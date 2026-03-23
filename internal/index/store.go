@@ -273,6 +273,58 @@ type Repo struct {
 	IndexedAt   time.Time `json:"indexed_at"`
 }
 
+// RemoveRepo deletes a repo and all its files/symbols/imports/refs (via cascade).
+func (s *Store) RemoveRepo(path string) error {
+	_, err := s.db.Exec("DELETE FROM repos WHERE path = ?", path)
+	return err
+}
+
+// SubRepos returns repos whose paths are strict subdirectories of root.
+func (s *Store) SubRepos(root string) ([]Repo, error) {
+	prefix := root + "/"
+	rows, err := s.db.Query(`
+		SELECT id, path, indexed_at, 0, 0 FROM repos
+		WHERE path LIKE ? AND path != ?
+	`, prefix+"%", root)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var repos []Repo
+	for rows.Next() {
+		var r Repo
+		if err := rows.Scan(&r.ID, &r.Path, &r.IndexedAt, &r.FileCount, &r.SymbolCount); err != nil {
+			return nil, err
+		}
+		repos = append(repos, r)
+	}
+	return repos, rows.Err()
+}
+
+// ParentRepo returns a repo that contains path as a subdirectory, if any.
+func (s *Store) ParentRepo(path string) (Repo, bool, error) {
+	// Walk up the path checking each ancestor.
+	dir := path
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+		var r Repo
+		err := s.db.QueryRow(`
+			SELECT id, path, indexed_at, 0, 0 FROM repos WHERE path = ?
+		`, dir).Scan(&r.ID, &r.Path, &r.IndexedAt, &r.FileCount, &r.SymbolCount)
+		if err == nil {
+			return r, true, nil
+		}
+		if err != sql.ErrNoRows {
+			return Repo{}, false, err
+		}
+	}
+	return Repo{}, false, nil
+}
+
 // ListRepos returns all indexed repos with stats.
 func (s *Store) ListRepos() ([]Repo, error) {
 	rows, err := s.db.Query(`

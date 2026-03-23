@@ -73,6 +73,23 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 	}
 	defer store.Close()
 
+	// Remove any sub-repos that are inside this root — their files will be
+	// re-indexed under this broader repo.
+	subRepos, _ := store.SubRepos(root)
+	for _, sub := range subRepos {
+		fmt.Fprintf(os.Stderr, "Removing sub-repo %s (now covered by %s)\n", sub.Path, root)
+		if err := store.RemoveRepo(sub.Path); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove sub-repo %s: %v\n", sub.Path, err)
+		}
+	}
+
+	// If this path is inside an already-indexed parent repo, warn and
+	// re-index from the parent root instead.
+	if parent, ok, _ := store.ParentRepo(root); ok {
+		fmt.Fprintf(os.Stderr, "Note: %s is inside indexed repo %s — indexing parent instead\n", root, parent.Path)
+		root = parent.Path
+	}
+
 	repoID, err := store.EnsureRepo(root)
 	if err != nil {
 		return nil, fmt.Errorf("registering repo: %w", err)
