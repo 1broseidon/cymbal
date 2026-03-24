@@ -6,7 +6,13 @@ cymbal parses your codebase into a local SQLite index, then gives you instant sy
 
 ## Install
 
-With Go (requires CGO for tree-sitter + SQLite):
+Homebrew:
+
+```sh
+brew install 1broseidon/tap/cymbal
+```
+
+Or with Go (requires CGO for tree-sitter + SQLite):
 
 ```sh
 CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go install github.com/1broseidon/cymbal@latest
