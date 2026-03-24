@@ -1,14 +1,13 @@
 # Commands
 
-All commands support `--json` for structured output and `--repo` to specify the repo root explicitly.
+All commands support `--json` for structured output. Each repo gets its own database at `~/.cymbal/repos/<hash>/index.db`, auto-resolved from your working directory.
 
 ## Global Flags
 
 | Flag | Description |
 |------|-------------|
-| `-d, --db <path>` | Path to cymbal database (default: `~/.cymbal/cymbal.db`) |
+| `-d, --db <path>` | Override path to cymbal database (default: auto-resolved per repo) |
 | `--json` | Output as JSON instead of frontmatter+content |
-| `--repo <path>` | Explicit repo root (default: auto-detect from CWD) |
 
 ---
 

@@ -2,6 +2,26 @@
 
 All notable changes to cymbal are documented here.
 
+## [0.3.0] - 2026-03-24
+
+### Changed
+
+- **Per-repo databases** — each repo gets its own SQLite DB at `~/.cymbal/repos/<hash>/index.db`, eliminating cross-repo symbol bleed. Searching in repo A no longer returns results from repo B.
+- Removed `repos` table and `repo_id` column — no longer needed since each DB is one repo
+- Added `meta` table storing `repo_root` path per database
+- `cymbal ls --repos` lists all indexed repos with file/symbol counts
+- `--repo` flag removed (repo identity comes from DB path now)
+- `--db` flag still works as override for all commands
+
+### Added
+
+- `refs` and `impact` now show surrounding call-site context (1 line above/below by default, adjustable with `-C`)
+- VitePress docs site at chain.sh/cymbal with chain.sh design language
+
+### Fixed
+
+- Stale symbol entries from moved/deleted repos no longer pollute search results
+
 ## [0.2.0] - 2026-03-23
 
 ### Changed

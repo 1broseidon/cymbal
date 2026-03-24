@@ -100,9 +100,9 @@ Adding a language requires a tree-sitter grammar and a symbol extraction query �
 
 ## How it works
 
-1. **Index** — tree-sitter parses each file into an AST. cymbal extracts symbols (functions, types, variables, imports) and references (calls, type usage) and stores them in SQLite with FTS5 full-text search.
+1. **Index** — tree-sitter parses each file into an AST. cymbal extracts symbols (functions, types, variables, imports) and references (calls, type usage) and stores them in SQLite with FTS5 full-text search. Each repo gets its own database at `~/.cymbal/repos/<hash>/index.db`.
 
-2. **Query** — all commands read from the SQLite index. Symbol lookups, cross-references, and import graphs are SQL queries. No re-parsing needed.
+2. **Query** — all commands read from the current repo's SQLite index. Symbol lookups, cross-references, and import graphs are SQL queries. No re-parsing needed. No cross-repo bleed.
 
 3. **Incremental** — re-indexing only processes files that changed since the last run, tracked by content hash.
 
