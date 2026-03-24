@@ -71,15 +71,15 @@ jobs:
 
       - name: Build cross (${{ matrix.goos }}/${{ matrix.cross_arch }})
         run: |
-          cat > /tmp/zig-cc << 'EOF'
+          cat > /tmp/zig-cc << EOF
           #!/bin/sh
-          exec zig cc -target ${{ matrix.cross_target }} "$@"
+          exec zig cc -target ${{ matrix.cross_target }} "\$@"
           EOF
           chmod +x /tmp/zig-cc
 
           CC=/tmp/zig-cc CGO_ENABLED=1 CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" \
             GOOS=${{ matrix.goos }} GOARCH=${{ matrix.cross_arch }} \
-            go build -trimpath -ldflags="-s -w" -o cymbal .
+            go build -trimpath -ldflags="-s -w -linkmode=external -extld=/tmp/zig-cc" -o cymbal .
           tar czf cymbal_${{ matrix.goos }}_${{ matrix.cross_arch }}.tar.gz cymbal
           rm cymbal
 
