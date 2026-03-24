@@ -47,7 +47,7 @@ func init() {
 	refsCmd.Flags().Bool("importers", false, "find files that import the defining file")
 	refsCmd.Flags().Bool("impact", false, "transitive impact analysis (--importers --depth 2)")
 	refsCmd.Flags().IntP("depth", "D", 1, "import chain depth for --importers (max 3)")
-	refsCmd.Flags().IntP("limit", "n", 50, "max results")
+	refsCmd.Flags().IntP("limit", "n", 20, "max results")
 	rootCmd.AddCommand(refsCmd)
 }
 
@@ -66,16 +66,30 @@ func refsSymbol(dbPath, name string, limit int, jsonOut bool) error {
 		return writeJSON(results)
 	}
 
-	var content strings.Builder
+	var refs []refLine
 	for _, r := range results {
-		line := readSourceLine(r.File, r.Line)
-		fmt.Fprintf(&content, "%s:%d: %s\n", r.RelPath, r.Line, strings.TrimSpace(line))
+		refs = append(refs, refLine{
+			relPath: r.RelPath,
+			line:    r.Line,
+			text:    strings.TrimSpace(readSourceLine(r.File, r.Line)),
+		})
+	}
+	lines, groups := dedupRefLines(refs)
+
+	var content strings.Builder
+	for _, l := range lines {
+		content.WriteString(l)
+		content.WriteByte('\n')
 	}
 
-	frontmatter([]kv{
-		{"symbol", name},
-		{"ref_count", fmt.Sprintf("%d", len(results))},
-	}, content.String())
+	meta := []kv{{"symbol", name}}
+	if groups < len(results) {
+		meta = append(meta, kv{"groups", fmt.Sprintf("%d", groups)})
+		meta = append(meta, kv{"total_refs", fmt.Sprintf("%d", len(results))})
+	} else {
+		meta = append(meta, kv{"ref_count", fmt.Sprintf("%d", len(results))})
+	}
+	frontmatter(meta, content.String())
 	return nil
 }
 

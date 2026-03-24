@@ -64,7 +64,7 @@ Results are ranked: exact match > prefix > fuzzy.`,
 
 func init() {
 	searchCmd.Flags().StringP("kind", "k", "", "filter by symbol kind (function, class, method, etc.)")
-	searchCmd.Flags().IntP("limit", "n", 50, "max results")
+	searchCmd.Flags().IntP("limit", "n", 20, "max results")
 	searchCmd.Flags().StringP("lang", "l", "", "filter by language (go, python, typescript, etc.)")
 	searchCmd.Flags().BoolP("exact", "e", false, "exact name match only")
 	searchCmd.Flags().BoolP("text", "t", false, "full-text grep across file contents")

@@ -41,6 +41,48 @@ type kv struct {
 	k, v string
 }
 
+// refLine is a single reference with file, line, and source text.
+type refLine struct {
+	relPath string
+	line    int
+	text    string
+}
+
+// dedupRefLines groups identical source text per file.
+// Returns formatted lines ready to print and the number of unique groups.
+func dedupRefLines(refs []refLine) ([]string, int) {
+	type key struct{ path, text string }
+	type group struct {
+		path  string
+		text  string
+		lines []int
+	}
+
+	seen := make(map[key]*group)
+	var order []key
+
+	for _, r := range refs {
+		k := key{r.relPath, r.text}
+		if g, ok := seen[k]; ok {
+			g.lines = append(g.lines, r.line)
+		} else {
+			seen[k] = &group{path: r.relPath, text: r.text, lines: []int{r.line}}
+			order = append(order, k)
+		}
+	}
+
+	var out []string
+	for _, k := range order {
+		g := seen[k]
+		if len(g.lines) == 1 {
+			out = append(out, fmt.Sprintf("%s:%d: %s", g.path, g.lines[0], g.text))
+		} else {
+			out = append(out, fmt.Sprintf("%s (%d sites): %s", g.path, len(g.lines), g.text))
+		}
+	}
+	return out, len(order)
+}
+
 // readSourceLine reads a single line from a file on disk.
 // Returns the trimmed-right content or "" on error.
 func readSourceLine(path string, lineNum int) string {

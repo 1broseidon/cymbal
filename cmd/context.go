@@ -61,10 +61,19 @@ Examples:
 
 		// Callers section.
 		if len(result.Callers) > 0 {
-			fmt.Fprintf(&content, "\n# Callers (%d)\n", len(result.Callers))
+			var refs []refLine
 			for _, r := range result.Callers {
-				line := readSourceLine(r.File, r.Line)
-				fmt.Fprintf(&content, "%s:%d: %s\n", r.RelPath, r.Line, strings.TrimSpace(line))
+				refs = append(refs, refLine{
+					relPath: r.RelPath,
+					line:    r.Line,
+					text:    strings.TrimSpace(readSourceLine(r.File, r.Line)),
+				})
+			}
+			lines, _ := dedupRefLines(refs)
+			fmt.Fprintf(&content, "\n# Callers (%d)\n", len(lines))
+			for _, l := range lines {
+				content.WriteString(l)
+				content.WriteByte('\n')
 			}
 		}
 
