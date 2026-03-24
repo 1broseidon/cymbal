@@ -97,12 +97,14 @@ func FindGitRoot(dir string) (string, error) {
 
 // parseResult holds the output of a parse worker.
 type parseResult struct {
-	entry  walker.FileEntry
-	hash   string
-	result *symbols.ParseResult
+	entry    walker.FileEntry
+	hash     string
+	result   *symbols.ParseResult
+	rowCount int // symbols + imports + refs for batching decisions
 }
 
 // flushBatch writes a batch of parse results to the DB in a single transaction.
+// Prepares statements once for the entire batch (not per file).
 // Uses SAVEPOINTs per file so a single failure doesn't corrupt the batch.
 // Stats are published only after successful commit.
 func flushBatch(store *Store, batch []parseResult, indexed, found, writeErrs *atomic.Int64) {
@@ -115,6 +117,14 @@ func flushBatch(store *Store, batch []parseResult, indexed, found, writeErrs *at
 		return
 	}
 
+	stmts, err := PrepareBatchStmts(tx)
+	if err != nil {
+		tx.Rollback()
+		writeErrs.Add(int64(len(batch)))
+		return
+	}
+	defer stmts.Close()
+
 	type fileStats struct{ symbolCount int }
 	committed := make([]fileStats, 0, len(batch))
 
@@ -125,7 +135,7 @@ func flushBatch(store *Store, batch []parseResult, indexed, found, writeErrs *at
 			continue
 		}
 
-		err := store.InsertFileAllTx(tx, pr.entry.Path, pr.entry.RelPath,
+		err := InsertFileAllStmts(stmts, pr.entry.Path, pr.entry.RelPath,
 			pr.entry.Language, pr.hash, pr.entry.ModTime,
 			pr.result.Symbols, pr.result.Imports, pr.result.Refs)
 		if err != nil {
@@ -221,6 +231,8 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 	resultCh := make(chan parseResult, 256)
 
 	// Phase 1: parse workers — CPU-bound, fully parallel.
+	// Each worker reads the file once, parses from those bytes, and hashes
+	// from the same buffer — eliminating duplicate I/O and allocation.
 	var parseWg sync.WaitGroup
 	for range workers {
 		parseWg.Add(1)
@@ -233,26 +245,33 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 				}
 
 				if !opts.Force {
-					// Fast path: check mtime from pre-loaded map (no DB query).
 					if storedMtime, ok := mtimes[f.Path]; ok && !storedMtime.IsZero() && !f.ModTime.After(storedMtime) {
 						unchanged.Add(1)
 						continue
 					}
 				}
 
-				result, err := parser.ParseFile(f.Path, f.Language)
+				// Read once — parse and hash from same bytes.
+				src, err := os.ReadFile(f.Path)
+				if err != nil {
+					parseErrs.Add(1)
+					continue
+				}
+
+				result, err := parser.ParseBytes(src, f.Path, f.Language)
 				if err != nil {
 					parseErrs.Add(1)
 					continue
 				}
 
 				// Only compute hash when there's a stored entry to compare against.
-				// On cold index this avoids reading every file a second time.
 				var hash string
 				if _, exists := mtimes[f.Path]; exists {
-					hash, _ = HashFile(f.Path)
+					hash = HashBytes(src)
 				}
-				resultCh <- parseResult{entry: f, hash: hash, result: result}
+
+				rows := len(result.Symbols) + len(result.Imports) + len(result.Refs)
+				resultCh <- parseResult{entry: f, hash: hash, result: result, rowCount: rows}
 			}
 		}()
 	}
@@ -274,16 +293,22 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 	progressDone := startProgress(totalFiles, &indexed, &unchanged, &found)
 
 	// Phase 2: serial writer — batched transactions, no lock contention.
-	// Uses SAVEPOINT per file so a single file failure doesn't corrupt the batch.
-	// Stats are accumulated locally and published only after successful commit.
-	const batchSize = 100
+	// Flush when file count >= 100 OR total rows (symbols+imports+refs) >= 50k.
+	// This prevents pathological batches from symbol-dense repos.
+	const (
+		maxBatchFiles = 100
+		maxBatchRows  = 50_000
+	)
 	var batch []parseResult
+	batchRows := 0
 
 	for pr := range resultCh {
 		batch = append(batch, pr)
-		if len(batch) >= batchSize {
+		batchRows += pr.rowCount
+		if len(batch) >= maxBatchFiles || batchRows >= maxBatchRows {
 			flushBatch(store, batch, &indexed, &found, &writeErrs)
 			batch = batch[:0]
+			batchRows = 0
 		}
 	}
 	flushBatch(store, batch, &indexed, &found, &writeErrs)

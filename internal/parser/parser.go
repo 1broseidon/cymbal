@@ -69,6 +69,16 @@ func ParseFile(filePath, lang string) (*symbols.ParseResult, error) {
 	return ParseSource(src, filePath, lang, tsLang)
 }
 
+// ParseBytes parses source bytes (already read) and extracts symbols, imports, and refs.
+// Use this when you already have the file contents to avoid a redundant ReadFile.
+func ParseBytes(src []byte, filePath, lang string) (*symbols.ParseResult, error) {
+	tsLang, ok := languages[lang]
+	if !ok {
+		return nil, fmt.Errorf("unsupported language: %s", lang)
+	}
+	return ParseSource(src, filePath, lang, tsLang)
+}
+
 // ParseSource parses source bytes and extracts symbols, imports, and refs.
 func ParseSource(src []byte, filePath, lang string, tsLang *sitter.Language) (*symbols.ParseResult, error) {
 	p := sitter.NewParser()

@@ -269,6 +269,12 @@ func HashFile(path string) (string, error) {
 	return hex.EncodeToString(h[:]), nil
 }
 
+// HashBytes computes SHA-256 hex string from bytes already in memory.
+func HashBytes(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
 // UpsertFile stores file info and returns the file ID. Clears old data via cascade.
 func (s *Store) UpsertFile(filePath, relPath, lang, hash string, mtime time.Time) (int64, error) {
 	now := time.Now()
@@ -427,6 +433,107 @@ func (s *Store) InsertFileAllTx(tx *sql.Tx, filePath, relPath, lang, hash string
 	}
 	if err := insertRefsTx(tx, fileID, refs); err != nil {
 		return err
+	}
+	return nil
+}
+
+// BatchStmts holds prepared statements reused across an entire batch transaction.
+// This avoids preparing 3–5 statements per file (300+ prepares per 100-file batch).
+// Call PrepareBatchStmts once per batch, use InsertFileAllStmts per file, then Close.
+type BatchStmts struct {
+	delFile   *sql.Stmt
+	insFile   *sql.Stmt
+	insSymbol *sql.Stmt
+	insImport *sql.Stmt
+	insRef    *sql.Stmt
+}
+
+// PrepareBatchStmts prepares all statements for a batch transaction.
+func PrepareBatchStmts(tx *sql.Tx) (*BatchStmts, error) {
+	var b BatchStmts
+	var err error
+
+	b.delFile, err = tx.Prepare("DELETE FROM files WHERE path = ?")
+	if err != nil {
+		return nil, err
+	}
+	b.insFile, err = tx.Prepare(
+		"INSERT INTO files (path, rel_path, language, hash, indexed_at, mtime) VALUES (?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		b.Close()
+		return nil, err
+	}
+	b.insSymbol, err = tx.Prepare(`INSERT INTO symbols
+		(file_id, name, kind, start_line, end_line, start_col, end_col, parent, depth, signature, summary, language)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		b.Close()
+		return nil, err
+	}
+	b.insImport, err = tx.Prepare("INSERT INTO imports (file_id, raw_path, language) VALUES (?, ?, ?)")
+	if err != nil {
+		b.Close()
+		return nil, err
+	}
+	b.insRef, err = tx.Prepare("INSERT INTO refs (file_id, line, name, language) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		b.Close()
+		return nil, err
+	}
+	return &b, nil
+}
+
+// Close closes all prepared statements.
+func (b *BatchStmts) Close() {
+	if b.delFile != nil {
+		b.delFile.Close()
+	}
+	if b.insFile != nil {
+		b.insFile.Close()
+	}
+	if b.insSymbol != nil {
+		b.insSymbol.Close()
+	}
+	if b.insImport != nil {
+		b.insImport.Close()
+	}
+	if b.insRef != nil {
+		b.insRef.Close()
+	}
+}
+
+// InsertFileAllStmts inserts a file and all its data using pre-prepared statements.
+func InsertFileAllStmts(b *BatchStmts, filePath, relPath, lang, hash string, mtime time.Time, syms []symbols.Symbol, imports []symbols.Import, refs []symbols.Ref) error {
+	now := time.Now()
+	b.delFile.Exec(filePath) //nolint:errcheck
+
+	res, err := b.insFile.Exec(filePath, relPath, lang, hash, now, mtime)
+	if err != nil {
+		return err
+	}
+	fileID, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+
+	for _, sym := range syms {
+		if _, err := b.insSymbol.Exec(
+			fileID, sym.Name, sym.Kind,
+			sym.StartLine, sym.EndLine, sym.StartCol, sym.EndCol,
+			sym.Parent, sym.Depth, sym.Signature, sym.Summary, sym.Language,
+		); err != nil {
+			return err
+		}
+	}
+	for _, imp := range imports {
+		if _, err := b.insImport.Exec(fileID, imp.RawPath, imp.Language); err != nil {
+			return err
+		}
+	}
+	for _, ref := range refs {
+		if _, err := b.insRef.Exec(fileID, ref.Line, ref.Name, ref.Language); err != nil {
+			return err
+		}
 	}
 	return nil
 }
