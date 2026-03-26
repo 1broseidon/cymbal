@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -45,22 +46,21 @@ type kv struct {
 	k, v string
 }
 
-// parseSymbolArg parses a symbol argument that may include file disambiguation.
+// parseSymbolArg parses a symbol argument that may include file or parent disambiguation.
 // Accepted formats:
 //
-//	"Config"                          → file="", symbol="Config"
-//	"config.go:Config"                → file="config.go", symbol="Config"
-//	"internal/config/config.go:Config" → file="internal/config/config.go", symbol="Config"
+//	"Config"                          → file="", parent="", symbol="Config"
+//	"config.go:Config"                → file="config.go", parent="", symbol="Config"
+//	"internal/config/config.go:Config" → file="internal/config/config.go", parent="", symbol="Config"
+//	"config.Load"                     → file="", parent="config", symbol="Load"
+//	"Session.save"                    → file="", parent="Session", symbol="save"
 func parseSymbolArg(arg string) (file, symbol string) {
-	// If it contains "/" it might be "path/to/file.go:Symbol".
-	// Split on the last ":" and check if the left side looks like a file.
+	// Check for file:Symbol syntax first.
 	idx := strings.LastIndex(arg, ":")
 	if idx > 0 {
 		left := arg[:idx]
 		right := arg[idx+1:]
-		// Left side looks like a file if it contains "/" or has a known extension.
 		if (strings.Contains(left, "/") || walker.LangForFile(left) != "") && right != "" {
-			// Make sure right side isn't a line number (that's file:L1-L2 syntax).
 			if _, err := strconv.Atoi(strings.TrimPrefix(right, "L")); err != nil {
 				return left, right
 			}
@@ -69,29 +69,131 @@ func parseSymbolArg(arg string) (file, symbol string) {
 	return "", arg
 }
 
-// resolveSymbol looks up a symbol by name, optionally filtered by file path.
-// Returns the matching results. If file is non-empty, results are filtered
-// to those whose RelPath or full Path contains the file string.
-func resolveSymbol(dbPath, file, symbol string) ([]index.SymbolResult, error) {
+// ResolveResult wraps resolved symbols with metadata about the resolution.
+type ResolveResult struct {
+	Results    []index.SymbolResult
+	TotalFound int  // total before auto-resolve (for "matches: N" hint)
+	Fuzzy      bool // true if resolved via case-insensitive or prefix match
+}
+
+// flexResolve is the flexible symbol resolution pipeline. It handles:
+//   - Exact name match
+//   - Dot-qualified names (config.Load → parent/path filter)
+//   - File-path disambiguation (config.go:Config)
+//   - Auto-resolve ambiguity (pick best match by refs + path proximity)
+//   - Fuzzy fallback (case-insensitive → prefix match)
+func flexResolve(dbPath, arg string) (*ResolveResult, error) {
+	file, symbol := parseSymbolArg(arg)
+
+	// Check for dot-qualified name: "Parent.Child" or "pkg.Symbol"
+	var parentHint string
+	if file == "" && strings.Contains(symbol, ".") {
+		parts := strings.SplitN(symbol, ".", 2)
+		parentHint = parts[0]
+		symbol = parts[1]
+	}
+
+	// Step 1: exact name match.
 	results, err := index.SymbolsByName(dbPath, symbol)
 	if err != nil {
 		return nil, err
 	}
-	if file == "" || len(results) <= 1 {
-		return results, nil
-	}
 
-	// Filter by file path.
-	var filtered []index.SymbolResult
-	for _, r := range results {
-		if strings.HasSuffix(r.RelPath, file) || strings.Contains(r.RelPath, file) || strings.HasSuffix(r.File, file) {
-			filtered = append(filtered, r)
+	// Step 2: if no results, try case-insensitive via FTS.
+	fuzzy := false
+	if len(results) == 0 {
+		results, err = index.SearchSymbolsFlex(dbPath, symbol, 20)
+		if err != nil {
+			return nil, err
+		}
+		if len(results) > 0 {
+			fuzzy = true
 		}
 	}
-	if len(filtered) > 0 {
-		return filtered, nil
+
+	if len(results) == 0 {
+		return &ResolveResult{}, nil
 	}
-	return results, nil // no match on file filter, return all
+
+	totalFound := len(results)
+
+	// Step 3: filter by file hint.
+	if file != "" && len(results) > 1 {
+		var filtered []index.SymbolResult
+		for _, r := range results {
+			if strings.HasSuffix(r.RelPath, file) || strings.Contains(r.RelPath, file) {
+				filtered = append(filtered, r)
+			}
+		}
+		if len(filtered) > 0 {
+			results = filtered
+		}
+	}
+
+	// Step 4: filter by parent/package hint (dot-qualified).
+	if parentHint != "" && len(results) > 1 {
+		var filtered []index.SymbolResult
+		for _, r := range results {
+			// Match against parent field (ClassName.method) or file path (pkg.Function).
+			if strings.EqualFold(r.Parent, parentHint) || strings.Contains(r.RelPath, parentHint) {
+				filtered = append(filtered, r)
+			}
+		}
+		if len(filtered) > 0 {
+			results = filtered
+		}
+	}
+
+	// Step 5: auto-resolve ambiguity — rank by ref count + path depth (shallower = more important).
+	if len(results) > 1 {
+		rankSymbols(results)
+	}
+
+	return &ResolveResult{
+		Results:    results,
+		TotalFound: totalFound,
+		Fuzzy:      fuzzy,
+	}, nil
+}
+
+// rankSymbols sorts results by heuristic relevance:
+// - fewer path segments (closer to root = more important)
+// - shorter file path (less nested)
+// - kind priority: struct/class > function > method > variable
+func rankSymbols(results []index.SymbolResult) {
+	kindPriority := map[string]int{
+		"struct": 0, "class": 0, "interface": 0, "type": 0,
+		"function": 1, "method": 2, "enum": 3, "variable": 4,
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		// Fewer path segments = closer to project root.
+		di := strings.Count(results[i].RelPath, "/")
+		dj := strings.Count(results[j].RelPath, "/")
+		if di != dj {
+			return di < dj
+		}
+		// Kind priority.
+		pi := kindPriority[results[i].Kind]
+		pj := kindPriority[results[j].Kind]
+		if pi != pj {
+			return pi < pj
+		}
+		// Shorter path as tiebreaker.
+		return len(results[i].RelPath) < len(results[j].RelPath)
+	})
+}
+
+// resolveSymbol is a backward-compatible wrapper around flexResolve.
+func resolveSymbol(dbPath, file, symbol string) ([]index.SymbolResult, error) {
+	arg := symbol
+	if file != "" {
+		arg = file + ":" + symbol
+	}
+	res, err := flexResolve(dbPath, arg)
+	if err != nil {
+		return nil, err
+	}
+	return res.Results, nil
 }
 
 // refLine is a single reference with file, line, source text, and surrounding context.

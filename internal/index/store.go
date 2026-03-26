@@ -558,6 +558,30 @@ func (r SymbolResult) SymbolID() string {
 	return fmt.Sprintf("%s:%s:%s:%s:%d", r.RelPath, r.Language, r.Kind, r.Name, r.StartLine)
 }
 
+// SearchSymbolsCI performs a case-insensitive exact name match.
+func (s *Store) SearchSymbolsCI(name string, limit int) ([]SymbolResult, error) {
+	rows, err := s.db.Query(`
+		SELECT s.name, s.kind, f.path, f.rel_path, s.start_line, s.end_line, s.parent, s.depth, s.signature, COALESCE(s.summary, ''), s.language
+		FROM symbols s JOIN files f ON s.file_id = f.id
+		WHERE s.name COLLATE NOCASE = ?
+		ORDER BY s.name LIMIT ?
+	`, name, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []SymbolResult
+	for rows.Next() {
+		var r SymbolResult
+		if err := rows.Scan(&r.Name, &r.Kind, &r.File, &r.RelPath, &r.StartLine, &r.EndLine, &r.Parent, &r.Depth, &r.Signature, &r.Summary, &r.Language); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
 // SearchSymbols searches using FTS5 with ranking: exact > prefix > fuzzy.
 func (s *Store) SearchSymbols(query, kind, lang string, exact bool, limit int) ([]SymbolResult, error) {
 	var rows *sql.Rows

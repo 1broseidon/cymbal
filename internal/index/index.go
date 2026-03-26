@@ -857,6 +857,38 @@ func Investigate(dbPath, symbolName string, opts ...InvestigateOpts) (*Investiga
 	return res, nil
 }
 
+// InvestigateResolved builds an InvestigateResult for a pre-resolved symbol.
+// Use when the caller already resolved the symbol (e.g., via flexResolve).
+func InvestigateResolved(dbPath string, sym SymbolResult) (*InvestigateResult, error) {
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+
+	source := readLines(sym.File, sym.StartLine, sym.EndLine)
+	res := &InvestigateResult{
+		Symbol: sym,
+		Source: source,
+	}
+
+	switch sym.Kind {
+	case "function", "method":
+		res.Kind = "function"
+		res.Refs, _ = store.FindReferences(sym.Name, 20)
+		res.Impact, _ = store.FindImpact(sym.Name, 2, 20)
+	case "class", "struct", "type", "interface", "trait", "enum":
+		res.Kind = "type"
+		res.Members, _ = store.ChildSymbols(sym.Name, 50)
+		res.Refs, _ = store.FindReferences(sym.Name, 20)
+	default:
+		res.Kind = sym.Kind
+		res.Refs, _ = store.FindReferences(sym.Name, 20)
+	}
+
+	return res, nil
+}
+
 // FindImpact performs transitive caller analysis for a symbol.
 func FindImpact(dbPath, symbolName string, depth, limit int) ([]ImpactResult, error) {
 	if limit <= 0 {
@@ -881,6 +913,28 @@ func FindTrace(dbPath, symbolName string, depth, limit int) ([]TraceResult, erro
 	}
 	defer store.Close()
 	return store.FindTrace(symbolName, depth, limit)
+}
+
+// SearchSymbolsFlex performs a flexible search: case-insensitive + prefix match.
+// Used as a fallback when exact name match returns no results.
+func SearchSymbolsFlex(dbPath, name string, limit int) ([]SymbolResult, error) {
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+
+	// Try case-insensitive exact match first.
+	results, err := store.SearchSymbolsCI(name, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) > 0 {
+		return results, nil
+	}
+
+	// Fall back to FTS prefix match.
+	return store.SearchSymbols(name, "", "", false, limit)
 }
 
 // SymbolsByName finds symbols by exact name (for show command).

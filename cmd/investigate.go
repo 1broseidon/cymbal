@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/1broseidon/cymbal/internal/index"
@@ -19,47 +17,51 @@ or impact — cymbal looks at the symbol's kind and returns what matters.
 
   function/method → source + callers + shallow impact
   class/struct/type/interface → source + members + references
-  ambiguous → ranked candidates with file and kind
+  ambiguous → auto-resolves to best match, notes alternatives
+
+Supports disambiguation:
+  cymbal investigate Config              # auto-picks best match
+  cymbal investigate config.go:Config    # file hint
+  cymbal investigate auth.Middleware      # parent/package hint
 
 Examples:
   cymbal investigate OpenStore
   cymbal investigate SymbolResult
-  cymbal investigate ParseFile`,
+  cymbal investigate config.Load`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		dbPath := getDBPath(cmd)
 		jsonOut := getJSONFlag(cmd)
 
-		fileHint, symName := parseSymbolArg(name)
-		var opts []index.InvestigateOpts
-		if fileHint != "" {
-			opts = append(opts, index.InvestigateOpts{FileHint: fileHint})
-		}
-		result, err := index.Investigate(dbPath, symName, opts...)
+		res, err := flexResolve(dbPath, name)
 		if err != nil {
-			var ambig *index.AmbiguousError
-			if errors.As(err, &ambig) {
-				if jsonOut {
-					return writeJSON(map[string]any{
-						"ambiguous": true,
-						"matches":   ambig.Matches,
-					})
-				}
-				fmt.Fprintf(os.Stderr, "Multiple matches for '%s' — be more specific:\n", name)
-				for _, r := range ambig.Matches {
-					fmt.Printf("  %-12s %-40s %s:%d-%d\n", r.Kind, r.Name, r.RelPath, r.StartLine, r.EndLine)
-				}
-				os.Exit(1)
-			}
+			return err
+		}
+
+		if len(res.Results) == 0 {
+			return fmt.Errorf("symbol not found: %s", name)
+		}
+
+		// Use the best match (first after ranking).
+		sym := res.Results[0]
+
+		result, err := index.InvestigateResolved(dbPath, sym)
+		if err != nil {
 			return err
 		}
 
 		if jsonOut {
-			return writeJSON(result)
+			data := map[string]any{"result": result}
+			if res.TotalFound > 1 {
+				data["matches"] = res.TotalFound
+			}
+			if res.Fuzzy {
+				data["fuzzy"] = true
+			}
+			return writeJSON(data)
 		}
 
-		sym := result.Symbol
 		var content strings.Builder
 
 		// Source section.
@@ -111,12 +113,23 @@ Examples:
 			}
 		}
 
-		frontmatter([]kv{
+		meta := []kv{
 			{"symbol", sym.Name},
 			{"kind", sym.Kind},
 			{"investigate", result.Kind},
 			{"file", fmt.Sprintf("%s:%d", sym.RelPath, sym.StartLine)},
-		}, content.String())
+		}
+		if res.TotalFound > 1 {
+			also := make([]string, 0, len(res.Results)-1)
+			for _, r := range res.Results[1:] {
+				also = append(also, fmt.Sprintf("%s:%d", r.RelPath, r.StartLine))
+			}
+			meta = append(meta, kv{"matches", fmt.Sprintf("%d (also: %s)", res.TotalFound, strings.Join(also, ", "))})
+		}
+		if res.Fuzzy {
+			meta = append(meta, kv{"fuzzy", "true"})
+		}
+		frontmatter(meta, content.String())
 		return nil
 	},
 }

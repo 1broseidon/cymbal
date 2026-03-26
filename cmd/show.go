@@ -154,33 +154,18 @@ func showFile(target string, ctx int, jsonOut bool) error {
 }
 
 func showSymbol(dbPath, name string, ctx int, jsonOut bool) error {
-	fileHint, symName := parseSymbolArg(name)
-	results, err := resolveSymbol(dbPath, fileHint, symName)
+	res, err := flexResolve(dbPath, name)
 	if err != nil {
 		return err
 	}
 
-	if len(results) == 0 {
+	if len(res.Results) == 0 {
 		fmt.Fprintf(os.Stderr, "Symbol not found: %s\n", name)
 		os.Exit(1)
 	}
 
-	// Multiple matches — disambiguate.
-	if len(results) > 1 {
-		if jsonOut {
-			return writeJSON(map[string]any{
-				"ambiguous": true,
-				"matches":   results,
-			})
-		}
-		fmt.Fprintf(os.Stderr, "Multiple matches for '%s' — be more specific:\n", name)
-		for _, r := range results {
-			fmt.Printf("  %-12s %-40s %s:%d-%d\n", r.Kind, r.Name, r.RelPath, r.StartLine, r.EndLine)
-		}
-		os.Exit(1)
-	}
-
-	sym := results[0]
+	// Auto-resolve: pick the best match (first after ranking).
+	sym := res.Results[0]
 	startLine := sym.StartLine
 	endLine := sym.EndLine
 	if ctx > 0 {
@@ -215,10 +200,21 @@ func showSymbol(dbPath, name string, ctx int, jsonOut bool) error {
 		content.WriteByte('\n')
 	}
 
-	frontmatter([]kv{
+	meta := []kv{
 		{"symbol", sym.Name},
 		{"kind", sym.Kind},
 		{"file", fmt.Sprintf("%s:%d", sym.RelPath, sym.StartLine)},
-	}, content.String())
+	}
+	if res.TotalFound > 1 {
+		also := make([]string, 0, len(res.Results)-1)
+		for _, r := range res.Results[1:] {
+			also = append(also, fmt.Sprintf("%s:%d", r.RelPath, r.StartLine))
+		}
+		meta = append(meta, kv{"matches", fmt.Sprintf("%d (also: %s)", res.TotalFound, strings.Join(also, ", "))})
+	}
+	if res.Fuzzy {
+		meta = append(meta, kv{"fuzzy", "true"})
+	}
+	frontmatter(meta, content.String())
 	return nil
 }
