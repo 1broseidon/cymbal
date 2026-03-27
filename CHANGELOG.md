@@ -2,6 +2,16 @@
 
 All notable changes to cymbal are documented here.
 
+## [0.7.2] - 2026-03-26
+
+### Added
+
+- PowerShell install script for Windows (`install.ps1`) — `irm .../install.ps1 | iex` fetches the latest release, extracts to `%LOCALAPPDATA%\cymbal`, and adds to PATH.
+
+### Fixed
+
+- Database file created inside the project directory on Windows when `%USERPROFILE%` is unset. Now uses `os.UserCacheDir()` (`%LOCALAPPDATA%` on Windows) as the primary data directory, with safe fallbacks that never produce a relative path.
+
 ## [0.7.1] - 2026-03-26
 
 ### Added

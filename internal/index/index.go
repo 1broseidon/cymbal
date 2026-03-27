@@ -67,16 +67,29 @@ type RepoStatsResult struct {
 	Languages   map[string]int `json:"languages"`
 }
 
-// RepoDBPath computes the per-repo database path: ~/.cymbal/repos/<hash>/index.db
+// cymbalDir returns the base directory for cymbal data.
+// Prefers os.UserCacheDir (%LOCALAPPDATA% on Windows, ~/.cache on Linux,
+// ~/Library/Caches on macOS), falls back to ~/.cymbal.
+func cymbalDir() (string, error) {
+	if d, err := os.UserCacheDir(); err == nil {
+		return filepath.Join(d, "cymbal"), nil
+	}
+	if h, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(h, ".cymbal"), nil
+	}
+	return "", fmt.Errorf("cannot determine home or cache directory")
+}
+
+// RepoDBPath computes the per-repo database path: <cymbalDir>/repos/<hash>/index.db
 // where hash is the first 16 hex chars of SHA-256 of the absolute repo root path.
 func RepoDBPath(repoRoot string) (string, error) {
-	home, err := os.UserHomeDir()
+	base, err := cymbalDir()
 	if err != nil {
-		return "", fmt.Errorf("getting home dir: %w", err)
+		return "", err
 	}
 	h := sha256.Sum256([]byte(repoRoot))
 	hash := hex.EncodeToString(h[:8]) // 16 hex chars
-	return filepath.Join(home, ".cymbal", "repos", hash, "index.db"), nil
+	return filepath.Join(base, "repos", hash, "index.db"), nil
 }
 
 // FindGitRoot walks up from dir to find the nearest .git directory.

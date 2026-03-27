@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -53,11 +52,12 @@ func getDBPath(cmd *cobra.Command) string {
 }
 
 func fallbackDBPath() string {
-	home, err := os.UserHomeDir()
+	dbPath, err := index.RepoDBPath("_fallback")
 	if err != nil {
-		return ".cymbal.db"
+		// Last resort: temp directory, never a relative path in the project.
+		return filepath.Join(os.TempDir(), "cymbal", "cymbal.db")
 	}
-	return fmt.Sprintf("%s/.cymbal/cymbal.db", home)
+	return dbPath
 }
 
 func getJSONFlag(cmd *cobra.Command) bool {
