@@ -2,6 +2,12 @@
 
 All notable changes to cymbal are documented here.
 
+## [0.8.3] - 2026-04-02
+
+### Added
+
+- **GHCR container** — pre-built multi-arch Docker image (linux/amd64, linux/arm64) published to `ghcr.io/1broseidon/cymbal` on every release, tagged with version and `latest`.
+
 ## [0.8.2] - 2026-04-02
 
 ### Added
