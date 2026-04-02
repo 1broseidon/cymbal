@@ -26,10 +26,12 @@ func init() {
 	rootCmd.PersistentFlags().Bool("json", false, "output as JSON")
 }
 
-// getDBPath returns the database path. If --db is set, use it.
-// Otherwise, detect git root from CWD and compute per-repo path.
+// getDBPath returns the database path. Priority: --db flag > CYMBAL_DB env > auto per-repo.
 func getDBPath(cmd *cobra.Command) string {
 	if p, _ := cmd.Flags().GetString("db"); p != "" {
+		return p
+	}
+	if p := os.Getenv("CYMBAL_DB"); p != "" {
 		return p
 	}
 	cwd, err := os.Getwd()

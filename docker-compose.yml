@@ -1,0 +1,9 @@
+services:
+  cymbal:
+    build: .
+    volumes:
+      # Mount the repo to index into /workspace
+      - .:/workspace
+    working_dir: /workspace
+    # CYMBAL_DB defaults to /workspace/.cymbal/index.db (set in Dockerfile)
+    # Override here if needed: environment: [CYMBAL_DB=/some/other/path]
