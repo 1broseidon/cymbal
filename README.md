@@ -18,6 +18,18 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/1broseidon/cymbal/main/install.ps1 | iex
 ```
 
+To uninstall (keeps index data by default):
+
+```powershell
+# Remove binary and PATH entry, keep SQLite indexes
+irm https://raw.githubusercontent.com/1broseidon/cymbal/main/uninstall.ps1 | iex
+
+# Also remove all SQLite indexes
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/1broseidon/cymbal/main/uninstall.ps1))) -Purge
+```
+
+> **Note:** `-Purge` removes all per-repo SQLite indexes stored under `%LOCALAPPDATA%\cymbal\repos\`. Omit it to keep your indexes intact in case you reinstall.
+
 Go (requires CGO for tree-sitter + SQLite):
 
 ```sh
@@ -26,7 +38,46 @@ CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go install github.com/1broseidon/cymbal@latest
 
 Or grab a binary from [releases](https://github.com/1broseidon/cymbal/releases).
 
+### Docker
+
+No local Go toolchain or CGO setup needed — run cymbal from a container against any repo on your machine.
+
+```sh
+# Build the image
+docker build -t cymbal .
+```
+
+Mount any repo and the SQLite index lands at `.cymbal/index.db` inside it by default:
+
+```sh
+# Index a repo
+docker run --rm -v /path/to/your/repo:/workspace cymbal index .
+
+# Query it (index persists at /path/to/your/repo/.cymbal/index.db)
+docker run --rm -v /path/to/your/repo:/workspace cymbal investigate handleAuth
+
+# Override the DB location if needed
+docker run --rm -v /path/to/your/repo:/workspace -e CYMBAL_DB=/some/other/path.db cymbal index .
+```
+
+Or use docker compose (mounts the current directory by default):
+
+```sh
+docker compose run --rm cymbal index .
+docker compose run --rm cymbal investigate handleAuth
+```
+
+Add `.cymbal/` to your `.gitignore` to keep the index out of version control.
+
 ## Quick start
+
+Define a shell alias once so every command looks like the native binary:
+
+```sh
+alias cymbal='docker run --rm -v "$(pwd)":/workspace cymbal'
+```
+
+Then:
 
 ```sh
 # Index the current project
@@ -49,6 +100,8 @@ cymbal diff handleAuth main      # git diff scoped to a function
 cymbal context handleAuth        # bundled: source + types + callers + imports
 cymbal ls                        # file tree
 ```
+
+The SQLite index is written to `.cymbal/index.db` in the current directory and persists between runs.
 
 ## Commands
 
@@ -76,7 +129,9 @@ All commands support `--json` for structured output.
 
 cymbal is designed as the code navigation layer for AI agents. One command handles most investigations — specific commands exist as escape hatches when you need more control.
 
-Add this to your agent's system prompt (e.g., `CLAUDE.md`, `agent.md`, or MCP tool descriptions):
+Add this to your agent's system prompt (e.g., `CLAUDE.md`, `agent.md`, or MCP tool descriptions).
+
+**Native install:**
 
 ```markdown
 ## Code Exploration Policy
@@ -91,6 +146,26 @@ Use `cymbal` CLI for code navigation — prefer it over Read, Grep, Glob, or Bas
 - Before exploring structure: `cymbal ls` (tree) or `cymbal ls --stats` (overview)
 - To disambiguate: `cymbal show path/to/file.go:SymbolName` or `cymbal investigate file.go:Symbol`
 - First run: `cymbal index .` to build the initial index (<1s). After that, queries auto-refresh — no manual reindexing needed.
+- All commands support `--json` for structured output.
+```
+
+**Docker (no local install required):**
+
+```markdown
+## Code Exploration Policy
+Use `cymbal` via Docker for code navigation — prefer it over Read, Grep, Glob, or Bash for code exploration.
+Run all cymbal commands as: `docker run --rm -v "$(pwd)":/workspace cymbal <command>`
+- **New to a repo?**: `docker run --rm -v "$(pwd)":/workspace cymbal structure` — entry points, hotspots, central packages. Start here.
+- **To understand a symbol**: `docker run --rm -v "$(pwd)":/workspace cymbal investigate <symbol>` — returns source, callers, impact, or members based on what the symbol is.
+- **To understand multiple symbols**: `docker run --rm -v "$(pwd)":/workspace cymbal investigate Foo Bar Baz` — batch mode, one invocation.
+- **To trace an execution path**: `docker run --rm -v "$(pwd)":/workspace cymbal trace <symbol>` — follows the call graph downward (what does X call, what do those call).
+- **To assess change risk**: `docker run --rm -v "$(pwd)":/workspace cymbal impact <symbol>` — follows the call graph upward (what breaks if X changes).
+- Before reading a file: `docker run --rm -v "$(pwd)":/workspace cymbal outline <file>` or `docker run --rm -v "$(pwd)":/workspace cymbal show <file:L1-L2>`
+- Before searching: `docker run --rm -v "$(pwd)":/workspace cymbal search <query>` (symbols) or add `--text` for grep
+- Before exploring structure: `docker run --rm -v "$(pwd)":/workspace cymbal ls` or `docker run --rm -v "$(pwd)":/workspace cymbal ls --stats`
+- To disambiguate: `docker run --rm -v "$(pwd)":/workspace cymbal investigate path/to/file.go:Symbol`
+- First run: `docker run --rm -v "$(pwd)":/workspace cymbal index .` to build the initial index. After that, queries auto-refresh — no manual reindexing needed.
+- The SQLite index is stored at `.cymbal/index.db` in the repo root and persists between runs.
 - All commands support `--json` for structured output.
 ```
 
@@ -116,7 +191,7 @@ Adding a language requires a tree-sitter grammar and a symbol extraction query �
 
 ## How it works
 
-1. **Index** — tree-sitter parses each file into an AST. cymbal extracts symbols (functions, types, variables, imports) and references (calls, type usage) and stores them in SQLite with FTS5 full-text search. Each repo gets its own database at `~/.cymbal/repos/<hash>/index.db`.
+1. **Index** — tree-sitter parses each file into an AST. cymbal extracts symbols (functions, types, variables, imports) and references (calls, type usage) and stores them in SQLite with FTS5 full-text search. Each repo gets its own database at `~/.cymbal/repos/<hash>/index.db` by default. Override with `--db <path>` or the `CYMBAL_DB` environment variable.
 
 2. **Query** — all commands read from the current repo's SQLite index. Symbol lookups, cross-references, and import graphs are SQL queries. No re-parsing needed. No cross-repo bleed.
 
