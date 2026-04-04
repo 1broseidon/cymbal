@@ -62,7 +62,7 @@ docker run --rm -v /path/to/your/repo:/workspace -e CYMBAL_DB=/some/other/path.d
 Pin a specific version if needed:
 
 ```sh
-docker pull ghcr.io/1broseidon/cymbal:v0.8.3
+docker pull ghcr.io/1broseidon/cymbal:v0.8.4
 ```
 
 Or build the image yourself:
