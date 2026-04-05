@@ -118,7 +118,12 @@ func investigateOnePrint(dbPath, name string, jsonOut bool) error {
 		for _, m := range result.Members {
 			fmt.Fprintf(&content, "  %-12s %s", m.Kind, m.Name)
 			if m.Signature != "" {
-				fmt.Fprintf(&content, " %s", m.Signature)
+				sig := m.Signature
+				// Truncate multi-line signatures to first line.
+				if nl := strings.IndexByte(sig, '\n'); nl >= 0 {
+					sig = sig[:nl] + " ..."
+				}
+				fmt.Fprintf(&content, " %s", sig)
 			}
 			fmt.Fprintf(&content, "  %s:%d\n", m.RelPath, m.StartLine)
 		}

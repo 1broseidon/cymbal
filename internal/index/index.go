@@ -950,7 +950,23 @@ func InvestigateResolved(dbPath string, sym SymbolResult) (*InvestigateResult, e
 	}
 	defer store.Close()
 
-	source := readLines(sym.File, sym.StartLine, sym.EndLine)
+	// Cap source for large type symbols — members are listed separately.
+	const maxTypeLines = 60
+	srcEnd := sym.EndLine
+	truncated := false
+	switch sym.Kind {
+	case "class", "struct", "type", "interface", "trait", "enum":
+		if srcEnd-sym.StartLine+1 > maxTypeLines {
+			srcEnd = sym.StartLine + maxTypeLines - 1
+			truncated = true
+		}
+	}
+
+	source := readLines(sym.File, sym.StartLine, srcEnd)
+	if truncated {
+		source += fmt.Sprintf("\n... (%d more lines — see cymbal show %s:%d-%d)\n",
+			sym.EndLine-srcEnd, sym.RelPath, sym.StartLine, sym.EndLine)
+	}
 	res := &InvestigateResult{
 		Symbol: sym,
 		Source: source,

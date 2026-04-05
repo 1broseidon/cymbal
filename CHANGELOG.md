@@ -2,6 +2,18 @@
 
 All notable changes to cymbal are documented here.
 
+## [0.8.5] - 2026-04-05
+
+### Changed
+
+- **Smart truncation for type symbols** — `show` and `investigate` now cap class/struct/interface/enum output at 60 lines instead of dumping the entire body (e.g., FastAPI class went from 170KB to 1.8KB). Full source remains available via `cymbal show file:L1-L2`. Members are listed separately in `investigate`.
+- **Truncated member signatures** — multi-line signatures in `investigate` member listings are collapsed to the first line, preventing huge docstring-heavy parameter lists from bloating output.
+
+### Fixed
+
+- **README accuracy** — removed unsupported languages (HCL, Dockerfile, TOML, HTML, CSS) from supported list, corrected benchmark numbers to match actual RESULTS.md, fixed "Go, Python, and TypeScript" to "Go and Python" (no TS corpus repo).
+- **Benchmark token efficiency** — `show` and `investigate` for large types now dramatically outperform ripgrep instead of losing badly (FastAPI show: -1413% → 84% savings; APIRouter agent workflow: -248% → 95% savings).
+
 ## [0.8.4] - 2026-04-04
 
 ### Added

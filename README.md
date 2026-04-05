@@ -191,7 +191,7 @@ An agent tracing an auth flow typically makes 15-20 sequential tool calls: show 
 
 cymbal uses tree-sitter grammars. Currently supported:
 
-Go, Python, JavaScript, TypeScript, TSX, Rust, C, C++, C#, Java, Ruby, Swift, Kotlin, Scala, PHP, Lua, Bash, HCL, Dockerfile, YAML, TOML, HTML, CSS
+Go, Python, JavaScript, TypeScript, TSX, Rust, C, C++, C#, Java, Ruby, Swift, Kotlin, Scala, PHP, Lua, Bash, YAML
 
 Adding a language requires a tree-sitter grammar and a symbol extraction query — see `internal/parser/` for examples.
 
@@ -201,26 +201,26 @@ Adding a language requires a tree-sitter grammar and a symbol extraction query �
 
 2. **Query** — all commands read from the current repo's SQLite index. Symbol lookups, cross-references, and import graphs are SQL queries. No re-parsing needed. No cross-repo bleed.
 
-3. **Always fresh** — every query automatically checks for changed files and reindexes them before returning results. No manual reindexing, no watch daemons, no hooks. Edit a file, run a query, get the right answer. The mtime+size fast path adds ~2ms when nothing changed; only dirty files are re-parsed.
+3. **Always fresh** — every query automatically checks for changed files and reindexes them before returning results. No manual reindexing, no watch daemons, no hooks. Edit a file, run a query, get the right answer. The mtime+size fast path adds ~10-24ms when nothing changed; only dirty files are re-parsed.
 
 ## Benchmarks
 
-Measured against ripgrep on three real-world repos (gin, kubectl, fastapi) across Go, Python, and TypeScript. Full harness in `bench/`.
+Measured against ripgrep on three real-world repos (gin, kubectl, fastapi) across Go and Python. Full harness in `bench/`.
 
 ```sh
 go run ./bench setup   # clone pinned corpus repos
 go run ./bench run     # run all benchmarks → bench/RESULTS.md
 ```
 
-**Speed** — cymbal queries complete in 9-33ms. Reindex with nothing changed: 7-24ms.
+**Speed** — cymbal queries complete in 9-27ms. Reindex with nothing changed: 8-20ms.
 
 **Accuracy** — 100% automated ground-truth verification across 37 checks (search returns correct file+kind, show returns correct source, refs finds known callers, investigate includes expected signature).
 
-**Token efficiency** — for targeted lookups, cymbal uses 62-100% fewer tokens than ripgrep. Refs queries show the biggest wins (93-100% savings) because cymbal returns semantic call sites, not every line mentioning the string.
+**Token efficiency** — for targeted lookups, cymbal uses 17-100% fewer tokens than ripgrep. Refs queries show the biggest wins (3-100% savings) because cymbal returns semantic call sites, not every line mentioning the string.
 
-**JIT freshness** — queries auto-detect and reparse changed files. Overhead: ~2ms when nothing changed, ~25-47ms after touching 1 file, ~50-75ms after touching 5 files. Deleted files are automatically pruned.
+**JIT freshness** — queries auto-detect and reparse changed files. Overhead: ~10-23ms when nothing changed, ~22-27ms after touching 1 file, ~33-43ms after touching 5 files. Deleted files are automatically pruned.
 
-**Agent workflow** — `cymbal investigate` replaces 3 separate ripgrep calls (search + show + refs) with 1 call. Typical savings: 81-99% fewer tokens for focused symbols.
+**Agent workflow** — `cymbal investigate` replaces 3 separate ripgrep calls (search + show + refs) with 1 call. Typical savings: 41-100% fewer tokens for focused symbols.
 
 ## Docs
 

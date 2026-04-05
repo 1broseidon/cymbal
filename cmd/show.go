@@ -165,6 +165,18 @@ func showFile(target string, ctx int, jsonOut bool) error {
 	return nil
 }
 
+// maxTypeShowLines caps the source shown for class/struct/type/interface
+// symbols. Members are listed separately so the full body is redundant.
+const maxTypeShowLines = 60
+
+func isTypeKind(kind string) bool {
+	switch kind {
+	case "class", "struct", "type", "interface", "trait", "enum":
+		return true
+	}
+	return false
+}
+
 func showSymbol(dbPath, name string, ctx int, jsonOut bool) error {
 	res, err := flexResolve(dbPath, name)
 	if err != nil {
@@ -182,6 +194,14 @@ func showSymbol(dbPath, name string, ctx int, jsonOut bool) error {
 	if ctx > 0 {
 		startLine = max(1, startLine-ctx)
 		endLine = endLine + ctx
+	}
+
+	// Smart truncation: cap large type symbols.
+	totalLines := sym.EndLine - sym.StartLine + 1
+	truncated := false
+	if isTypeKind(sym.Kind) && totalLines > maxTypeShowLines {
+		endLine = startLine + maxTypeShowLines - 1
+		truncated = true
 	}
 
 	if jsonOut {
@@ -209,6 +229,11 @@ func showSymbol(dbPath, name string, ctx int, jsonOut bool) error {
 		}
 		content.WriteString(scanner.Text())
 		content.WriteByte('\n')
+	}
+
+	if truncated {
+		fmt.Fprintf(&content, "\n... (%d more lines — use cymbal show %s:%d-%d for full source)\n",
+			totalLines-maxTypeShowLines, sym.RelPath, sym.StartLine, sym.EndLine)
 	}
 
 	meta := []kv{
