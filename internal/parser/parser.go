@@ -182,7 +182,12 @@ func (e *symbolExtractor) extractImport(node *sitter.Node) (symbols.Import, bool
 			content := node.Content(e.src)
 			return symbols.Import{RawPath: content, Language: e.lang}, true
 		}
-	case "apex", "java", "kotlin", "scala":
+	case "kotlin":
+		if nodeType == "import_header" {
+			content := node.Content(e.src)
+			return symbols.Import{RawPath: content, Language: e.lang}, true
+		}
+	case "apex", "java", "scala":
 		// Apex has no import statements — classes are globally available.
 		// Included here so the switch case is consistent across all three extraction functions.
 		if nodeType == "import_declaration" {
@@ -276,7 +281,20 @@ func (e *symbolExtractor) extractRef(node *sitter.Node) (symbols.Ref, bool) {
 				}
 			}
 		}
-	case "apex", "java", "kotlin", "scala":
+	case "kotlin":
+		// Kotlin call_expression wraps navigation_expression + call_suffix.
+		// Also handle simple function calls via simple_identifier.
+		if nodeType == "call_expression" {
+			name := extractCallName(node.Child(0), e.src)
+			if name != "" {
+				return symbols.Ref{
+					Name:     name,
+					Line:     int(node.StartPoint().Row) + 1,
+					Language: e.lang,
+				}, true
+			}
+		}
+	case "apex", "java", "scala":
 		if nodeType == "method_invocation" {
 			nameNode := node.ChildByFieldName("name")
 			if nameNode != nil {
@@ -356,7 +374,9 @@ func (e *symbolExtractor) classifyNode(nodeType string, node *sitter.Node) (stri
 		return e.classifyJS(nodeType, node)
 	case "rust":
 		return e.classifyRust(nodeType, node)
-	case "apex", "java", "kotlin", "scala":
+	case "kotlin":
+		return e.classifyKotlin(nodeType, node)
+	case "apex", "java", "scala":
 		return e.classifyJavaLike(nodeType, node)
 	case "ruby":
 		return e.classifyRuby(nodeType, node)
@@ -529,6 +549,41 @@ func (e *symbolExtractor) classifyRust(nodeType string, node *sitter.Node) (stri
 		return "module", node.ChildByFieldName("name")
 	}
 	return "", nil
+}
+
+// classifyKotlin handles Kotlin's tree-sitter grammar which differs from Java:
+//   - class names are type_identifier children (not "name" field)
+//   - function names are simple_identifier children (not "name" field)
+//   - uses object_declaration, companion_object, property_declaration
+func (e *symbolExtractor) classifyKotlin(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	switch nodeType {
+	case "class_declaration":
+		return "class", e.findChildByType(node, "type_identifier")
+	case "object_declaration":
+		return "class", e.findChildByType(node, "type_identifier")
+	case "companion_object":
+		return "class", e.findChildByType(node, "type_identifier")
+	case "interface_declaration":
+		return "interface", e.findChildByType(node, "type_identifier")
+	case "function_declaration":
+		return "function", e.findChildByType(node, "simple_identifier")
+	case "property_declaration":
+		return "field", e.findChildByType(node, "variable_declaration")
+	case "enum_class_body":
+		// Skip — enum entries are handled via class_declaration parent
+	}
+	return "", nil
+}
+
+// findChildByType returns the first direct child with the given node type.
+func (e *symbolExtractor) findChildByType(node *sitter.Node, childType string) *sitter.Node {
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == childType {
+			return child
+		}
+	}
+	return nil
 }
 
 func (e *symbolExtractor) classifyJavaLike(nodeType string, node *sitter.Node) (string, *sitter.Node) {
