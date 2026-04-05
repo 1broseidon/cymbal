@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
+	"github.com/1broseidon/cymbal/internal/parser/apex"
 	"github.com/smacker/go-tree-sitter/bash"
 	"github.com/smacker/go-tree-sitter/c"
 	"github.com/smacker/go-tree-sitter/cpp"
@@ -29,6 +30,7 @@ import (
 )
 
 var languages = map[string]*sitter.Language{
+	"apex":       apex.GetLanguage(),
 	"go":         golang.GetLanguage(),
 	"python":     python.GetLanguage(),
 	"javascript": javascript.GetLanguage(),
@@ -180,7 +182,9 @@ func (e *symbolExtractor) extractImport(node *sitter.Node) (symbols.Import, bool
 			content := node.Content(e.src)
 			return symbols.Import{RawPath: content, Language: e.lang}, true
 		}
-	case "java", "kotlin", "scala":
+	case "apex", "java", "kotlin", "scala":
+		// Apex has no import statements — classes are globally available.
+		// Included here so the switch case is consistent across all three extraction functions.
 		if nodeType == "import_declaration" {
 			content := node.Content(e.src)
 			return symbols.Import{RawPath: content, Language: e.lang}, true
@@ -272,7 +276,7 @@ func (e *symbolExtractor) extractRef(node *sitter.Node) (symbols.Ref, bool) {
 				}
 			}
 		}
-	case "java", "kotlin", "scala":
+	case "apex", "java", "kotlin", "scala":
 		if nodeType == "method_invocation" {
 			nameNode := node.ChildByFieldName("name")
 			if nameNode != nil {
@@ -352,7 +356,7 @@ func (e *symbolExtractor) classifyNode(nodeType string, node *sitter.Node) (stri
 		return e.classifyJS(nodeType, node)
 	case "rust":
 		return e.classifyRust(nodeType, node)
-	case "java", "kotlin", "scala":
+	case "apex", "java", "kotlin", "scala":
 		return e.classifyJavaLike(nodeType, node)
 	case "ruby":
 		return e.classifyRuby(nodeType, node)
