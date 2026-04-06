@@ -191,7 +191,7 @@ An agent tracing an auth flow typically makes 15-20 sequential tool calls: show 
 
 cymbal uses tree-sitter grammars. Currently supported:
 
-Go, Python, JavaScript, TypeScript, TSX, Rust, C, C++, C#, Java, Ruby, Swift, Kotlin, Scala, PHP, Lua, Bash, YAML
+Go, Python, JavaScript, TypeScript, TSX, Rust, C, C++, C#, Java, Ruby, Swift, Kotlin, Scala, PHP, Lua, Bash, YAML, Elixir, HCL/Terraform, Protobuf
 
 Adding a language requires a tree-sitter grammar and a symbol extraction query — see `internal/parser/` for examples.
 

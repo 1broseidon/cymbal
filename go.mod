@@ -1,6 +1,6 @@
 module github.com/1broseidon/cymbal
 
-go 1.25.7
+go 1.25.8
 
 require (
 	github.com/1broseidon/oneagent v0.12.0

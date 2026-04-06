@@ -1,10 +1,13 @@
 BINARY := cymbal
 CGO_CFLAGS := -DSQLITE_ENABLE_FTS5
 
-.PHONY: build clean test install lint
+.PHONY: build build-check ci clean install lint test vulncheck
 
 build:
 	CGO_CFLAGS="$(CGO_CFLAGS)" go build -o $(BINARY) .
+
+build-check:
+	CGO_CFLAGS="$(CGO_CFLAGS)" go build ./...
 
 install:
 	CGO_CFLAGS="$(CGO_CFLAGS)" go install .
@@ -14,6 +17,11 @@ test:
 
 lint:
 	go vet ./...
+
+vulncheck:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+ci: build-check lint test vulncheck
 
 clean:
 	rm -f $(BINARY)

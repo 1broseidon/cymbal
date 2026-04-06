@@ -2,6 +2,23 @@
 
 All notable changes to cymbal are documented here.
 
+## [0.8.6] - 2026-04-06
+
+### Added
+
+- **Elixir language support** — modules (`defmodule`), functions (`def`/`defp`), macros (`defmacro`), protocols (`defprotocol`), imports (`alias`/`import`/`use`/`require`), and cross-module refs.
+- **HCL/Terraform language support** — resources, variables, outputs, data sources, modules, providers, and locals blocks with synthesized names (e.g., `aws_instance.web`).
+- **Protobuf language support** — messages, enums, services, RPCs, and proto imports.
+- **Kotlin language support** — proper symbol extraction for classes, interfaces, objects, enums, methods, and companion objects (merged PR #7).
+- **CI workflows** — build, lint, test, security (`govulncheck`), and dependency review checks on PRs and main branch.
+- **PR template** — required structure with summary, testing checklist, security notes, and rollout risk.
+- **PR body validation** — CI check that enforces template usage and completed checklist items on non-draft PRs.
+
+### Changed
+
+- **Go version** — bumped from 1.25.7 to 1.25.8 to resolve stdlib vulnerability flagged by new security check.
+- **Makefile** — added `build-check`, `vulncheck`, and `ci` targets.
+
 ## [0.8.5] - 2026-04-05
 
 ### Changed

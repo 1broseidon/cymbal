@@ -1,0 +1,62 @@
+name: PR Body
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - reopened
+      - ready_for_review
+      - synchronize
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR template
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request.body || "";
+            const requiredHeadings = [
+              "## Summary",
+              "## Testing",
+              "## Checklist",
+              "## Security Notes",
+              "## Risks / Rollout",
+            ];
+
+            const missingHeadings = requiredHeadings.filter((heading) => !body.includes(heading));
+            if (missingHeadings.length > 0) {
+              core.setFailed(
+                `Missing required PR sections: ${missingHeadings.join(", ")}. ` +
+                `Use the PR template and keep all headings.`
+              );
+              return;
+            }
+
+            const checklistMatch = body.match(/## Checklist\s*([\s\S]*?)(?:\n## |\n?$)/);
+            if (!checklistMatch) {
+              core.setFailed("Checklist section is missing or malformed.");
+              return;
+            }
+
+            const checklist = checklistMatch[1];
+            const unchecked = [...checklist.matchAll(/^- \[ \] .+$/gm)].map((match) => match[0]);
+            const checked = [...checklist.matchAll(/^- \[[xX]\] .+$/gm)].map((match) => match[0]);
+
+            if (checked.length === 0) {
+              core.setFailed("Checklist is present, but nothing is checked.");
+              return;
+            }
+
+            if (unchecked.length > 0) {
+              core.setFailed(
+                `Complete the PR checklist before merge. Remaining items:\n${unchecked.join("\n")}`
+              );
+            }

@@ -11,12 +11,15 @@ import (
 	"github.com/smacker/go-tree-sitter/c"
 	"github.com/smacker/go-tree-sitter/cpp"
 	"github.com/smacker/go-tree-sitter/csharp"
+	"github.com/smacker/go-tree-sitter/elixir"
 	"github.com/smacker/go-tree-sitter/golang"
+	"github.com/smacker/go-tree-sitter/hcl"
 	"github.com/smacker/go-tree-sitter/java"
 	"github.com/smacker/go-tree-sitter/javascript"
 	"github.com/smacker/go-tree-sitter/kotlin"
 	"github.com/smacker/go-tree-sitter/lua"
 	"github.com/smacker/go-tree-sitter/php"
+	"github.com/smacker/go-tree-sitter/protobuf"
 	"github.com/smacker/go-tree-sitter/python"
 	"github.com/smacker/go-tree-sitter/ruby"
 	"github.com/smacker/go-tree-sitter/rust"
@@ -46,6 +49,9 @@ var languages = map[string]*sitter.Language{
 	"bash":       bash.GetLanguage(),
 	"scala":      scala.GetLanguage(),
 	"yaml":       yaml.GetLanguage(),
+	"elixir":     elixir.GetLanguage(),
+	"hcl":        hcl.GetLanguage(),
+	"protobuf":   protobuf.GetLanguage(),
 }
 
 // SupportedLanguage returns true if tree-sitter can parse this language.
@@ -155,60 +161,129 @@ func (e *symbolExtractor) extractImport(node *sitter.Node) (symbols.Import, bool
 
 	switch e.lang {
 	case "go":
-		if nodeType == "import_spec" {
-			pathNode := node.ChildByFieldName("path")
-			if pathNode != nil {
-				raw := strings.Trim(pathNode.Content(e.src), "\"")
-				return symbols.Import{RawPath: raw, Language: e.lang}, true
-			}
-		}
+		return e.extractImportGo(nodeType, node)
 	case "python":
-		if nodeType == "import_statement" || nodeType == "import_from_statement" {
-			content := node.Content(e.src)
-			return symbols.Import{RawPath: content, Language: e.lang}, true
-		}
+		return e.extractImportPython(nodeType, node)
 	case "javascript", "typescript":
-		if nodeType == "import_statement" {
-			sourceNode := node.ChildByFieldName("source")
-			if sourceNode != nil {
-				raw := strings.Trim(sourceNode.Content(e.src), "\"'`")
-				return symbols.Import{RawPath: raw, Language: e.lang}, true
-			}
-		}
+		return e.extractImportJS(nodeType, node)
 	case "rust":
-		if nodeType == "use_declaration" {
-			content := node.Content(e.src)
-			return symbols.Import{RawPath: content, Language: e.lang}, true
-		}
+		return e.extractImportRust(nodeType, node)
 	case "java", "scala":
-		if nodeType == "import_declaration" {
-			content := node.Content(e.src)
-			return symbols.Import{RawPath: content, Language: e.lang}, true
-		}
+		return e.extractImportJVM(nodeType, node)
 	case "kotlin":
-		if nodeType == "import_header" {
-			content := node.Content(e.src)
-			return symbols.Import{RawPath: content, Language: e.lang}, true
-		}
+		return e.extractImportKotlin(nodeType, node)
 	case "ruby":
-		if nodeType == "call" {
-			funcNode := node.ChildByFieldName("method")
-			if funcNode != nil {
-				name := funcNode.Content(e.src)
-				if name == "require" || name == "require_relative" {
-					argsNode := node.ChildByFieldName("arguments")
-					if argsNode != nil {
-						raw := strings.Trim(argsNode.Content(e.src), "()'\"")
-						return symbols.Import{RawPath: raw, Language: e.lang}, true
-					}
+		return e.extractImportRuby(nodeType, node)
+	case "c", "cpp":
+		return e.extractImportC(nodeType, node)
+	case "elixir":
+		return e.extractImportElixir(nodeType, node)
+	case "protobuf":
+		return e.extractImportProtobuf(nodeType, node)
+	}
+	return symbols.Import{}, false
+}
+
+func (e *symbolExtractor) extractImportGo(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType == "import_spec" {
+		pathNode := node.ChildByFieldName("path")
+		if pathNode != nil {
+			raw := strings.Trim(pathNode.Content(e.src), "\"")
+			return symbols.Import{RawPath: raw, Language: e.lang}, true
+		}
+	}
+	return symbols.Import{}, false
+}
+
+func (e *symbolExtractor) extractImportPython(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType == "import_statement" || nodeType == "import_from_statement" {
+		return symbols.Import{RawPath: node.Content(e.src), Language: e.lang}, true
+	}
+	return symbols.Import{}, false
+}
+
+func (e *symbolExtractor) extractImportJS(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType == "import_statement" {
+		sourceNode := node.ChildByFieldName("source")
+		if sourceNode != nil {
+			raw := strings.Trim(sourceNode.Content(e.src), "\"'`")
+			return symbols.Import{RawPath: raw, Language: e.lang}, true
+		}
+	}
+	return symbols.Import{}, false
+}
+
+func (e *symbolExtractor) extractImportRust(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType == "use_declaration" {
+		return symbols.Import{RawPath: node.Content(e.src), Language: e.lang}, true
+	}
+	return symbols.Import{}, false
+}
+
+func (e *symbolExtractor) extractImportJVM(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType == "import_declaration" {
+		return symbols.Import{RawPath: node.Content(e.src), Language: e.lang}, true
+	}
+	return symbols.Import{}, false
+}
+
+func (e *symbolExtractor) extractImportRuby(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType == "call" {
+		funcNode := node.ChildByFieldName("method")
+		if funcNode != nil {
+			name := funcNode.Content(e.src)
+			if name == "require" || name == "require_relative" {
+				argsNode := node.ChildByFieldName("arguments")
+				if argsNode != nil {
+					raw := strings.Trim(argsNode.Content(e.src), "()'\"")
+					return symbols.Import{RawPath: raw, Language: e.lang}, true
 				}
 			}
 		}
-	case "c", "cpp":
-		if nodeType == "preproc_include" {
-			pathNode := node.ChildByFieldName("path")
-			if pathNode != nil {
-				raw := strings.Trim(pathNode.Content(e.src), "<>\"")
+	}
+	return symbols.Import{}, false
+}
+
+func (e *symbolExtractor) extractImportC(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType == "preproc_include" {
+		pathNode := node.ChildByFieldName("path")
+		if pathNode != nil {
+			raw := strings.Trim(pathNode.Content(e.src), "<>\"")
+			return symbols.Import{RawPath: raw, Language: e.lang}, true
+		}
+	}
+	return symbols.Import{}, false
+}
+
+func (e *symbolExtractor) extractImportKotlin(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType == "import_header" {
+		return symbols.Import{RawPath: node.Content(e.src), Language: e.lang}, true
+	}
+	return symbols.Import{}, false
+}
+
+func (e *symbolExtractor) extractImportElixir(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType == "call" {
+		first := node.Child(0)
+		if first != nil && first.Type() == "identifier" {
+			name := first.Content(e.src)
+			if name == "alias" || name == "import" || name == "use" || name == "require" {
+				arg := node.Child(1)
+				if arg != nil {
+					return symbols.Import{RawPath: arg.Content(e.src), Language: e.lang}, true
+				}
+			}
+		}
+	}
+	return symbols.Import{}, false
+}
+
+func (e *symbolExtractor) extractImportProtobuf(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType == "import" {
+		for i := range int(node.ChildCount()) {
+			child := node.Child(i)
+			if child.Type() == "string" {
+				raw := strings.Trim(child.Content(e.src), "\"")
 				return symbols.Import{RawPath: raw, Language: e.lang}, true
 			}
 		}
@@ -221,99 +296,110 @@ func (e *symbolExtractor) extractRef(node *sitter.Node) (symbols.Ref, bool) {
 	nodeType := node.Type()
 
 	switch e.lang {
-	case "go":
-		if nodeType == "call_expression" {
-			funcNode := node.ChildByFieldName("function")
-			if funcNode != nil {
-				name := extractCallName(funcNode, e.src)
-				if name != "" {
-					return symbols.Ref{
-						Name:     name,
-						Line:     int(node.StartPoint().Row) + 1,
-						Language: e.lang,
-					}, true
-				}
-			}
-		}
+	case "go", "javascript", "typescript", "rust":
+		return e.extractRefCallExpr(nodeType, node)
 	case "python":
-		if nodeType == "call" {
-			funcNode := node.ChildByFieldName("function")
-			if funcNode != nil {
-				name := extractCallName(funcNode, e.src)
-				if name != "" {
-					return symbols.Ref{
-						Name:     name,
-						Line:     int(node.StartPoint().Row) + 1,
-						Language: e.lang,
-					}, true
-				}
-			}
-		}
-	case "javascript", "typescript":
-		if nodeType == "call_expression" {
-			funcNode := node.ChildByFieldName("function")
-			if funcNode != nil {
-				name := extractCallName(funcNode, e.src)
-				if name != "" {
-					return symbols.Ref{
-						Name:     name,
-						Line:     int(node.StartPoint().Row) + 1,
-						Language: e.lang,
-					}, true
-				}
-			}
-		}
-	case "rust":
-		if nodeType == "call_expression" {
-			funcNode := node.ChildByFieldName("function")
-			if funcNode != nil {
-				name := extractCallName(funcNode, e.src)
-				if name != "" {
-					return symbols.Ref{
-						Name:     name,
-						Line:     int(node.StartPoint().Row) + 1,
-						Language: e.lang,
-					}, true
-				}
-			}
-		}
+		return e.extractRefPythonCall(nodeType, node)
 	case "java", "scala":
-		if nodeType == "method_invocation" {
-			nameNode := node.ChildByFieldName("name")
-			if nameNode != nil {
-				return symbols.Ref{
-					Name:     nameNode.Content(e.src),
-					Line:     int(node.StartPoint().Row) + 1,
-					Language: e.lang,
-				}, true
-			}
-		}
+		return e.extractRefJVM(nodeType, node)
 	case "kotlin":
-		if nodeType == "call_expression" {
-			// First child is the callee (simple_identifier or navigation_expression).
-			if node.ChildCount() > 0 {
-				callee := node.Child(0)
-				name := extractCallName(callee, e.src)
-				if name != "" {
-					return symbols.Ref{
-						Name:     name,
-						Line:     int(node.StartPoint().Row) + 1,
-						Language: e.lang,
-					}, true
-				}
-			}
-		}
+		return e.extractRefKotlin(nodeType, node)
 	case "ruby":
-		if nodeType == "call" || nodeType == "method_call" {
-			nameNode := node.ChildByFieldName("method")
-			if nameNode != nil {
-				return symbols.Ref{
-					Name:     nameNode.Content(e.src),
-					Line:     int(node.StartPoint().Row) + 1,
-					Language: e.lang,
-				}, true
+		return e.extractRefRuby(nodeType, node)
+	case "elixir":
+		return e.extractRefElixir(nodeType, node)
+	}
+	return symbols.Ref{}, false
+}
+
+func (e *symbolExtractor) extractRefCallExpr(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	if nodeType != "call_expression" {
+		return symbols.Ref{}, false
+	}
+	funcNode := node.ChildByFieldName("function")
+	if funcNode != nil {
+		name := extractCallName(funcNode, e.src)
+		if name != "" {
+			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+		}
+	}
+	return symbols.Ref{}, false
+}
+
+func (e *symbolExtractor) extractRefPythonCall(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	if nodeType != "call" {
+		return symbols.Ref{}, false
+	}
+	funcNode := node.ChildByFieldName("function")
+	if funcNode != nil {
+		name := extractCallName(funcNode, e.src)
+		if name != "" {
+			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+		}
+	}
+	return symbols.Ref{}, false
+}
+
+func (e *symbolExtractor) extractRefJVM(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	if nodeType != "method_invocation" {
+		return symbols.Ref{}, false
+	}
+	nameNode := node.ChildByFieldName("name")
+	if nameNode != nil {
+		return symbols.Ref{Name: nameNode.Content(e.src), Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+	}
+	return symbols.Ref{}, false
+}
+
+func (e *symbolExtractor) extractRefRuby(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	if nodeType != "call" && nodeType != "method_call" {
+		return symbols.Ref{}, false
+	}
+	nameNode := node.ChildByFieldName("method")
+	if nameNode != nil {
+		return symbols.Ref{Name: nameNode.Content(e.src), Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+	}
+	return symbols.Ref{}, false
+}
+
+func (e *symbolExtractor) extractRefKotlin(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	if nodeType != "call_expression" {
+		return symbols.Ref{}, false
+	}
+	if node.ChildCount() > 0 {
+		callee := node.Child(0)
+		name := extractCallName(callee, e.src)
+		if name != "" {
+			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+		}
+	}
+	return symbols.Ref{}, false
+}
+
+func (e *symbolExtractor) extractRefElixir(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	if nodeType != "call" {
+		return symbols.Ref{}, false
+	}
+	first := node.Child(0)
+	if first == nil {
+		return symbols.Ref{}, false
+	}
+	if first.Type() == "dot" {
+		for i := range int(first.ChildCount()) {
+			child := first.Child(i)
+			if child.Type() == "identifier" {
+				return symbols.Ref{Name: child.Content(e.src), Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
 			}
 		}
+	} else if first.Type() == "identifier" {
+		name := first.Content(e.src)
+		switch name {
+		case "def", "defp", "defmodule", "defmacro", "defmacrop",
+			"defstruct", "defprotocol", "defimpl", "defguard",
+			"alias", "import", "use", "require":
+			return symbols.Ref{}, false
+		}
+		return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
 	}
 	return symbols.Ref{}, false
 }
@@ -336,11 +422,21 @@ func (e *symbolExtractor) nodeToSymbol(node *sitter.Node, parent string, depth i
 	nodeType := node.Type()
 
 	kind, nameNode := e.classifyNode(nodeType, node)
-	if kind == "" || nameNode == nil {
+	if kind == "" {
 		return symbols.Symbol{}, false
 	}
 
-	name := nameNode.Content(e.src)
+	var name string
+	if nameNode != nil {
+		name = nameNode.Content(e.src)
+	}
+	// For HCL, the name is synthesized from labels, not a single AST node.
+	if e.lang == "hcl" && kind != "" {
+		name = e.hclBlockName(node)
+	}
+	if nameNode == nil && name == "" {
+		return symbols.Symbol{}, false
+	}
 	if name == "" {
 		return symbols.Symbol{}, false
 	}
@@ -380,6 +476,12 @@ func (e *symbolExtractor) classifyNode(nodeType string, node *sitter.Node) (stri
 		return e.classifyRuby(nodeType, node)
 	case "c", "cpp":
 		return e.classifyC(nodeType, node)
+	case "elixir":
+		return e.classifyElixir(nodeType, node)
+	case "hcl":
+		return e.classifyHCL(nodeType, node)
+	case "protobuf":
+		return e.classifyProtobuf(nodeType, node)
 	default:
 		return e.classifyGeneric(nodeType, node)
 	}
@@ -685,6 +787,152 @@ func (e *symbolExtractor) classifyC(nodeType string, node *sitter.Node) (string,
 		return "type", node.ChildByFieldName("declarator")
 	}
 	return "", nil
+}
+
+func (e *symbolExtractor) classifyElixir(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	if nodeType != "call" {
+		return "", nil
+	}
+	first := node.Child(0)
+	if first == nil || first.Type() != "identifier" {
+		return "", nil
+	}
+	keyword := first.Content(e.src)
+	// In Elixir's tree-sitter grammar, arguments are positional children (index 1+),
+	// not accessed via ChildByFieldName("arguments").
+	arg := node.Child(1) // first argument after the keyword
+	switch keyword {
+	case "defmodule":
+		if arg != nil {
+			return "module", arg // alias node e.g. MyApp.Accounts
+		}
+	case "def":
+		if arg != nil {
+			if arg.Type() == "call" {
+				return "function", arg.Child(0) // function name identifier
+			}
+			return "function", arg
+		}
+	case "defp":
+		if arg != nil {
+			if arg.Type() == "call" {
+				return "function", arg.Child(0)
+			}
+			return "function", arg
+		}
+	case "defmacro", "defmacrop":
+		if arg != nil {
+			if arg.Type() == "call" {
+				return "macro", arg.Child(0)
+			}
+			return "macro", arg
+		}
+	case "defprotocol":
+		if arg != nil {
+			return "interface", arg
+		}
+	}
+	return "", nil
+}
+
+func (e *symbolExtractor) classifyHCL(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	if nodeType != "block" {
+		return "", nil
+	}
+	// HCL blocks: identifier [string_lit...] { body }
+	// e.g. resource "aws_instance" "web" { ... }
+	blockType := node.Child(0)
+	if blockType == nil || blockType.Type() != "identifier" {
+		return "", nil
+	}
+	typeName := blockType.Content(e.src)
+	// Check if block has any string labels after the type identifier.
+	hasLabels := false
+	for i := 1; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == "string_lit" {
+			hasLabels = true
+			break
+		} else {
+			break
+		}
+	}
+	switch typeName {
+	case "resource", "variable", "output", "data", "module", "provider":
+		if hasLabels {
+			return e.hclKind(typeName), blockType
+		}
+	case "locals", "terraform":
+		return e.hclKind(typeName), blockType
+	}
+	return "", nil
+}
+
+func (e *symbolExtractor) hclKind(typeName string) string {
+	switch typeName {
+	case "resource":
+		return "resource"
+	case "module", "terraform", "provider":
+		return "module"
+	default:
+		return "variable"
+	}
+}
+
+// hclBlockName synthesizes a name from block labels.
+// e.g. resource "aws_instance" "web" → "aws_instance.web"
+func (e *symbolExtractor) hclBlockName(node *sitter.Node) string {
+	var labels []string
+	for i := 1; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == "string_lit" {
+			for j := range int(child.ChildCount()) {
+				gc := child.Child(j)
+				if gc.Type() == "template_literal" {
+					labels = append(labels, gc.Content(e.src))
+				}
+			}
+		} else {
+			break
+		}
+	}
+	if len(labels) == 0 {
+		// For locals/terraform blocks with no labels.
+		first := node.Child(0)
+		if first != nil {
+			return first.Content(e.src)
+		}
+		return ""
+	}
+	return strings.Join(labels, ".")
+}
+
+func (e *symbolExtractor) classifyProtobuf(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	switch nodeType {
+	case "message":
+		return "struct", protoNameNode(node, "message_name")
+	case "enum":
+		return "enum", protoNameNode(node, "enum_name")
+	case "service":
+		return "interface", protoNameNode(node, "service_name")
+	case "rpc":
+		return "method", protoNameNode(node, "rpc_name")
+	}
+	return "", nil
+}
+
+func protoNameNode(node *sitter.Node, childType string) *sitter.Node {
+	for i := range int(node.ChildCount()) {
+		child := node.Child(i)
+		if child.Type() == childType {
+			// The name node wraps an identifier — return the identifier for clean content.
+			if child.ChildCount() > 0 {
+				return child.Child(0)
+			}
+			return child
+		}
+	}
+	return nil
 }
 
 func (e *symbolExtractor) classifyGeneric(nodeType string, node *sitter.Node) (string, *sitter.Node) {
