@@ -926,7 +926,7 @@ func Investigate(dbPath, symbolName string, opts ...InvestigateOpts) (*Investiga
 		res.Refs, _ = store.FindReferences(sym.Name, 20)
 		res.Impact, _ = store.FindImpact(sym.Name, 2, 20)
 
-	case "class", "struct", "type", "interface", "trait", "enum", "object":
+	case "class", "struct", "type", "interface", "trait", "enum", "object", "mixin", "extension":
 		res.Kind = "type"
 		res.Members, _ = store.ChildSymbols(sym.Name, 50)
 		// For types, show who references the type name.
@@ -955,7 +955,7 @@ func InvestigateResolved(dbPath string, sym SymbolResult) (*InvestigateResult, e
 	srcEnd := sym.EndLine
 	truncated := false
 	switch sym.Kind {
-	case "class", "struct", "type", "interface", "trait", "enum", "object":
+	case "class", "struct", "type", "interface", "trait", "enum", "object", "mixin", "extension":
 		if srcEnd-sym.StartLine+1 > maxTypeLines {
 			srcEnd = sym.StartLine + maxTypeLines - 1
 			truncated = true
@@ -977,7 +977,7 @@ func InvestigateResolved(dbPath string, sym SymbolResult) (*InvestigateResult, e
 		res.Kind = "function"
 		res.Refs, _ = store.FindReferences(sym.Name, 20)
 		res.Impact, _ = store.FindImpact(sym.Name, 2, 20)
-	case "class", "struct", "type", "interface", "trait", "enum", "object":
+	case "class", "struct", "type", "interface", "trait", "enum", "object", "mixin", "extension":
 		res.Kind = "type"
 		res.Members, _ = store.ChildSymbols(sym.Name, 50)
 		res.Refs, _ = store.FindReferences(sym.Name, 20)

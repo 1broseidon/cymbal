@@ -697,15 +697,18 @@ func findChildByType(node *sitter.Node, typeName string) *sitter.Node {
 
 // findDescendantByType returns the first descendant (BFS) with the given type.
 func findDescendantByType(node *sitter.Node, typeName string) *sitter.Node {
+	queue := make([]*sitter.Node, 0, int(node.ChildCount()))
 	for i := range int(node.ChildCount()) {
-		c := node.Child(i)
-		if c.Type() == typeName {
-			return c
-		}
+		queue = append(queue, node.Child(i))
 	}
-	for i := range int(node.ChildCount()) {
-		if found := findDescendantByType(node.Child(i), typeName); found != nil {
-			return found
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if current.Type() == typeName {
+			return current
+		}
+		for i := range int(current.ChildCount()) {
+			queue = append(queue, current.Child(i))
 		}
 	}
 	return nil
@@ -962,7 +965,9 @@ func protoNameNode(node *sitter.Node, childType string) *sitter.Node {
 }
 
 // dartInsideClassBody reports whether node sits inside a class_body,
-// enum_body, extension_body, or mixin body — i.e. its declaration is a member.
+// enum_body, or extension_body — i.e. its declaration is a member of a type.
+// Note: the Dart grammar uses class_body for mixin bodies too, so mixin
+// members are covered by the class_body check.
 func dartInsideClassBody(node *sitter.Node) bool {
 	p := node.Parent()
 	for p != nil {

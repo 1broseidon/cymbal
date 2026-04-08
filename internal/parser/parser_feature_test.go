@@ -1001,6 +1001,38 @@ void doSomething() {}
 		t.Error("expected 'name' setter")
 	}
 
+	// --- Constructors ---
+	// Shape() and Shape.origin() both map to constructor kind with name "Shape".
+	if findSymbolKind(result.Symbols, "Shape", "constructor") == nil {
+		debugSymbols()
+		t.Error("expected Shape constructor")
+	}
+	// Circle(this.radius) and factory Circle.unit() both map to constructor kind.
+	if findSymbolKind(result.Symbols, "Circle", "constructor") == nil {
+		debugSymbols()
+		t.Error("expected Circle constructor")
+	}
+
+	// --- Mixin members ---
+	printSelfSym := findSymbolKind(result.Symbols, "printSelf", "method")
+	if printSelfSym == nil {
+		debugSymbols()
+		t.Fatal("expected printSelf method (mixin member)")
+	}
+	if printSelfSym.Parent != "Printable" {
+		t.Errorf("expected printSelf parent 'Printable', got %q", printSelfSym.Parent)
+	}
+
+	// --- Extension members ---
+	isLargerSym := findSymbolKind(result.Symbols, "isLargerThan", "method")
+	if isLargerSym == nil {
+		debugSymbols()
+		t.Fatal("expected isLargerThan method (extension member)")
+	}
+	if isLargerSym.Parent != "ShapeUtils" {
+		t.Errorf("expected isLargerThan parent 'ShapeUtils', got %q", isLargerSym.Parent)
+	}
+
 	// --- Refs (function/method calls) ---
 	if findRef(result.Refs, "print") == nil {
 		debugSymbols()
@@ -1011,11 +1043,21 @@ void doSomething() {}
 		t.Error("expected area ref")
 	}
 
-	// --- Signature for functions ---
+	// --- Signatures ---
+	// Functions have a formal_parameter_list signature.
 	mainSym := findSymbol(result.Symbols, "main")
 	if mainSym == nil || mainSym.Signature == "" {
 		debugSymbols()
 		t.Error("expected non-empty signature for main function")
+	}
+	// Setters carry their single parameter as a signature.
+	if nameSetSym != nil && nameSetSym.Signature == "" {
+		t.Error("expected non-empty signature for name setter")
+	}
+	// Constructor with a parameter list should have a signature.
+	circleCtor := findSymbolKind(result.Symbols, "Circle", "constructor")
+	if circleCtor == nil || circleCtor.Signature == "" {
+		t.Error("expected non-empty signature for Circle constructor")
 	}
 }
 
