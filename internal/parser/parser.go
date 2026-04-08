@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	dart "github.com/UserNobody14/tree-sitter-dart/bindings/go"
-	sitter "github.com/smacker/go-tree-sitter"
 	apex "github.com/lynxbat/go-tree-sitter-apex"
+	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/bash"
 	"github.com/smacker/go-tree-sitter/c"
 	"github.com/smacker/go-tree-sitter/cpp"
