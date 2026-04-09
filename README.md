@@ -1,5 +1,10 @@
 # cymbal
 
+[![GitHub Stars](https://img.shields.io/github/stars/1broseidon/cymbal?style=social)](https://github.com/1broseidon/cymbal/stargazers)
+[![Go Reference](https://pkg.go.dev/badge/github.com/1broseidon/cymbal.svg)](https://pkg.go.dev/github.com/1broseidon/cymbal)
+[![Go Report Card](https://goreportcard.com/badge/github.com/1broseidon/cymbal)](https://goreportcard.com/report/github.com/1broseidon/cymbal)
+[![Latest Release](https://img.shields.io/github/v/release/1broseidon/cymbal)](https://github.com/1broseidon/cymbal/releases/latest)
+
 Fast, language-agnostic code indexer and symbol navigator built on [tree-sitter](https://tree-sitter.github.io/).
 
 cymbal parses your codebase into a local SQLite index, then gives you instant symbol search, cross-references, impact analysis, and scoped diffs — all from the command line. Designed to be called by AI agents, editor plugins, or directly from your terminal.

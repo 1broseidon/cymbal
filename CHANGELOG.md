@@ -8,6 +8,11 @@ All notable changes to cymbal are documented here.
 
 - **Library-ready package layout** — moved all four `internal/` packages to top-level importable packages: `symbols/`, `parser/`, `index/`, `walker/`. External Go projects can now import cymbal as a library (e.g., `import "github.com/1broseidon/cymbal/index"`). The CLI (`cmd/`) continues to work unchanged. This is a **breaking change** for any code that imported `internal/` paths directly (which was not possible for external consumers, but affects forks).
 
+### Added
+
+- **MIT license file**.
+- **README badges** — GitHub stars, Go Reference, Go Report Card, latest release.
+
 ## [0.8.8] - 2026-04-08
 
 ### Added
