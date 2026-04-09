@@ -29,6 +29,7 @@ export default (async () => {
       version,
       nav: [
         { text: 'Guide', link: '/guide/getting-started' },
+        { text: 'Library', link: '/guide/library' },
         { text: 'Commands', link: '/reference/commands' },
         { text: 'Changelog', link: '/changelog' },
       ],
@@ -37,6 +38,7 @@ export default (async () => {
           text: 'Guide',
           items: [
             { text: 'Getting Started', link: '/guide/getting-started' },
+            { text: 'Library Guide', link: '/guide/library' },
             { text: 'Agent-Native Output', link: '/guide/agent-native' },
           ],
         },

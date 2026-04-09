@@ -227,8 +227,46 @@ go run ./bench run     # run all benchmarks → bench/RESULTS.md
 
 **Agent workflow** — `cymbal investigate` replaces 3 separate ripgrep calls (search + show + refs) with 1 call. Typical savings: 41-100% fewer tokens for focused symbols.
 
+## Use as a library
+
+```sh
+CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go get github.com/1broseidon/cymbal@latest
+```
+
+Four packages are exported:
+
+| Package | What it does |
+|---------|-------------|
+| `index` | Indexing engine, SQLite store, and all query APIs |
+| `parser` | Tree-sitter parsing for 22 languages |
+| `symbols` | Core data types (Symbol, Import, Ref) |
+| `walker` | Concurrent file discovery with language detection |
+
+```go
+import (
+    "fmt"
+    "github.com/1broseidon/cymbal/index"
+)
+
+// Index a repo
+stats, _ := index.Index("/path/to/repo", "", index.Options{})
+fmt.Printf("%d files, %d symbols\n", stats.FilesIndexed, stats.SymbolsFound)
+
+// Query — all functions take a dbPath and return typed results
+dbPath, _ := index.RepoDBPath("/path/to/repo")
+
+results, _ := index.SearchSymbols(dbPath, index.SearchQuery{Text: "handleAuth"})
+inv, _ := index.Investigate(dbPath, "handleAuth")
+trace, _ := index.FindTrace(dbPath, "handleAuth", 3, 50)
+impact, _ := index.FindImpact(dbPath, "handleAuth", 2, 100)
+refs, _ := index.FindReferences(dbPath, "handleAuth", 50)
+```
+
+For the full API reference, streaming patterns, and lower-level store access, see the [library guide](./docs/guide/library.md).
+
 ## Docs
 
+- [Library guide](./docs/guide/library.md)
 - [Changelog](./CHANGELOG.md)
 
 ## License
