@@ -1411,10 +1411,17 @@ func (s *Store) FindDeadSymbols(q DeadSymbolQuery) ([]DeadSymbol, error) {
 		       s.parent, s.depth, s.signature, s.language
 		FROM symbols s
 		JOIN files f ON s.file_id = f.id
-		WHERE NOT EXISTS (SELECT 1 FROM refs r WHERE r.name = s.name)
+		WHERE NOT EXISTS (SELECT 1 FROM refs r WHERE r.name = s.name AND r.language = s.language)
 		  AND s.kind NOT IN ('constructor','getter','setter','impl','enum_member',
 		                     'field','module','namespace','resource','macro')`
 	var args []any
+
+	// Refs are primarily call-site based. Variable/constant refs are not
+	// comprehensively tracked and create very noisy false positives by default.
+	// Users can still request them explicitly with --kind.
+	if q.Kind == "" {
+		sqlQuery += " AND s.kind NOT IN ('variable','constant')"
+	}
 
 	if q.Kind != "" {
 		sqlQuery += " AND s.kind = ?"
@@ -1443,7 +1450,7 @@ func (s *Store) FindDeadSymbols(q DeadSymbolQuery) ([]DeadSymbol, error) {
 			return nil, err
 		}
 		// Always exclude: entry points.
-		if isEntryPoint(sym.Name, sym.Language) {
+		if isEntryPoint(sym.Name, sym.Kind, sym.Language) {
 			continue
 		}
 
@@ -1490,20 +1497,27 @@ func (s *Store) FindDeadSymbols(q DeadSymbolQuery) ([]DeadSymbol, error) {
 
 // isEntryPoint returns true for known program entry points that should never
 // be reported as dead code regardless of reference count.
-func isEntryPoint(name, lang string) bool {
-	switch name {
-	case "main", "Main", "init", "Init":
-		return true
+func isEntryPoint(name, kind, lang string) bool {
+	if kind != "function" && kind != "method" {
+		return false
 	}
-	// Go: TestMain is a special entry point.
-	if lang == "go" && name == "TestMain" {
-		return true
+
+	switch lang {
+	case "go":
+		// Go entry points.
+		return name == "main" || name == "init" || name == "TestMain"
+	case "c", "cpp":
+		// C/C++ executable entry point.
+		return name == "main"
+	case "java", "kotlin", "csharp":
+		// JVM/.NET entry method convention.
+		return name == "main" || name == "Main"
+	case "python":
+		// Python module entry guard (__name__ == "__main__").
+		return name == "__main__"
+	default:
+		return false
 	}
-	// Python: __main__ module entry.
-	if lang == "python" && name == "__main__" {
-		return true
-	}
-	return false
 }
 
 // isDunderMethod returns true for Python double-underscore methods (__xxx__)
@@ -1580,6 +1594,10 @@ func isTestSymbol(name, lang, relPath string) bool {
 //   - "medium": probably dead — exported/public or visibility unknown, no refs
 //   - "low":    uncertain — methods (could implement interfaces), or dynamic-dispatch languages
 func classifyDeadConfidence(name, kind, language, parent string) (confidence, reason string) {
+	if kind == "variable" || kind == "constant" {
+		return "low", "variable/constant refs are not fully tracked by call-site extraction"
+	}
+
 	// Python parser can emit class methods as kind="function" with non-empty parent.
 	// Avoid treating all nested symbols in all languages as methods.
 	isMethod := kind == "method" || (language == "python" && parent != "")
@@ -1622,7 +1640,7 @@ func classifyDeadConfidence(name, kind, language, parent string) (confidence, re
 		return "low", "Lua symbol — dynamic dispatch common"
 
 	case "elixir":
-		if isMethod {
+		if kind == "function" {
 			return "low", "Elixir function — may be called dynamically via apply/spawn"
 		}
 		return "medium", "Elixir symbol with no references"

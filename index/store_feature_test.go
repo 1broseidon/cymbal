@@ -431,8 +431,53 @@ func TestFeatureStoreDeadSymbolsEntryPointExclusions(t *testing.T) {
 
 	for _, r := range results {
 		switch r.Name {
-		case "main", "Main", "init", "Init", "TestMain":
-			t.Errorf("entry point %q should be excluded from dead code results", r.Name)
+		case "main", "init", "TestMain":
+			t.Errorf("Go entry point %q should be excluded from dead code results", r.Name)
+		}
+	}
+
+	// Main/Init are not Go entry points and should remain candidates.
+	foundMain := false
+	foundInitCap := false
+	for _, r := range results {
+		if r.Name == "Main" {
+			foundMain = true
+		}
+		if r.Name == "Init" {
+			foundInitCap = true
+		}
+	}
+	if !foundMain {
+		t.Error("expected Go function Main to remain eligible")
+	}
+	if !foundInitCap {
+		t.Error("expected Go function Init to remain eligible")
+	}
+}
+
+func TestFeatureStoreDeadSymbolsEntryPointLanguageAware(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	javaFile, err := store.UpsertFile("/repo/App.java", "App.java", "java", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertSymbols(javaFile, []symbols.Symbol{
+		{Name: "Main", Kind: "method", Parent: "App", File: "/repo/App.java", StartLine: 1, EndLine: 10, Language: "java"},
+		{Name: "helper", Kind: "method", Parent: "App", File: "/repo/App.java", StartLine: 12, EndLine: 20, Language: "java"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, r := range results {
+		if r.Language == "java" && r.Name == "Main" {
+			t.Fatal("expected Java Main entry method to be excluded")
 		}
 	}
 }
@@ -967,6 +1012,106 @@ func TestFeatureStoreDeadSymbolsInvalidMinConfidence(t *testing.T) {
 	_, err := store.FindDeadSymbols(DeadSymbolQuery{MinConfidence: "bogus", Limit: 10})
 	if err == nil {
 		t.Fatal("expected error for invalid min confidence")
+	}
+}
+
+func TestFeatureStoreDeadSymbolsDefaultExcludesVariablesAndConstants(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "helper", Kind: "function", File: "/repo/main.go", StartLine: 1, EndLine: 10, Language: "go"},
+		{Name: "tmpVar", Kind: "variable", Parent: "helper", File: "/repo/main.go", StartLine: 3, EndLine: 3, Language: "go"},
+		{Name: "flag", Kind: "constant", File: "/repo/main.go", StartLine: 12, EndLine: 12, Language: "go"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	foundFunc := false
+	for _, r := range results {
+		if r.Kind == "variable" || r.Kind == "constant" {
+			t.Fatalf("did not expect %s in default dead-symbol results", r.Kind)
+		}
+		if r.Name == "helper" {
+			foundFunc = true
+		}
+	}
+	if !foundFunc {
+		t.Fatal("expected helper function in default dead-symbol results")
+	}
+}
+
+func TestFeatureStoreDeadSymbolsVariableKindIsLowConfidence(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "tmpVar", Kind: "variable", Parent: "helper", File: "/repo/main.go", StartLine: 3, EndLine: 3, Language: "go"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Kind: "variable", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected exactly one variable result, got %d", len(results))
+	}
+	if results[0].Confidence != "low" {
+		t.Fatalf("expected low confidence for variable kind, got %q", results[0].Confidence)
+	}
+}
+
+func TestFeatureStoreDeadSymbolsRefMatchLanguageScoped(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	goFile, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertSymbols(goFile, []symbols.Symbol{
+		{Name: "sharedName", Kind: "function", File: "/repo/main.go", StartLine: 1, EndLine: 10, Language: "go"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	jsFile, err := store.UpsertFile("/repo/app.js", "app.js", "javascript", "hash2", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertRefs(jsFile, []symbols.Ref{{Name: "sharedName", Line: 1, Language: "javascript"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Language: "go", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found := false
+	for _, r := range results {
+		if r.Name == "sharedName" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected Go sharedName to remain dead; JS ref should not mark it alive")
 	}
 }
 
