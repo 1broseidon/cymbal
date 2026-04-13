@@ -2,6 +2,12 @@
 
 All notable changes to cymbal are documented here.
 
+## [0.9.2] - 2026-04-13
+
+### Fixed
+
+- **Go composite literal & JS/TS `new` expression ref extraction** — `refs`, `trace`, `impact`, and `investigate` now detect references from Go composite literals (`Config{}`, `http.Client{}`, `map[K]V{}`, `[]T{}`, `[N]T{}`), including qualified types (`pkg.Type`), and from JavaScript/TypeScript `new` expressions (`new Foo()`, `new pkg.Bar()`) (PR #14).
+
 ## [0.9.1] - 2026-04-11
 
 ### Added
