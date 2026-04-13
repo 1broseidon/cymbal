@@ -302,7 +302,17 @@ func (e *symbolExtractor) extractRef(node *sitter.Node) (symbols.Ref, bool) {
 	nodeType := node.Type()
 
 	switch e.lang {
-	case "go", "javascript", "typescript", "rust", "c", "cpp":
+	case "go":
+		if ref, ok := e.extractRefCallExpr(nodeType, node); ok {
+			return ref, true
+		}
+		return e.extractRefGoCompositeLiteral(nodeType, node)
+	case "javascript", "typescript":
+		if ref, ok := e.extractRefCallExpr(nodeType, node); ok {
+			return ref, true
+		}
+		return e.extractRefNewExpr(nodeType, node)
+	case "rust", "c", "cpp":
 		return e.extractRefCallExpr(nodeType, node)
 	case "python":
 		return e.extractRefPythonCall(nodeType, node)
@@ -327,6 +337,98 @@ func (e *symbolExtractor) extractRefCallExpr(nodeType string, node *sitter.Node)
 	funcNode := node.ChildByFieldName("function")
 	if funcNode != nil {
 		name := extractCallName(funcNode, e.src, e.lang)
+		if name != "" {
+			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+		}
+	}
+	return symbols.Ref{}, false
+}
+
+func (e *symbolExtractor) extractRefGoCompositeLiteral(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	if nodeType != "composite_literal" {
+		return symbols.Ref{}, false
+	}
+	typeNode := node.ChildByFieldName("type")
+	if typeNode == nil {
+		return symbols.Ref{}, false
+	}
+	line := int(node.StartPoint().Row) + 1
+
+	switch typeNode.Type() {
+	case "type_identifier":
+		name := typeNode.Content(e.src)
+		if name != "" {
+			return symbols.Ref{Name: name, Line: line, Language: e.lang}, true
+		}
+	case "qualified_type":
+		// e.g. pkg.StructName — extract StructName
+		nameNode := typeNode.ChildByFieldName("name")
+		if nameNode != nil {
+			name := nameNode.Content(e.src)
+			if name != "" {
+				return symbols.Ref{Name: name, Line: line, Language: e.lang}, true
+			}
+		}
+	case "map_type":
+		// map[KeyType]ValueType — emit refs for named key and value types
+		keyNode := typeNode.ChildByFieldName("key")
+		valNode := typeNode.ChildByFieldName("value")
+		if keyNode != nil {
+			switch keyNode.Type() {
+			case "type_identifier":
+				e.refs = append(e.refs, symbols.Ref{Name: keyNode.Content(e.src), Line: line, Language: e.lang})
+			case "qualified_type":
+				if nameNode := keyNode.ChildByFieldName("name"); nameNode != nil {
+					e.refs = append(e.refs, symbols.Ref{Name: nameNode.Content(e.src), Line: line, Language: e.lang})
+				}
+			}
+		}
+		if valNode != nil {
+			switch valNode.Type() {
+			case "type_identifier":
+				return symbols.Ref{Name: valNode.Content(e.src), Line: line, Language: e.lang}, true
+			case "qualified_type":
+				if nameNode := valNode.ChildByFieldName("name"); nameNode != nil {
+					return symbols.Ref{Name: nameNode.Content(e.src), Line: line, Language: e.lang}, true
+				}
+			}
+		}
+	case "slice_type":
+		// []TypeName{} — extract TypeName
+		elemNode := typeNode.ChildByFieldName("element")
+		if elemNode != nil {
+			switch elemNode.Type() {
+			case "type_identifier":
+				return symbols.Ref{Name: elemNode.Content(e.src), Line: line, Language: e.lang}, true
+			case "qualified_type":
+				if nameNode := elemNode.ChildByFieldName("name"); nameNode != nil {
+					return symbols.Ref{Name: nameNode.Content(e.src), Line: line, Language: e.lang}, true
+				}
+			}
+		}
+	case "array_type":
+		elemNode := typeNode.ChildByFieldName("element")
+		if elemNode != nil {
+			switch elemNode.Type() {
+			case "type_identifier":
+				return symbols.Ref{Name: elemNode.Content(e.src), Line: line, Language: e.lang}, true
+			case "qualified_type":
+				if nameNode := elemNode.ChildByFieldName("name"); nameNode != nil {
+					return symbols.Ref{Name: nameNode.Content(e.src), Line: line, Language: e.lang}, true
+				}
+			}
+		}
+	}
+	return symbols.Ref{}, false
+}
+
+func (e *symbolExtractor) extractRefNewExpr(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	if nodeType != "new_expression" {
+		return symbols.Ref{}, false
+	}
+	ctorNode := node.ChildByFieldName("constructor")
+	if ctorNode != nil {
+		name := extractCallName(ctorNode, e.src, e.lang)
 		if name != "" {
 			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
 		}

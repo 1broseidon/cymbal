@@ -1495,3 +1495,242 @@ func Third() {}
 		t.Error("Second should come before Third")
 	}
 }
+
+// --- Go Composite Literal Ref Tests ---
+
+func TestFeatureGoCompositeLiteralRef(t *testing.T) {
+	src := []byte(`package main
+
+type UsedStruct struct {
+	Name string
+}
+
+func main() {
+	s := UsedStruct{Name: "foo"}
+	_ = s
+}
+`)
+	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := findRef(result.Refs, "UsedStruct")
+	if ref == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find UsedStruct ref from composite literal")
+	}
+	if ref.Line != 8 {
+		t.Errorf("expected UsedStruct ref on line 8, got %d", ref.Line)
+	}
+}
+
+func TestFeatureGoMapLiteralRef(t *testing.T) {
+	src := []byte(`package main
+
+type MyKey string
+type MyValue int
+
+func main() {
+	m := map[MyKey]MyValue{}
+	_ = m
+}
+`)
+	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyRef := findRef(result.Refs, "MyKey")
+	if keyRef == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find MyKey ref from map composite literal")
+	}
+
+	valRef := findRef(result.Refs, "MyValue")
+	if valRef == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find MyValue ref from map composite literal")
+	}
+}
+
+func TestFeatureGoSliceLiteralRef(t *testing.T) {
+	src := []byte(`package main
+
+type Item struct{ V int }
+
+func main() {
+	items := []Item{{V: 1}, {V: 2}}
+	_ = items
+}
+`)
+	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := findRef(result.Refs, "Item")
+	if ref == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find Item ref from slice composite literal")
+	}
+}
+
+func TestFeatureGoQualifiedCompositeLiteralRef(t *testing.T) {
+	src := []byte(`package main
+
+import "net/http"
+
+func main() {
+	_ = http.Client{Timeout: 30}
+}
+`)
+	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := findRef(result.Refs, "Client")
+	if ref == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find Client ref from qualified composite literal")
+	}
+}
+
+func TestFeatureGoQualifiedMapLiteralRef(t *testing.T) {
+	src := []byte(`package main
+
+import "pkg"
+
+func main() {
+	m := map[pkg.Key]pkg.Value{}
+	_ = m
+}
+`)
+	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyRef := findRef(result.Refs, "Key")
+	if keyRef == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find Key ref from qualified map key type")
+	}
+
+	valRef := findRef(result.Refs, "Value")
+	if valRef == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find Value ref from qualified map value type")
+	}
+}
+
+func TestFeatureGoQualifiedSliceLiteralRef(t *testing.T) {
+	src := []byte(`package main
+
+import "pkg"
+
+func main() {
+	items := []pkg.Item{}
+	_ = items
+}
+`)
+	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := findRef(result.Refs, "Item")
+	if ref == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find Item ref from qualified slice element type")
+	}
+}
+
+func TestFeatureGoQualifiedArrayLiteralRef(t *testing.T) {
+	src := []byte(`package main
+
+import "pkg"
+
+func main() {
+	items := [3]pkg.Item{}
+	_ = items
+}
+`)
+	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := findRef(result.Refs, "Item")
+	if ref == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find Item ref from qualified array element type")
+	}
+}
+
+// --- JS/TS New Expression Ref Tests ---
+
+func TestFeatureJSNewExpressionRef(t *testing.T) {
+	src := []byte(`class UsedClass {
+    constructor(name) {
+        this.name = name;
+    }
+}
+
+const obj = new UsedClass("test");
+`)
+	result, err := ParseSource(src, "test.js", "javascript", languages["javascript"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := findRef(result.Refs, "UsedClass")
+	if ref == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find UsedClass ref from new expression")
+	}
+	if ref.Line != 7 {
+		t.Errorf("expected UsedClass ref on line 7, got %d", ref.Line)
+	}
+}
+
+func TestFeatureTSNewExpressionRef(t *testing.T) {
+	src := []byte(`class Service {
+    private name: string;
+    constructor(name: string) {
+        this.name = name;
+    }
+}
+
+const svc = new Service("api");
+`)
+	result, err := ParseSource(src, "test.ts", "typescript", languages["typescript"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := findRef(result.Refs, "Service")
+	if ref == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find Service ref from new expression in TypeScript")
+	}
+	if ref.Line != 8 {
+		t.Errorf("expected Service ref on line 8, got %d", ref.Line)
+	}
+}
+
+func TestFeatureJSNewExpressionMemberRef(t *testing.T) {
+	src := []byte(`const ws = new WebSocket.Server({ port: 8080 });
+`)
+	result, err := ParseSource(src, "test.js", "javascript", languages["javascript"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := findRef(result.Refs, "Server")
+	if ref == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find Server ref from new member expression")
+	}
+}
