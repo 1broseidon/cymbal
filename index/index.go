@@ -900,6 +900,19 @@ func InvestigateResolved(dbPath string, sym SymbolResult) (*InvestigateResult, e
 	return res, nil
 }
 
+// FindDeadSymbols finds symbols with zero references (potential dead code).
+func FindDeadSymbols(dbPath string, q DeadSymbolQuery) ([]DeadSymbol, error) {
+	if q.Limit <= 0 {
+		q.Limit = 50
+	}
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	return store.FindDeadSymbols(q)
+}
+
 // FindImpact performs transitive caller analysis for a symbol.
 func FindImpact(dbPath, symbolName string, depth, limit int) ([]ImpactResult, error) {
 	if limit <= 0 {

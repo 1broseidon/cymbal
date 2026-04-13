@@ -2,6 +2,12 @@
 
 All notable changes to cymbal are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **`cymbal dead` -- dead code detection with confidence ratings** -- finds symbols defined but never referenced in the codebase. Each result includes a confidence level (`high`, `medium`, `low`) with a human-readable reason explaining the classification. Language-aware heuristics: Go unexported symbols get `high` confidence, Python/Dart `_`-prefixed privates get `high`, methods get `low` (possible interface implementations), Ruby/Lua symbols get `low` (heavy metaprogramming). Entry points (`main`, `init`), test functions, constructors, getters, setters, and fields are excluded by default. Supports `--kind`, `--lang`, `--min-confidence`, `--include-tests`, `--limit`, and `--json` flags. Also available as `index.FindDeadSymbols()` library API (@Phototonic).
+
 ## [0.10.0] - 2026-04-15
 
 ### Highlights
@@ -57,6 +63,7 @@ All notable changes to cymbal are documented here.
 ### Docs
 
 - Updated README agent-integration guidance to reference `AGENTS.md` instead of `agent.md`.
+
 
 ## [0.9.2] - 2026-04-13
 

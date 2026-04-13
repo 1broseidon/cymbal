@@ -1374,6 +1374,303 @@ func (s *Store) FindTrace(symbolName string, depth, limit int) ([]TraceResult, e
 	return results, nil
 }
 
+// DeadSymbol holds a potentially dead symbol with confidence rating.
+type DeadSymbol struct {
+	SymbolResult
+	Confidence string `json:"confidence"` // "high", "medium", "low"
+	Reason     string `json:"reason"`     // explanation of why this confidence was assigned
+}
+
+// DeadSymbolQuery defines the options for dead symbol detection.
+type DeadSymbolQuery struct {
+	Kind          string // filter by symbol kind (e.g. "function", "struct")
+	Language      string // filter by language (e.g. "go", "python")
+	MinConfidence string // minimum confidence: "high", "medium", "low" (default "low" = all)
+	IncludeTests  bool   // include test functions (excluded by default)
+	Limit         int
+}
+
+// FindDeadSymbols finds symbols that have zero references in the codebase.
+// It queries for unreferenced symbols, filters out known false positives,
+// and assigns a confidence level to each result based on language-specific rules.
+func (s *Store) FindDeadSymbols(q DeadSymbolQuery) ([]DeadSymbol, error) {
+	if q.Limit <= 0 {
+		q.Limit = 50
+	}
+
+	// Build SQL query — fetch unreferenced symbols, excluding kinds that are
+	// inherently not useful to report (fields, constructors, etc.).
+	sqlQuery := `
+		SELECT s.name, s.kind, f.path, f.rel_path, s.start_line, s.end_line,
+		       s.parent, s.depth, s.signature, s.language
+		FROM symbols s
+		JOIN files f ON s.file_id = f.id
+		WHERE NOT EXISTS (SELECT 1 FROM refs r WHERE r.name = s.name)
+		  AND s.kind NOT IN ('constructor','getter','setter','impl','enum_member',
+		                     'field','module','namespace','resource','macro')`
+	var args []any
+
+	if q.Kind != "" {
+		sqlQuery += " AND s.kind = ?"
+		args = append(args, q.Kind)
+	}
+	if q.Language != "" {
+		sqlQuery += " AND s.language = ?"
+		args = append(args, q.Language)
+	}
+
+	sqlQuery += " ORDER BY f.rel_path, s.start_line"
+
+	rows, err := s.db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Collect raw candidates — we'll apply Go-side filtering and confidence next.
+	var candidates []SymbolResult
+	for rows.Next() {
+		var r SymbolResult
+		if err := rows.Scan(&r.Name, &r.Kind, &r.File, &r.RelPath, &r.StartLine, &r.EndLine,
+			&r.Parent, &r.Depth, &r.Signature, &r.Language); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Post-process: filter and assign confidence.
+	var results []DeadSymbol
+	for _, sym := range candidates {
+		// Always exclude: entry points.
+		if isEntryPoint(sym.Name, sym.Language) {
+			continue
+		}
+
+		// Always exclude: Python dunder methods.
+		if sym.Language == "python" && isDunderMethod(sym.Name) {
+			continue
+		}
+
+		// Exclude test functions by default.
+		if !q.IncludeTests && isTestSymbol(sym.Name, sym.Language, sym.RelPath) {
+			continue
+		}
+
+		confidence, reason := classifyDeadConfidence(sym.Name, sym.Kind, sym.Language, sym.RelPath)
+
+		// Filter by minimum confidence.
+		if !meetsMinConfidence(confidence, q.MinConfidence) {
+			continue
+		}
+
+		results = append(results, DeadSymbol{
+			SymbolResult: sym,
+			Confidence:   confidence,
+			Reason:       reason,
+		})
+
+		if len(results) >= q.Limit {
+			break
+		}
+	}
+
+	return results, nil
+}
+
+// isEntryPoint returns true for known program entry points that should never
+// be reported as dead code regardless of reference count.
+func isEntryPoint(name, lang string) bool {
+	switch name {
+	case "main", "Main", "init", "Init":
+		return true
+	}
+	// Go: TestMain is a special entry point.
+	if lang == "go" && name == "TestMain" {
+		return true
+	}
+	// Python: __main__ module entry.
+	if lang == "python" && name == "__main__" {
+		return true
+	}
+	return false
+}
+
+// isDunderMethod returns true for Python double-underscore methods (__xxx__)
+// which are protocol methods called implicitly by the Python runtime.
+func isDunderMethod(name string) bool {
+	return len(name) > 4 && strings.HasPrefix(name, "__") && strings.HasSuffix(name, "__")
+}
+
+// isTestSymbol detects test functions/methods by name and file path patterns.
+func isTestSymbol(name, lang, relPath string) bool {
+	// Language-specific name patterns.
+	switch lang {
+	case "go":
+		// Go test functions: Test*, Benchmark*, Fuzz*, Example*
+		if strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "Benchmark") ||
+			strings.HasPrefix(name, "Fuzz") || strings.HasPrefix(name, "Example") {
+			return true
+		}
+	case "python":
+		// Python: test_* functions, or classes named Test*
+		if strings.HasPrefix(name, "test_") || strings.HasPrefix(name, "Test") {
+			return true
+		}
+	case "ruby":
+		if strings.HasPrefix(name, "test_") {
+			return true
+		}
+	case "rust":
+		// Rust test functions are annotated with #[test], which we can't see
+		// from the name. But test modules are usually named "tests".
+		if name == "tests" {
+			return true
+		}
+	}
+
+	// File-path based detection (cross-language).
+	relPathLower := strings.ToLower(relPath)
+	if strings.Contains(relPathLower, "_test.") || strings.Contains(relPathLower, "/test_") ||
+		strings.Contains(relPathLower, "/tests/") || strings.Contains(relPathLower, "/test/") ||
+		strings.Contains(relPathLower, ".test.") || strings.Contains(relPathLower, ".spec.") ||
+		strings.Contains(relPathLower, "__tests__/") || strings.Contains(relPathLower, "\\test\\") ||
+		strings.Contains(relPathLower, "\\tests\\") || strings.Contains(relPathLower, "_test\\") {
+		return true
+	}
+
+	return false
+}
+
+// classifyDeadConfidence assigns a confidence level and reason to a dead symbol
+// based on language-specific visibility rules and symbol kind.
+//
+// Confidence levels:
+//   - "high":   very likely truly dead — private/unexported, no refs, not a special method
+//   - "medium": probably dead — exported/public or visibility unknown, no refs
+//   - "low":    uncertain — methods (could implement interfaces), or dynamic-dispatch languages
+func classifyDeadConfidence(name, kind, language, relPath string) (confidence, reason string) {
+	isMethod := kind == "method"
+
+	switch language {
+	case "go":
+		isExported := len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z'
+		if isMethod {
+			if isExported {
+				return "low", "exported Go method — may satisfy an interface"
+			}
+			return "medium", "unexported Go method with no references"
+		}
+		if isExported {
+			return "medium", "exported Go symbol — may be used by external packages"
+		}
+		return "high", "unexported Go symbol with no references"
+
+	case "python":
+		if strings.HasPrefix(name, "_") {
+			// Single underscore = private convention.
+			if isMethod {
+				return "medium", "private Python method with no references"
+			}
+			return "high", "private Python symbol with no references"
+		}
+		if isMethod {
+			return "low", "Python method — may be called dynamically or satisfy a protocol"
+		}
+		return "medium", "Python symbol with no references"
+
+	case "ruby":
+		// Ruby has heavy metaprogramming — lower confidence across the board.
+		if isMethod {
+			return "low", "Ruby method — heavy use of metaprogramming and dynamic dispatch"
+		}
+		return "low", "Ruby symbol — may be called via metaprogramming"
+
+	case "lua":
+		return "low", "Lua symbol — dynamic dispatch common"
+
+	case "elixir":
+		if isMethod {
+			return "low", "Elixir function — may be called dynamically via apply/spawn"
+		}
+		return "medium", "Elixir symbol with no references"
+
+	case "javascript", "typescript":
+		if isMethod {
+			return "low", "JS/TS method — may be called dynamically or via prototype chain"
+		}
+		return "medium", "JS/TS symbol with no references"
+
+	case "java", "kotlin":
+		if isMethod {
+			return "low", "method — may implement an interface or be called via reflection"
+		}
+		return "medium", "symbol with no references — visibility cannot be determined from name"
+
+	case "csharp":
+		if isMethod {
+			return "low", "C# method — may implement an interface or be called via reflection"
+		}
+		return "medium", "C# symbol with no references — visibility cannot be determined from name"
+
+	case "swift":
+		if isMethod {
+			return "low", "Swift method — may satisfy a protocol requirement"
+		}
+		return "medium", "Swift symbol with no references"
+
+	case "dart":
+		if isMethod {
+			return "low", "Dart method — may implement an abstract class method"
+		}
+		// Dart private symbols start with _
+		if strings.HasPrefix(name, "_") {
+			return "high", "private Dart symbol with no references"
+		}
+		return "medium", "Dart symbol with no references"
+
+	case "c":
+		return "medium", "C symbol with no references — may be used via function pointers"
+
+	case "cpp":
+		if isMethod {
+			return "low", "C++ method — may implement a virtual interface"
+		}
+		return "medium", "C++ symbol with no references — may be used via function pointers"
+
+	case "rust":
+		if isMethod {
+			return "low", "Rust method — may implement a trait"
+		}
+		// Rust is private by default, but we can't verify pub status from the name.
+		return "medium", "Rust symbol with no references — private by default but pub status unknown"
+
+	case "php":
+		if isMethod {
+			return "low", "PHP method — may implement an interface or be called dynamically"
+		}
+		return "medium", "PHP symbol with no references"
+
+	default:
+		if isMethod {
+			return "low", "method with no references — may implement an interface"
+		}
+		return "medium", "symbol with no references"
+	}
+}
+
+// meetsMinConfidence checks whether a confidence level meets the minimum threshold.
+// Ordering: high > medium > low.
+func meetsMinConfidence(confidence, minConfidence string) bool {
+	if minConfidence == "" || minConfidence == "low" {
+		return true // show everything
+	}
+	rank := map[string]int{"low": 0, "medium": 1, "high": 2}
+	return rank[confidence] >= rank[minConfidence]
+}
+
 // FindImpact performs transitive caller analysis using BFS.
 func (s *Store) FindImpact(symbolName string, depth, limit int) ([]ImpactResult, error) {
 	if depth <= 0 {

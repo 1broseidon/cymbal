@@ -1,6 +1,7 @@
 package index
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -322,6 +323,547 @@ func TestFeatureStoreImportsAndRefs(t *testing.T) {
 	}
 	if refs[0].Line != 10 {
 		t.Errorf("expected ref on line 10, got %d", refs[0].Line)
+	}
+}
+
+// ---------- Dead symbol detection tests ----------
+
+func TestFeatureStoreDeadSymbolsBasic(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	// Insert a Go file with functions.
+	fid, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "main", Kind: "function", File: "/repo/main.go", StartLine: 1, EndLine: 5, Language: "go"},
+		{Name: "helperFunc", Kind: "function", File: "/repo/main.go", StartLine: 7, EndLine: 15, Language: "go"},
+		{Name: "usedFunc", Kind: "function", File: "/repo/main.go", StartLine: 17, EndLine: 25, Language: "go"},
+		{Name: "ExportedUnused", Kind: "function", File: "/repo/main.go", StartLine: 27, EndLine: 35, Language: "go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a ref for usedFunc — it should NOT appear as dead.
+	err = store.InsertRefs(fid, []symbols.Ref{
+		{Name: "usedFunc", Line: 3, Language: "go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that "main" (entry point) is excluded.
+	for _, r := range results {
+		if r.Name == "main" {
+			t.Error("entry point 'main' should not be reported as dead")
+		}
+	}
+
+	// Check that "usedFunc" (has refs) is excluded.
+	for _, r := range results {
+		if r.Name == "usedFunc" {
+			t.Error("'usedFunc' has references and should not be reported as dead")
+		}
+	}
+
+	// Check that "helperFunc" (unexported, no refs) IS reported.
+	found := false
+	for _, r := range results {
+		if r.Name == "helperFunc" {
+			found = true
+			if r.Confidence != "high" {
+				t.Errorf("expected 'high' confidence for unexported Go function, got %q", r.Confidence)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected 'helperFunc' to be reported as dead")
+	}
+
+	// Check that "ExportedUnused" is reported with medium confidence.
+	found = false
+	for _, r := range results {
+		if r.Name == "ExportedUnused" {
+			found = true
+			if r.Confidence != "medium" {
+				t.Errorf("expected 'medium' confidence for exported Go function, got %q", r.Confidence)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected 'ExportedUnused' to be reported as dead")
+	}
+}
+
+func TestFeatureStoreDeadSymbolsEntryPointExclusions(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "main", Kind: "function", File: "/repo/main.go", StartLine: 1, EndLine: 5, Language: "go"},
+		{Name: "Main", Kind: "function", File: "/repo/main.go", StartLine: 7, EndLine: 10, Language: "go"},
+		{Name: "init", Kind: "function", File: "/repo/main.go", StartLine: 12, EndLine: 15, Language: "go"},
+		{Name: "Init", Kind: "function", File: "/repo/main.go", StartLine: 17, EndLine: 20, Language: "go"},
+		{Name: "TestMain", Kind: "function", File: "/repo/main.go", StartLine: 22, EndLine: 25, Language: "go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, r := range results {
+		switch r.Name {
+		case "main", "Main", "init", "Init", "TestMain":
+			t.Errorf("entry point %q should be excluded from dead code results", r.Name)
+		}
+	}
+}
+
+func TestFeatureStoreDeadSymbolsTestFunctionExclusion(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/calc_test.go", "calc_test.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "TestAdd", Kind: "function", File: "/repo/calc_test.go", StartLine: 1, EndLine: 10, Language: "go"},
+		{Name: "BenchmarkAdd", Kind: "function", File: "/repo/calc_test.go", StartLine: 12, EndLine: 20, Language: "go"},
+		{Name: "helperInTest", Kind: "function", File: "/repo/calc_test.go", StartLine: 22, EndLine: 30, Language: "go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Default: test functions excluded.
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if r.Name == "TestAdd" || r.Name == "BenchmarkAdd" {
+			t.Errorf("test function %q should be excluded by default", r.Name)
+		}
+	}
+	// helperInTest is in a _test.go file, so it should also be excluded.
+	for _, r := range results {
+		if r.Name == "helperInTest" {
+			t.Errorf("'helperInTest' in test file should be excluded by default")
+		}
+	}
+
+	// With IncludeTests: test functions included.
+	results, err = store.FindDeadSymbols(DeadSymbolQuery{IncludeTests: true, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundTest := false
+	for _, r := range results {
+		if r.Name == "TestAdd" {
+			foundTest = true
+			break
+		}
+	}
+	if !foundTest {
+		t.Error("expected 'TestAdd' to be included when IncludeTests=true")
+	}
+}
+
+func TestFeatureStoreDeadSymbolsPythonDunderExclusion(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/app.py", "app.py", "python", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "__init__", Kind: "method", File: "/repo/app.py", StartLine: 1, EndLine: 5, Language: "python"},
+		{Name: "__str__", Kind: "method", File: "/repo/app.py", StartLine: 7, EndLine: 10, Language: "python"},
+		{Name: "_private_func", Kind: "function", File: "/repo/app.py", StartLine: 12, EndLine: 20, Language: "python"},
+		{Name: "public_func", Kind: "function", File: "/repo/app.py", StartLine: 22, EndLine: 30, Language: "python"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, r := range results {
+		if r.Name == "__init__" || r.Name == "__str__" {
+			t.Errorf("Python dunder method %q should be excluded", r.Name)
+		}
+	}
+
+	// _private_func should be reported with high confidence.
+	found := false
+	for _, r := range results {
+		if r.Name == "_private_func" {
+			found = true
+			if r.Confidence != "high" {
+				t.Errorf("expected 'high' confidence for private Python function, got %q", r.Confidence)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected '_private_func' to be reported as dead")
+	}
+
+	// public_func should be medium confidence.
+	found = false
+	for _, r := range results {
+		if r.Name == "public_func" {
+			found = true
+			if r.Confidence != "medium" {
+				t.Errorf("expected 'medium' confidence for public Python function, got %q", r.Confidence)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected 'public_func' to be reported as dead")
+	}
+}
+
+func TestFeatureStoreDeadSymbolsMethodConfidence(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/handler.go", "handler.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "ServeHTTP", Kind: "method", File: "/repo/handler.go", StartLine: 1, EndLine: 10, Parent: "Handler", Language: "go"},
+		{Name: "privateHelper", Kind: "method", File: "/repo/handler.go", StartLine: 12, EndLine: 20, Parent: "Handler", Language: "go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, r := range results {
+		if r.Name == "ServeHTTP" && r.Confidence != "low" {
+			t.Errorf("exported Go method should have 'low' confidence, got %q", r.Confidence)
+		}
+		if r.Name == "privateHelper" && r.Confidence != "medium" {
+			t.Errorf("unexported Go method should have 'medium' confidence, got %q", r.Confidence)
+		}
+	}
+}
+
+func TestFeatureStoreDeadSymbolsKindFilter(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "unusedFunc", Kind: "function", File: "/repo/main.go", StartLine: 1, EndLine: 10, Language: "go"},
+		{Name: "unusedStruct", Kind: "struct", File: "/repo/main.go", StartLine: 12, EndLine: 20, Language: "go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Filter by kind=function — should only return functions.
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Kind: "function", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if r.Kind != "function" {
+			t.Errorf("expected only functions when kind filter is set, got %q", r.Kind)
+		}
+	}
+	if len(results) == 0 {
+		t.Error("expected at least one dead function")
+	}
+}
+
+func TestFeatureStoreDeadSymbolsLanguageFilter(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid1, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid1, []symbols.Symbol{
+		{Name: "goFunc", Kind: "function", File: "/repo/main.go", StartLine: 1, EndLine: 10, Language: "go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fid2, err := store.UpsertFile("/repo/app.py", "app.py", "python", "hash2", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid2, []symbols.Symbol{
+		{Name: "py_func", Kind: "function", File: "/repo/app.py", StartLine: 1, EndLine: 10, Language: "python"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Filter by language=go — should only return Go symbols.
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Language: "go", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if r.Language != "go" {
+			t.Errorf("expected only Go symbols when language filter is set, got %q", r.Language)
+		}
+	}
+}
+
+func TestFeatureStoreDeadSymbolsMinConfidence(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid, []symbols.Symbol{
+		// unexported function → high confidence
+		{Name: "helperFunc", Kind: "function", File: "/repo/main.go", StartLine: 1, EndLine: 10, Language: "go"},
+		// exported function → medium confidence
+		{Name: "ExportedFunc", Kind: "function", File: "/repo/main.go", StartLine: 12, EndLine: 20, Language: "go"},
+		// exported method → low confidence
+		{Name: "ServeHTTP", Kind: "method", File: "/repo/main.go", StartLine: 22, EndLine: 30, Parent: "Handler", Language: "go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// MinConfidence=high — should only return high confidence.
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{MinConfidence: "high", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if r.Confidence != "high" {
+			t.Errorf("with min-confidence=high, got result with confidence %q: %s", r.Confidence, r.Name)
+		}
+	}
+	if len(results) != 1 || results[0].Name != "helperFunc" {
+		t.Errorf("expected only 'helperFunc' with high confidence, got %d results", len(results))
+	}
+
+	// MinConfidence=medium — should return high and medium.
+	results, err = store.FindDeadSymbols(DeadSymbolQuery{MinConfidence: "medium", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if r.Confidence == "low" {
+			t.Errorf("with min-confidence=medium, should not include low confidence: %s", r.Name)
+		}
+	}
+
+	// MinConfidence=low (or empty) — should return all.
+	results, err = store.FindDeadSymbols(DeadSymbolQuery{MinConfidence: "low", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 3 {
+		t.Errorf("expected 3 results with min-confidence=low, got %d", len(results))
+	}
+}
+
+func TestFeatureStoreDeadSymbolsLimit(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Insert 10 unreferenced symbols.
+	var syms []symbols.Symbol
+	for i := range 10 {
+		syms = append(syms, symbols.Symbol{
+			Name:      fmt.Sprintf("func%d", i),
+			Kind:      "function",
+			File:      "/repo/main.go",
+			StartLine: i*10 + 1,
+			EndLine:   i*10 + 8,
+			Language:  "go",
+		})
+	}
+	err = store.InsertSymbols(fid, syms)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Limit to 3.
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) > 3 {
+		t.Errorf("expected at most 3 results, got %d", len(results))
+	}
+}
+
+func TestFeatureStoreDeadSymbolsExcludesFieldsAndConstructors(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/model.go", "model.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "New", Kind: "constructor", File: "/repo/model.go", StartLine: 1, EndLine: 5, Language: "go"},
+		{Name: "Name", Kind: "field", File: "/repo/model.go", StartLine: 7, EndLine: 7, Parent: "User", Language: "go"},
+		{Name: "Active", Kind: "getter", File: "/repo/model.go", StartLine: 9, EndLine: 12, Language: "go"},
+		{Name: "SetActive", Kind: "setter", File: "/repo/model.go", StartLine: 14, EndLine: 17, Language: "go"},
+		{Name: "ROLE_ADMIN", Kind: "enum_member", File: "/repo/model.go", StartLine: 19, EndLine: 19, Language: "go"},
+		{Name: "orphanFunc", Kind: "function", File: "/repo/model.go", StartLine: 21, EndLine: 30, Language: "go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	excluded := map[string]bool{"New": true, "Name": true, "Active": true, "SetActive": true, "ROLE_ADMIN": true}
+	for _, r := range results {
+		if excluded[r.Name] {
+			t.Errorf("kind %q symbol %q should be excluded from dead code results", r.Kind, r.Name)
+		}
+	}
+
+	// orphanFunc should be reported.
+	found := false
+	for _, r := range results {
+		if r.Name == "orphanFunc" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected 'orphanFunc' to be reported as dead")
+	}
+}
+
+func TestFeatureStoreDeadSymbolsDartPrivate(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/lib/widget.dart", "lib/widget.dart", "dart", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "_PrivateWidget", Kind: "class", File: "/repo/lib/widget.dart", StartLine: 1, EndLine: 20, Language: "dart"},
+		{Name: "PublicWidget", Kind: "class", File: "/repo/lib/widget.dart", StartLine: 22, EndLine: 40, Language: "dart"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, r := range results {
+		if r.Name == "_PrivateWidget" && r.Confidence != "high" {
+			t.Errorf("expected 'high' confidence for private Dart symbol, got %q", r.Confidence)
+		}
+		if r.Name == "PublicWidget" && r.Confidence != "medium" {
+			t.Errorf("expected 'medium' confidence for public Dart symbol, got %q", r.Confidence)
+		}
+	}
+}
+
+func TestFeatureStoreDeadSymbolsRubyLowConfidence(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/app.rb", "app.rb", "ruby", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "unused_method", Kind: "function", File: "/repo/app.rb", StartLine: 1, EndLine: 10, Language: "ruby"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(results) == 0 {
+		t.Fatal("expected at least one result for Ruby")
+	}
+	if results[0].Confidence != "low" {
+		t.Errorf("expected 'low' confidence for Ruby symbol due to metaprogramming, got %q", results[0].Confidence)
+	}
+}
+
+func TestFeatureStoreDeadSymbolsJSTestFileExclusion(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	// Symbols in a test file should be excluded by default.
+	fid, err := store.UpsertFile("/repo/src/utils.test.js", "src/utils.test.js", "javascript", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "testHelper", Kind: "function", File: "/repo/src/utils.test.js", StartLine: 1, EndLine: 10, Language: "javascript"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, r := range results {
+		if r.Name == "testHelper" {
+			t.Error("symbol in .test.js file should be excluded by default")
+		}
 	}
 }
 
