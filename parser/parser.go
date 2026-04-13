@@ -373,22 +373,50 @@ func (e *symbolExtractor) extractRefGoCompositeLiteral(nodeType string, node *si
 		// map[KeyType]ValueType — emit refs for named key and value types
 		keyNode := typeNode.ChildByFieldName("key")
 		valNode := typeNode.ChildByFieldName("value")
-		if keyNode != nil && keyNode.Type() == "type_identifier" {
-			e.refs = append(e.refs, symbols.Ref{Name: keyNode.Content(e.src), Line: line, Language: e.lang})
+		if keyNode != nil {
+			switch keyNode.Type() {
+			case "type_identifier":
+				e.refs = append(e.refs, symbols.Ref{Name: keyNode.Content(e.src), Line: line, Language: e.lang})
+			case "qualified_type":
+				if nameNode := keyNode.ChildByFieldName("name"); nameNode != nil {
+					e.refs = append(e.refs, symbols.Ref{Name: nameNode.Content(e.src), Line: line, Language: e.lang})
+				}
+			}
 		}
-		if valNode != nil && valNode.Type() == "type_identifier" {
-			return symbols.Ref{Name: valNode.Content(e.src), Line: line, Language: e.lang}, true
+		if valNode != nil {
+			switch valNode.Type() {
+			case "type_identifier":
+				return symbols.Ref{Name: valNode.Content(e.src), Line: line, Language: e.lang}, true
+			case "qualified_type":
+				if nameNode := valNode.ChildByFieldName("name"); nameNode != nil {
+					return symbols.Ref{Name: nameNode.Content(e.src), Line: line, Language: e.lang}, true
+				}
+			}
 		}
 	case "slice_type":
 		// []TypeName{} — extract TypeName
 		elemNode := typeNode.ChildByFieldName("element")
-		if elemNode != nil && elemNode.Type() == "type_identifier" {
-			return symbols.Ref{Name: elemNode.Content(e.src), Line: line, Language: e.lang}, true
+		if elemNode != nil {
+			switch elemNode.Type() {
+			case "type_identifier":
+				return symbols.Ref{Name: elemNode.Content(e.src), Line: line, Language: e.lang}, true
+			case "qualified_type":
+				if nameNode := elemNode.ChildByFieldName("name"); nameNode != nil {
+					return symbols.Ref{Name: nameNode.Content(e.src), Line: line, Language: e.lang}, true
+				}
+			}
 		}
 	case "array_type":
 		elemNode := typeNode.ChildByFieldName("element")
-		if elemNode != nil && elemNode.Type() == "type_identifier" {
-			return symbols.Ref{Name: elemNode.Content(e.src), Line: line, Language: e.lang}, true
+		if elemNode != nil {
+			switch elemNode.Type() {
+			case "type_identifier":
+				return symbols.Ref{Name: elemNode.Content(e.src), Line: line, Language: e.lang}, true
+			case "qualified_type":
+				if nameNode := elemNode.ChildByFieldName("name"); nameNode != nil {
+					return symbols.Ref{Name: nameNode.Content(e.src), Line: line, Language: e.lang}, true
+				}
+			}
 		}
 	}
 	return symbols.Ref{}, false

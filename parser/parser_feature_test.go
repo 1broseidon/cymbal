@@ -1597,6 +1597,78 @@ func main() {
 	}
 }
 
+func TestFeatureGoQualifiedMapLiteralRef(t *testing.T) {
+	src := []byte(`package main
+
+import "pkg"
+
+func main() {
+	m := map[pkg.Key]pkg.Value{}
+	_ = m
+}
+`)
+	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyRef := findRef(result.Refs, "Key")
+	if keyRef == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find Key ref from qualified map key type")
+	}
+
+	valRef := findRef(result.Refs, "Value")
+	if valRef == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find Value ref from qualified map value type")
+	}
+}
+
+func TestFeatureGoQualifiedSliceLiteralRef(t *testing.T) {
+	src := []byte(`package main
+
+import "pkg"
+
+func main() {
+	items := []pkg.Item{}
+	_ = items
+}
+`)
+	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := findRef(result.Refs, "Item")
+	if ref == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find Item ref from qualified slice element type")
+	}
+}
+
+func TestFeatureGoQualifiedArrayLiteralRef(t *testing.T) {
+	src := []byte(`package main
+
+import "pkg"
+
+func main() {
+	items := [3]pkg.Item{}
+	_ = items
+}
+`)
+	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := findRef(result.Refs, "Item")
+	if ref == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find Item ref from qualified array element type")
+	}
+}
+
 // --- JS/TS New Expression Ref Tests ---
 
 func TestFeatureJSNewExpressionRef(t *testing.T) {
