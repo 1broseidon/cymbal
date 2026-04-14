@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/1broseidon/cymbal/index"
@@ -33,6 +34,13 @@ Examples:
 		scope, _ := cmd.Flags().GetString("scope")
 		depth, _ := cmd.Flags().GetInt("depth")
 
+		format = strings.ToLower(strings.TrimSpace(format))
+		switch format {
+		case "dot", "mermaid", "json":
+		default:
+			return fmt.Errorf("invalid format %q (expected: dot|mermaid|json)", format)
+		}
+
 		g, err := index.BuildDependsGraph(dbPath, index.DependsQuery{
 			Scope: scope,
 			Depth: depth,
@@ -45,12 +53,12 @@ Examples:
 			return fmt.Errorf("no dependency edges found")
 		}
 
-		switch strings.ToLower(format) {
+		switch format {
 		case "json":
 			return writeJSON(g)
 		case "mermaid":
 			printDependsMermaid(g)
-		default:
+		case "dot":
 			printDependsDOT(g)
 		}
 		return nil
@@ -64,20 +72,49 @@ func init() {
 	rootCmd.AddCommand(dependsCmd)
 }
 
-// sanitizeDOTID escapes a rel_path for use as a DOT node identifier.
-// Dots and slashes are replaced with underscores and the result is quoted.
-func sanitizeDOTID(relPath string) string {
-	id := strings.NewReplacer(
-		"/", "_",
-		"\\", "_",
-		".", "_",
-		"-", "_",
-	).Replace(relPath)
-	return `"` + id + `"`
+// dependsNodeIDs builds deterministic collision-free node IDs for graph outputs.
+// IDs are based on sorted node paths and use the n<index> form.
+func dependsNodeIDs(g *index.DependsGraph) map[string]string {
+	ids := make(map[string]string)
+	next := 0
+
+	for _, n := range g.Nodes {
+		if _, exists := ids[n.ID]; exists {
+			continue
+		}
+		ids[n.ID] = fmt.Sprintf("n%d", next)
+		next++
+	}
+
+	// Defensive fallback: include any edge endpoints missing from Nodes.
+	missingSet := make(map[string]struct{})
+	for _, e := range g.Edges {
+		if _, ok := ids[e.From]; !ok {
+			missingSet[e.From] = struct{}{}
+		}
+		if _, ok := ids[e.To]; !ok {
+			missingSet[e.To] = struct{}{}
+		}
+	}
+	if len(missingSet) > 0 {
+		missing := make([]string, 0, len(missingSet))
+		for m := range missingSet {
+			missing = append(missing, m)
+		}
+		sort.Strings(missing)
+		for _, m := range missing {
+			ids[m] = fmt.Sprintf("n%d", next)
+			next++
+		}
+	}
+
+	return ids
 }
 
 // printDependsDOT writes the graph in Graphviz DOT format.
 func printDependsDOT(g *index.DependsGraph) {
+	ids := dependsNodeIDs(g)
+
 	fmt.Println("digraph depends {")
 	fmt.Println(`  rankdir=LR;`)
 	fmt.Println(`  node [shape=box fontname="Helvetica"];`)
@@ -88,7 +125,7 @@ func printDependsDOT(g *index.DependsGraph) {
 		if n.Language != "" {
 			label = fmt.Sprintf("%s\\n[%s]", n.ID, n.Language)
 		}
-		fmt.Printf("  %s [label=%q];\n", sanitizeDOTID(n.ID), label)
+		fmt.Printf("  %s [label=%q];\n", ids[n.ID], label)
 	}
 
 	if len(g.Nodes) > 0 && len(g.Edges) > 0 {
@@ -96,7 +133,7 @@ func printDependsDOT(g *index.DependsGraph) {
 	}
 
 	for _, e := range g.Edges {
-		fmt.Printf("  %s -> %s;\n", sanitizeDOTID(e.From), sanitizeDOTID(e.To))
+		fmt.Printf("  %s -> %s;\n", ids[e.From], ids[e.To])
 	}
 
 	if len(g.Cycles) > 0 {
@@ -110,22 +147,14 @@ func printDependsDOT(g *index.DependsGraph) {
 	fmt.Println("}")
 }
 
-// sanitizeMermaidID returns a safe Mermaid node ID (alphanumeric + underscores).
-func sanitizeMermaidID(relPath string) string {
-	return strings.NewReplacer(
-		"/", "_",
-		"\\", "_",
-		".", "_",
-		"-", "_",
-	).Replace(relPath)
-}
-
 // printDependsMermaid writes the graph in Mermaid flowchart format.
 func printDependsMermaid(g *index.DependsGraph) {
+	ids := dependsNodeIDs(g)
+
 	fmt.Println("flowchart LR")
 
 	for _, n := range g.Nodes {
-		id := sanitizeMermaidID(n.ID)
+		id := ids[n.ID]
 		label := n.ID
 		if n.Language != "" {
 			label = fmt.Sprintf("%s\n[%s]", n.ID, n.Language)
@@ -138,7 +167,7 @@ func printDependsMermaid(g *index.DependsGraph) {
 	}
 
 	for _, e := range g.Edges {
-		fmt.Printf("  %s --> %s\n", sanitizeMermaidID(e.From), sanitizeMermaidID(e.To))
+		fmt.Printf("  %s --> %s\n", ids[e.From], ids[e.To])
 	}
 
 	if len(g.Cycles) > 0 {

@@ -1524,18 +1524,19 @@ func (s *Store) BuildDependsGraph(q DependsQuery) (*DependsGraph, error) {
 	}
 
 	// Step 3: load all imports.
-	impRows, err := s.db.Query(`SELECT file_id, raw_path FROM imports`)
+	impRows, err := s.db.Query(`SELECT file_id, raw_path, language FROM imports`)
 	if err != nil {
 		return nil, err
 	}
 	type rawImp struct {
 		fileID  int64
 		rawPath string
+		lang    string
 	}
 	var imports []rawImp
 	for impRows.Next() {
 		var ri rawImp
-		if err := impRows.Scan(&ri.fileID, &ri.rawPath); err != nil {
+		if err := impRows.Scan(&ri.fileID, &ri.rawPath, &ri.lang); err != nil {
 			impRows.Close()
 			return nil, err
 		}
@@ -1554,7 +1555,7 @@ func (s *Store) BuildDependsGraph(q DependsQuery) (*DependsGraph, error) {
 		if !ok {
 			continue
 		}
-		key := dependsImportKey(imp.rawPath)
+		key := dependsImportKey(imp.rawPath, imp.lang)
 		if key == "" {
 			continue
 		}
@@ -1703,14 +1704,58 @@ func dependsPathParts(relPath string) []string {
 // dependsImportKey extracts the best single lookup key from a raw import path
 // as stored in the imports table. It handles language-specific prefixes and
 // relative paths.
-func dependsImportKey(rawPath string) string {
+func dependsImportKey(rawPath, language string) string {
 	s := strings.TrimSpace(rawPath)
 	if s == "" {
 		return ""
 	}
+	lang := strings.ToLower(strings.TrimSpace(language))
 
 	// Python: "from pkg.mod import X" or "import pkg.mod"
-	if strings.HasPrefix(s, "from ") || strings.HasPrefix(s, "import ") {
+	if lang == "python" {
+		fields := strings.Fields(s)
+		if len(fields) >= 2 {
+			mod := fields[1]
+			parts := strings.Split(mod, ".")
+			return parts[len(parts)-1]
+		}
+		return ""
+	}
+
+	// Java / Kotlin: "import com.example.Foo;" or "import static com.example.Foo;"
+	if lang == "java" || lang == "kotlin" {
+		s = strings.TrimPrefix(s, "import ")
+		s = strings.TrimPrefix(s, "static ")
+		s = strings.TrimSuffix(s, ";")
+		// Wildcard import -- not resolvable to a single file.
+		if strings.HasSuffix(s, ".*") {
+			return ""
+		}
+		parts := strings.Split(s, ".")
+		return parts[len(parts)-1]
+	}
+
+	// Fallback heuristics when language is missing or unknown.
+	if strings.HasPrefix(s, "from ") {
+		fields := strings.Fields(s)
+		if len(fields) >= 2 {
+			mod := fields[1]
+			parts := strings.Split(mod, ".")
+			return parts[len(parts)-1]
+		}
+		return ""
+	}
+	if strings.HasPrefix(s, "import static ") || (strings.HasPrefix(s, "import ") && strings.HasSuffix(s, ";")) {
+		s = strings.TrimPrefix(s, "import ")
+		s = strings.TrimPrefix(s, "static ")
+		s = strings.TrimSuffix(s, ";")
+		if strings.HasSuffix(s, ".*") {
+			return ""
+		}
+		parts := strings.Split(s, ".")
+		return parts[len(parts)-1]
+	}
+	if strings.HasPrefix(s, "import ") {
 		fields := strings.Fields(s)
 		if len(fields) >= 2 {
 			mod := fields[1]
@@ -1735,19 +1780,6 @@ func dependsImportKey(rawPath string) string {
 			last = strings.TrimSpace(parts[len(parts)-2])
 		}
 		return last
-	}
-
-	// Java / Kotlin: "import com.example.Foo;" or "import static com.example.Foo;"
-	if strings.HasPrefix(s, "import ") {
-		s = strings.TrimPrefix(s, "import ")
-		s = strings.TrimPrefix(s, "static ")
-		s = strings.TrimSuffix(s, ";")
-		// Wildcard import -- not resolvable to a single file.
-		if strings.HasSuffix(s, ".*") {
-			return ""
-		}
-		parts := strings.Split(s, ".")
-		return parts[len(parts)-1]
 	}
 
 	// Relative paths: "./foo/bar" or "../baz/qux"
