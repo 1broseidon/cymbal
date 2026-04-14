@@ -825,6 +825,15 @@ func TestFeatureStoreDeadSymbolsExcludesFieldsAndConstructors(t *testing.T) {
 	}
 }
 
+func TestFeatureStoreDeadSymbolsExcludedKindReturnsError(t *testing.T) {
+	store, _ := newTestStore(t)
+
+	_, err := store.FindDeadSymbols(DeadSymbolQuery{Kind: "field", Limit: 10})
+	if err == nil {
+		t.Fatal("expected error for excluded dead-symbol kind")
+	}
+}
+
 func TestFeatureStoreDeadSymbolsDartPrivate(t *testing.T) {
 	store, _ := newTestStore(t)
 	now := time.Now()
@@ -1073,6 +1082,48 @@ func TestFeatureStoreDeadSymbolsVariableKindIsLowConfidence(t *testing.T) {
 	}
 	if results[0].Confidence != "low" {
 		t.Fatalf("expected low confidence for variable kind, got %q", results[0].Confidence)
+	}
+}
+
+func TestFeatureStoreDeadSymbolsGoUnicodeExportedName(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "Éxported", Kind: "function", File: "/repo/main.go", StartLine: 1, EndLine: 10, Language: "go"},
+		{Name: "helper", Kind: "function", File: "/repo/main.go", StartLine: 12, EndLine: 20, Language: "go"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seenUnicode := false
+	seenHelper := false
+	for _, r := range results {
+		if r.Name == "Éxported" {
+			seenUnicode = true
+			if r.Confidence != "medium" {
+				t.Fatalf("expected Unicode-exported Go function to be medium confidence, got %q", r.Confidence)
+			}
+		}
+		if r.Name == "helper" {
+			seenHelper = true
+			if r.Confidence != "high" {
+				t.Fatalf("expected unexported Go helper to be high confidence, got %q", r.Confidence)
+			}
+		}
+	}
+
+	if !seenUnicode || !seenHelper {
+		t.Fatalf("expected both symbols in results, got %+v", results)
 	}
 }
 

@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	_ "github.com/mattn/go-sqlite3"
 
@@ -71,6 +73,7 @@ CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
 CREATE INDEX IF NOT EXISTS idx_imports_raw ON imports(raw_path);
 CREATE INDEX IF NOT EXISTS idx_imports_file ON imports(file_id);
 CREATE INDEX IF NOT EXISTS idx_refs_name ON refs(name);
+CREATE INDEX IF NOT EXISTS idx_refs_name_lang ON refs(name, language);
 CREATE INDEX IF NOT EXISTS idx_refs_file ON refs(file_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(
@@ -1398,6 +1401,11 @@ func (s *Store) FindDeadSymbols(q DeadSymbolQuery) ([]DeadSymbol, error) {
 		q.Limit = 50
 	}
 
+	q.Kind = strings.ToLower(strings.TrimSpace(q.Kind))
+	if q.Kind != "" && isAlwaysExcludedDeadKind(q.Kind) {
+		return nil, fmt.Errorf("kind %q is excluded from dead detection", q.Kind)
+	}
+
 	minConfidence, err := normalizeMinConfidence(q.MinConfidence)
 	if err != nil {
 		return nil, err
@@ -1608,7 +1616,7 @@ func classifyDeadConfidence(name, kind, language, parent string, depth int) (con
 
 	switch language {
 	case "go":
-		isExported := len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z'
+		isExported := isGoExportedName(name)
 		if isMethod {
 			if isExported {
 				return "low", "exported Go method — may satisfy an interface"
@@ -1719,8 +1727,18 @@ func meetsMinConfidence(confidence, minConfidence string) bool {
 	if minConfidence == "" || minConfidence == "low" {
 		return true // show everything
 	}
-	rank := map[string]int{"low": 0, "medium": 1, "high": 2}
-	return rank[confidence] >= rank[minConfidence]
+	return confidenceRank(confidence) >= confidenceRank(minConfidence)
+}
+
+func confidenceRank(confidence string) int {
+	switch confidence {
+	case "high":
+		return 2
+	case "medium":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func normalizeMinConfidence(minConfidence string) (string, error) {
@@ -1740,6 +1758,24 @@ func isTypeLikeKind(kind string) bool {
 	default:
 		return false
 	}
+}
+
+func isAlwaysExcludedDeadKind(kind string) bool {
+	switch kind {
+	case "constructor", "getter", "setter", "impl", "enum_member",
+		"field", "module", "namespace", "resource", "macro":
+		return true
+	default:
+		return false
+	}
+}
+
+func isGoExportedName(name string) bool {
+	if name == "" {
+		return false
+	}
+	r, _ := utf8.DecodeRuneInString(name)
+	return unicode.IsUpper(r)
 }
 
 // FindImpact performs transitive caller analysis using BFS.
