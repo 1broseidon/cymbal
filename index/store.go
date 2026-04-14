@@ -1438,3 +1438,434 @@ func (s *Store) FindImpact(symbolName string, depth, limit int) ([]ImpactResult,
 
 	return results, nil
 }
+
+// ---------------------------------------------------------------------------
+// Dependency graph
+// ---------------------------------------------------------------------------
+
+// DependsQuery holds parameters for BuildDependsGraph.
+type DependsQuery struct {
+	// Scope restricts the graph to files whose rel_path starts with this prefix.
+	// Empty means all files.
+	Scope string
+	// Depth limits traversal hops from the scope root files.
+	// 0 means unlimited.
+	Depth int
+}
+
+// DependsNode is a file node in the dependency graph.
+type DependsNode struct {
+	ID       string `json:"id"`
+	Language string `json:"language"`
+}
+
+// DependsEdge is a directed import edge between two files.
+type DependsEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// DependsGraph is the resolved file-level dependency graph.
+type DependsGraph struct {
+	Nodes  []DependsNode `json:"nodes"`
+	Edges  []DependsEdge `json:"edges"`
+	Cycles [][]string    `json:"cycles,omitempty"`
+}
+
+// BuildDependsGraph constructs a file-level import dependency graph.
+//
+// Edges are resolved by matching each import's raw_path last segment against
+// known file rel_paths (the same best-effort heuristic used by the importers
+// command). External / stdlib imports that do not match any indexed file
+// produce no edge.
+func (s *Store) BuildDependsGraph(q DependsQuery) (*DependsGraph, error) {
+	// Step 1: load all indexed files.
+	type fileRec struct {
+		id       int64
+		relPath  string
+		language string
+	}
+
+	var allFiles []fileRec
+	rows, err := s.db.Query(`SELECT id, rel_path, language FROM files ORDER BY rel_path`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var f fileRec
+		if err := rows.Scan(&f.id, &f.relPath, &f.language); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		allFiles = append(allFiles, f)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Build lookup maps.
+	idToFile := make(map[int64]*fileRec, len(allFiles))
+	pathToFile := make(map[string]*fileRec, len(allFiles))
+	for i := range allFiles {
+		idToFile[allFiles[i].id] = &allFiles[i]
+		pathToFile[allFiles[i].relPath] = &allFiles[i]
+	}
+
+	// Step 2: build segment -> files map for import resolution.
+	// Key is the last meaningful path component (no extension) of a rel_path.
+	segToFiles := make(map[string][]*fileRec)
+	for i := range allFiles {
+		f := &allFiles[i]
+		parts := dependsPathParts(f.relPath)
+		for _, seg := range parts {
+			segToFiles[seg] = append(segToFiles[seg], f)
+		}
+	}
+
+	// Step 3: load all imports.
+	impRows, err := s.db.Query(`SELECT file_id, raw_path FROM imports`)
+	if err != nil {
+		return nil, err
+	}
+	type rawImp struct {
+		fileID  int64
+		rawPath string
+	}
+	var imports []rawImp
+	for impRows.Next() {
+		var ri rawImp
+		if err := impRows.Scan(&ri.fileID, &ri.rawPath); err != nil {
+			impRows.Close()
+			return nil, err
+		}
+		imports = append(imports, ri)
+	}
+	impRows.Close()
+	if err := impRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Step 4: resolve edges.
+	type edgeKey struct{ from, to string }
+	edgeSet := make(map[edgeKey]struct{})
+	for _, imp := range imports {
+		fromFile, ok := idToFile[imp.fileID]
+		if !ok {
+			continue
+		}
+		key := dependsImportKey(imp.rawPath)
+		if key == "" {
+			continue
+		}
+		candidates := segToFiles[key]
+		for _, toFile := range candidates {
+			if toFile.relPath == fromFile.relPath {
+				continue // skip self-loops
+			}
+			edgeSet[edgeKey{fromFile.relPath, toFile.relPath}] = struct{}{}
+		}
+	}
+
+	// Step 5: apply scope filter.
+	var edges []DependsEdge
+	nodeSet := make(map[string]struct{})
+
+	if q.Scope != "" {
+		scope := filepath.ToSlash(q.Scope)
+		for ek := range edgeSet {
+			fromSlash := filepath.ToSlash(ek.from)
+			if strings.HasPrefix(fromSlash, scope) {
+				edges = append(edges, DependsEdge{From: ek.from, To: ek.to})
+				nodeSet[ek.from] = struct{}{}
+				nodeSet[ek.to] = struct{}{}
+			}
+		}
+	} else {
+		for ek := range edgeSet {
+			edges = append(edges, DependsEdge{From: ek.from, To: ek.to})
+			nodeSet[ek.from] = struct{}{}
+			nodeSet[ek.to] = struct{}{}
+		}
+	}
+
+	// Step 6: apply depth filter (BFS from scope roots).
+	if q.Depth > 0 {
+		// Determine root nodes: files within scope.
+		roots := make(map[string]struct{})
+		if q.Scope != "" {
+			scope := filepath.ToSlash(q.Scope)
+			for _, f := range allFiles {
+				if strings.HasPrefix(filepath.ToSlash(f.relPath), scope) {
+					roots[f.relPath] = struct{}{}
+				}
+			}
+		} else {
+			for n := range nodeSet {
+				roots[n] = struct{}{}
+			}
+		}
+
+		// Build adjacency from edges collected so far.
+		adj := make(map[string][]string)
+		for _, e := range edges {
+			adj[e.From] = append(adj[e.From], e.To)
+		}
+
+		// BFS to collect reachable nodes within depth.
+		visited := make(map[string]int) // node -> min depth reached
+		queue := make([]string, 0, len(roots))
+		for r := range roots {
+			visited[r] = 0
+			queue = append(queue, r)
+		}
+		for len(queue) > 0 {
+			cur := queue[0]
+			queue = queue[1:]
+			d := visited[cur]
+			if d >= q.Depth {
+				continue
+			}
+			for _, nb := range adj[cur] {
+				if _, seen := visited[nb]; !seen {
+					visited[nb] = d + 1
+					queue = append(queue, nb)
+				}
+			}
+		}
+
+		// Filter edges to only those where both endpoints are reachable.
+		var filteredEdges []DependsEdge
+		filteredNodes := make(map[string]struct{})
+		for _, e := range edges {
+			_, fromOK := visited[e.From]
+			_, toOK := visited[e.To]
+			if fromOK && toOK {
+				filteredEdges = append(filteredEdges, e)
+				filteredNodes[e.From] = struct{}{}
+				filteredNodes[e.To] = struct{}{}
+			}
+		}
+		edges = filteredEdges
+		nodeSet = filteredNodes
+	}
+
+	// Step 7: build sorted node list.
+	var nodes []DependsNode
+	for relPath := range nodeSet {
+		lang := ""
+		if f, ok := pathToFile[relPath]; ok {
+			lang = f.language
+		}
+		nodes = append(nodes, DependsNode{ID: relPath, Language: lang})
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].From != edges[j].From {
+			return edges[i].From < edges[j].From
+		}
+		return edges[i].To < edges[j].To
+	})
+
+	// Step 8: detect cycles.
+	cycles := dependsDetectCycles(edges)
+
+	return &DependsGraph{
+		Nodes:  nodes,
+		Edges:  edges,
+		Cycles: cycles,
+	}, nil
+}
+
+// dependsPathParts returns the lookup keys for a file rel_path used when
+// building the segment->files map. It returns both the bare file stem and
+// directory-qualified variants so that "utils/helpers.go" can be matched by
+// either "helpers" or "utils/helpers".
+func dependsPathParts(relPath string) []string {
+	slashed := filepath.ToSlash(relPath)
+	// Strip extension.
+	if dot := strings.LastIndex(slashed, "."); dot >= 0 {
+		slashed = slashed[:dot]
+	}
+	parts := strings.Split(slashed, "/")
+	if len(parts) == 0 {
+		return nil
+	}
+	// Always include the bare file stem.
+	keys := []string{parts[len(parts)-1]}
+	// Also add progressively longer suffix paths for disambiguation.
+	for i := len(parts) - 2; i >= 0; i-- {
+		keys = append(keys, strings.Join(parts[i:], "/"))
+	}
+	return keys
+}
+
+// dependsImportKey extracts the best single lookup key from a raw import path
+// as stored in the imports table. It handles language-specific prefixes and
+// relative paths.
+func dependsImportKey(rawPath string) string {
+	s := strings.TrimSpace(rawPath)
+	if s == "" {
+		return ""
+	}
+
+	// Python: "from pkg.mod import X" or "import pkg.mod"
+	if strings.HasPrefix(s, "from ") || strings.HasPrefix(s, "import ") {
+		fields := strings.Fields(s)
+		if len(fields) >= 2 {
+			mod := fields[1]
+			parts := strings.Split(mod, ".")
+			return parts[len(parts)-1]
+		}
+		return ""
+	}
+
+	// Rust: "use std::collections::HashMap;" or "use crate::foo::{Bar, Baz};"
+	if strings.HasPrefix(s, "use ") {
+		s = strings.TrimPrefix(s, "use ")
+		s = strings.TrimSuffix(s, ";")
+		// Drop brace groups.
+		if idx := strings.Index(s, "{"); idx >= 0 {
+			s = s[:idx]
+		}
+		s = strings.TrimRight(s, ":")
+		parts := strings.Split(s, "::")
+		last := strings.TrimSpace(parts[len(parts)-1])
+		if last == "" && len(parts) > 1 {
+			last = strings.TrimSpace(parts[len(parts)-2])
+		}
+		return last
+	}
+
+	// Java / Kotlin: "import com.example.Foo;" or "import static com.example.Foo;"
+	if strings.HasPrefix(s, "import ") {
+		s = strings.TrimPrefix(s, "import ")
+		s = strings.TrimPrefix(s, "static ")
+		s = strings.TrimSuffix(s, ";")
+		// Wildcard import -- not resolvable to a single file.
+		if strings.HasSuffix(s, ".*") {
+			return ""
+		}
+		parts := strings.Split(s, ".")
+		return parts[len(parts)-1]
+	}
+
+	// Relative paths: "./foo/bar" or "../baz/qux"
+	if strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") {
+		// Strip leading ./ and ../
+		for strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") {
+			if strings.HasPrefix(s, "./") {
+				s = s[2:]
+			} else {
+				s = s[3:]
+			}
+		}
+		// Take last slash component and strip extension.
+		if idx := strings.LastIndex(s, "/"); idx >= 0 {
+			s = s[idx+1:]
+		}
+		if dot := strings.LastIndex(s, "."); dot >= 0 {
+			s = s[:dot]
+		}
+		return s
+	}
+
+	// General: "github.com/user/repo/pkg" or "mylib/header.h"
+	// Normalise backslashes.
+	s = strings.ReplaceAll(s, "\\", "/")
+	if idx := strings.LastIndex(s, "/"); idx >= 0 {
+		s = s[idx+1:]
+	}
+	// Strip extension.
+	if dot := strings.LastIndex(s, "."); dot >= 0 {
+		s = s[:dot]
+	}
+	return s
+}
+
+// dependsDetectCycles runs a DFS on the edge list and returns all detected
+// cycles as normalised slices of rel_paths (rotated so smallest element is
+// first). Duplicate cycles are deduplicated.
+func dependsDetectCycles(edges []DependsEdge) [][]string {
+	// Build adjacency list.
+	adj := make(map[string][]string)
+	for _, e := range edges {
+		adj[e.From] = append(adj[e.From], e.To)
+	}
+
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+	color := make(map[string]int)
+	var path []string
+	cycleSet := make(map[string][]string) // normalised key -> cycle
+
+	var dfs func(node string)
+	dfs = func(node string) {
+		color[node] = gray
+		path = append(path, node)
+		for _, nb := range adj[node] {
+			if color[nb] == gray {
+				// Found a back-edge: extract cycle from path.
+				start := -1
+				for i, n := range path {
+					if n == nb {
+						start = i
+						break
+					}
+				}
+				if start >= 0 {
+					cycle := make([]string, len(path)-start)
+					copy(cycle, path[start:])
+					// Normalise: rotate so smallest element is first.
+					minIdx := 0
+					for i, n := range cycle {
+						if n < cycle[minIdx] {
+							minIdx = i
+						}
+					}
+					norm := append(cycle[minIdx:], cycle[:minIdx]...)
+					key := strings.Join(norm, "|")
+					cycleSet[key] = norm
+				}
+			} else if color[nb] == white {
+				dfs(nb)
+			}
+		}
+		path = path[:len(path)-1]
+		color[node] = black
+	}
+
+	// Visit all nodes that appear in edges.
+	nodes := make(map[string]struct{})
+	for _, e := range edges {
+		nodes[e.From] = struct{}{}
+		nodes[e.To] = struct{}{}
+	}
+	sorted := make([]string, 0, len(nodes))
+	for n := range nodes {
+		sorted = append(sorted, n)
+	}
+	sort.Strings(sorted)
+	for _, n := range sorted {
+		if color[n] == white {
+			dfs(n)
+		}
+	}
+
+	if len(cycleSet) == 0 {
+		return nil
+	}
+	result := make([][]string, 0, len(cycleSet))
+	keys := make([]string, 0, len(cycleSet))
+	for k := range cycleSet {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		result = append(result, cycleSet[k])
+	}
+	return result
+}

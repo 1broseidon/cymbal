@@ -963,3 +963,13 @@ func SymbolsByName(dbPath, name string) ([]SymbolResult, error) {
 	}
 	return store.SearchSymbols(name, "", "", true, 100)
 }
+
+// BuildDependsGraph constructs a file-level import dependency graph.
+func BuildDependsGraph(dbPath string, q DependsQuery) (*DependsGraph, error) {
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	return store.BuildDependsGraph(q)
+}

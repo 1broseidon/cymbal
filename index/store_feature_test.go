@@ -390,3 +390,246 @@ func TestFeatureStoreChildSymbolsFileScoped(t *testing.T) {
 		t.Errorf("Kotlin-scoped member: expected 'users', got %q", kt[0].Name)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TestFeatureStoreDependsGraph
+// ---------------------------------------------------------------------------
+
+// insertDependsFixture sets up a small multi-file project:
+//
+//	main.go        imports config (go)
+//	config/config.go  imports util (go)
+//	util/util.go   (go, no indexed imports)
+//	app.py         imports util (python)
+//
+// Expected edges:
+//
+//	main.go -> config/config.go
+//	config/config.go -> util/util.go
+//	app.py -> util/util.go
+func insertDependsFixture(t *testing.T, store *Store) {
+	t.Helper()
+	now := time.Now()
+
+	fmain, err := store.UpsertFile("/repo/main.go", "main.go", "go", "h1", now, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fconf, err := store.UpsertFile("/repo/config/config.go", "config/config.go", "go", "h2", now, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	futil, err := store.UpsertFile("/repo/util/util.go", "util/util.go", "go", "h3", now, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fapp, err := store.UpsertFile("/repo/app.py", "app.py", "python", "h4", now, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// main.go imports "github.com/example/repo/config"
+	if err := store.InsertImports(fmain, []symbols.Import{
+		{RawPath: "github.com/example/repo/config", Language: "go"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// config/config.go imports "github.com/example/repo/util"
+	if err := store.InsertImports(fconf, []symbols.Import{
+		{RawPath: "github.com/example/repo/util", Language: "go"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// util/util.go has no imports
+	_ = futil
+	// app.py imports "from util import helper"
+	if err := store.InsertImports(fapp, []symbols.Import{
+		{RawPath: "from util import helper", Language: "python"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// edgeExists returns true if the given from->to edge is present in g.Edges.
+func edgeExists(g *DependsGraph, from, to string) bool {
+	for _, e := range g.Edges {
+		if e.From == from && e.To == to {
+			return true
+		}
+	}
+	return false
+}
+
+// nodeExists returns true if a node with the given ID is present in g.Nodes.
+func nodeExists(g *DependsGraph, id string) bool {
+	for _, n := range g.Nodes {
+		if n.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func TestFeatureStoreDependsGraph_BasicEdges(t *testing.T) {
+	store, _ := newTestStore(t)
+	insertDependsFixture(t, store)
+
+	g, err := store.BuildDependsGraph(DependsQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should have at least 4 nodes.
+	if len(g.Nodes) < 4 {
+		t.Errorf("expected >= 4 nodes, got %d", len(g.Nodes))
+	}
+
+	// Expected edges.
+	wantEdges := [][2]string{
+		{"main.go", "config/config.go"},
+		{"config/config.go", "util/util.go"},
+		{"app.py", "util/util.go"},
+	}
+	for _, e := range wantEdges {
+		if !edgeExists(g, e[0], e[1]) {
+			t.Errorf("expected edge %s -> %s, not found in %v", e[0], e[1], g.Edges)
+		}
+	}
+}
+
+func TestFeatureStoreDependsGraph_NodeLanguage(t *testing.T) {
+	store, _ := newTestStore(t)
+	insertDependsFixture(t, store)
+
+	g, err := store.BuildDependsGraph(DependsQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, n := range g.Nodes {
+		if n.Language == "" {
+			t.Errorf("node %q has empty language", n.ID)
+		}
+	}
+}
+
+func TestFeatureStoreDependsGraph_ScopeFilter(t *testing.T) {
+	store, _ := newTestStore(t)
+	insertDependsFixture(t, store)
+
+	// Scope to "config/" -- only edges where from starts with "config/"
+	g, err := store.BuildDependsGraph(DependsQuery{Scope: "config/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, e := range g.Edges {
+		if !hasPrefix(e.From, "config/") {
+			t.Errorf("scope filter violated: edge from=%q should have prefix 'config/'", e.From)
+		}
+	}
+
+	if !edgeExists(g, "config/config.go", "util/util.go") {
+		t.Error("expected edge config/config.go -> util/util.go under scope 'config/'")
+	}
+	if edgeExists(g, "main.go", "config/config.go") {
+		t.Error("edge main.go -> config/config.go should not appear under scope 'config/'")
+	}
+}
+
+func TestFeatureStoreDependsGraph_NoSelfLoops(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/self.go", "self.go", "go", "hs", now, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Import whose key matches self.go
+	if err := store.InsertImports(fid, []symbols.Import{
+		{RawPath: "github.com/x/self", Language: "go"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := store.BuildDependsGraph(DependsQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range g.Edges {
+		if e.From == e.To {
+			t.Errorf("self-loop detected: %s -> %s", e.From, e.To)
+		}
+	}
+}
+
+func TestFeatureStoreDependsGraph_EmptyDB(t *testing.T) {
+	store, _ := newTestStore(t)
+
+	g, err := store.BuildDependsGraph(DependsQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Nodes) != 0 || len(g.Edges) != 0 {
+		t.Errorf("expected empty graph for empty DB, got %d nodes %d edges", len(g.Nodes), len(g.Edges))
+	}
+}
+
+func TestFeatureStoreDependsGraph_CycleDetection(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fa, err := store.UpsertFile("/repo/a.go", "a.go", "go", "ha", now, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fb, err := store.UpsertFile("/repo/b.go", "b.go", "go", "hb", now, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// a.go imports b; b.go imports a -> cycle
+	if err := store.InsertImports(fa, []symbols.Import{{RawPath: "github.com/x/b", Language: "go"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertImports(fb, []symbols.Import{{RawPath: "github.com/x/a", Language: "go"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := store.BuildDependsGraph(DependsQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(g.Cycles) == 0 {
+		t.Error("expected at least one cycle to be detected between a.go and b.go")
+	}
+}
+
+func TestFeatureStoreDependsGraph_SortedOutput(t *testing.T) {
+	store, _ := newTestStore(t)
+	insertDependsFixture(t, store)
+
+	g, err := store.BuildDependsGraph(DependsQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 1; i < len(g.Nodes); i++ {
+		if g.Nodes[i].ID < g.Nodes[i-1].ID {
+			t.Errorf("nodes not sorted: %q before %q", g.Nodes[i-1].ID, g.Nodes[i].ID)
+		}
+	}
+	for i := 1; i < len(g.Edges); i++ {
+		prev := g.Edges[i-1]
+		cur := g.Edges[i]
+		if cur.From < prev.From || (cur.From == prev.From && cur.To < prev.To) {
+			t.Errorf("edges not sorted: (%s->%s) before (%s->%s)", prev.From, prev.To, cur.From, cur.To)
+		}
+	}
+}
+
+// hasPrefix is a helper to keep test code readable.
+func hasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}

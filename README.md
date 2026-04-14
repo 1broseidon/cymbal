@@ -129,6 +129,7 @@ The index auto-builds on first use — no manual `cymbal index .` required. Subs
 | `refs` | Find references / call sites. `--file` to scope by path |
 | `importers` | Reverse import lookup — who imports this? |
 | `impact` | Transitive callers — what's affected by a change? |
+| `depends` | File-level import dependency graph (DOT / Mermaid / JSON) |
 | `diff` | Git diff scoped to a symbol's line range |
 | `context` | Bundled view: source + types + callers + imports |
 

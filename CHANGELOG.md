@@ -2,6 +2,12 @@
 
 All notable changes to cymbal are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **`cymbal depends`** -- new command that exports the file-level import dependency graph. Supports three output formats: Graphviz DOT (`--format dot`, default), Mermaid flowchart (`--format mermaid`), and JSON (`--format json`). Accepts `--scope <prefix>` to limit traversal to source files under that prefix (while still allowing dependencies that point outside it to appear in the graph) and `--depth <n>` to limit traversal hops from scoped files. Cycle detection is included in all formats.
+
 ## [0.10.0] - 2026-04-15
 
 ### Highlights
@@ -57,6 +63,7 @@ All notable changes to cymbal are documented here.
 ### Docs
 
 - Updated README agent-integration guidance to reference `AGENTS.md` instead of `agent.md`.
+
 
 ## [0.9.2] - 2026-04-13
 
