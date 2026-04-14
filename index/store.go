@@ -1523,39 +1523,27 @@ func (s *Store) BuildDependsGraph(q DependsQuery) (*DependsGraph, error) {
 		}
 	}
 
-	// Step 3: load all imports.
+	// Step 3: stream imports and resolve edges.
 	impRows, err := s.db.Query(`SELECT file_id, raw_path, language FROM imports`)
 	if err != nil {
 		return nil, err
 	}
-	type rawImp struct {
-		fileID  int64
-		rawPath string
-		lang    string
-	}
-	var imports []rawImp
+
+	type edgeKey struct{ from, to string }
+	edgeSet := make(map[edgeKey]struct{})
 	for impRows.Next() {
-		var ri rawImp
-		if err := impRows.Scan(&ri.fileID, &ri.rawPath, &ri.lang); err != nil {
+		var fileID int64
+		var rawPath, lang string
+		if err := impRows.Scan(&fileID, &rawPath, &lang); err != nil {
 			impRows.Close()
 			return nil, err
 		}
-		imports = append(imports, ri)
-	}
-	impRows.Close()
-	if err := impRows.Err(); err != nil {
-		return nil, err
-	}
 
-	// Step 4: resolve edges.
-	type edgeKey struct{ from, to string }
-	edgeSet := make(map[edgeKey]struct{})
-	for _, imp := range imports {
-		fromFile, ok := idToFile[imp.fileID]
+		fromFile, ok := idToFile[fileID]
 		if !ok {
 			continue
 		}
-		key := dependsImportKey(imp.rawPath, imp.lang)
+		key := dependsImportKey(rawPath, lang)
 		if key == "" {
 			continue
 		}
@@ -1566,6 +1554,10 @@ func (s *Store) BuildDependsGraph(q DependsQuery) (*DependsGraph, error) {
 			}
 			edgeSet[edgeKey{fromFile.relPath, toFile.relPath}] = struct{}{}
 		}
+	}
+	impRows.Close()
+	if err := impRows.Err(); err != nil {
+		return nil, err
 	}
 
 	// Step 5: apply scope filter.
