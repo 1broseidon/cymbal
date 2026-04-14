@@ -1115,6 +1115,51 @@ func TestFeatureStoreDeadSymbolsRefMatchLanguageScoped(t *testing.T) {
 	}
 }
 
+func TestFeatureStoreDeadSymbolsTypeLikeKindsDefaultIncludedAfterRefFixes(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "UnusedType", Kind: "struct", File: "/repo/main.go", StartLine: 1, EndLine: 5, Language: "go"},
+		{Name: "UsedType", Kind: "struct", File: "/repo/main.go", StartLine: 7, EndLine: 11, Language: "go"},
+		{Name: "callUsedType", Kind: "function", File: "/repo/main.go", StartLine: 13, EndLine: 20, Language: "go"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertRefs(fid, []symbols.Ref{
+		{Name: "UsedType", Line: 14, Language: "go"},
+		{Name: "callUsedType", Line: 18, Language: "go"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	foundUnusedType := false
+	foundUsedType := false
+	for _, r := range results {
+		if r.Name == "UnusedType" {
+			foundUnusedType = true
+		}
+		if r.Name == "UsedType" {
+			foundUsedType = true
+		}
+	}
+	if !foundUnusedType {
+		t.Fatal("expected unreferenced type-like symbol to be included by default")
+	}
+	if foundUsedType {
+		t.Fatal("expected referenced type-like symbol to be excluded")
+	}
+}
+
 func TestFeatureStoreDeadSymbolsMinConfidenceNormalized(t *testing.T) {
 	store, _ := newTestStore(t)
 	now := time.Now()

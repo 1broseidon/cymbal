@@ -142,18 +142,17 @@ All commands support `--json` for structured output.
 
 `cymbal dead` is conservative by default to reduce false positives for agents.
 
-- **Default mode** focuses on lower-noise symbol kinds.
-- **Use `--kind`** for targeted audits of noisier kinds.
+- **Default mode** excludes high-noise local/state symbols (variables/constants).
+- **Use `--kind`** for targeted audits when you want a specific symbol kind.
 - **Use `--min-confidence`** to control strictness:
   - `high` — strongest signal (best for automation)
   - `medium` — balanced signal/noise for review
   - `low` — broadest results, includes uncertain candidates
 
-By default, `dead` excludes high-noise kinds that are currently harder to validate reliably from refs alone (for example variables/constants and type-like symbols). You can still audit them explicitly:
+By default, `dead` excludes variables/constants because those refs are harder to validate reliably from call-site extraction alone. You can still audit them explicitly:
 
 ```sh
 cymbal dead --kind variable --min-confidence low
-cymbal dead --kind struct --min-confidence low
 ```
 
 ## Agent integration
