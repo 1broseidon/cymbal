@@ -64,7 +64,6 @@ All notable changes to cymbal are documented here.
 
 - Updated README agent-integration guidance to reference `AGENTS.md` instead of `agent.md`.
 
-
 ## [0.9.2] - 2026-04-13
 
 ### Fixed

@@ -14,6 +14,9 @@ var dependsCmd = &cobra.Command{
 	Short: "Export the file-level import dependency graph",
 	Long: `Export the file-level import dependency graph for indexed files.
 
+Only files that participate in at least one resolved dependency edge are
+included in the rendered graph.
+
 Formats:
   dot      Graphviz DOT language (default)
   mermaid  Mermaid flowchart syntax
@@ -49,7 +52,7 @@ Examples:
 			return err
 		}
 
-		if len(g.Nodes) == 0 {
+		if len(g.Edges) == 0 {
 			return fmt.Errorf("no dependency edges found")
 		}
 
@@ -67,8 +70,8 @@ Examples:
 
 func init() {
 	dependsCmd.Flags().StringP("format", "f", "dot", "output format: dot, mermaid, json")
-	dependsCmd.Flags().StringP("scope", "s", "", "restrict to files whose rel_path starts with this prefix")
-	dependsCmd.Flags().IntP("depth", "d", 0, "max traversal depth from scope roots (0 = unlimited)")
+	dependsCmd.Flags().StringP("scope", "s", "", "restrict to dependency edges originating from files whose rel_path starts with this prefix")
+	dependsCmd.Flags().IntP("depth", "d", 0, "max traversal depth from scoped files (0 = unlimited)")
 	rootCmd.AddCommand(dependsCmd)
 }
 
@@ -157,8 +160,9 @@ func printDependsMermaid(g *index.DependsGraph) {
 		id := ids[n.ID]
 		label := n.ID
 		if n.Language != "" {
-			label = fmt.Sprintf("%s\n[%s]", n.ID, n.Language)
+			label = fmt.Sprintf("%s<br/>[%s]", n.ID, n.Language)
 		}
+		label = strings.ReplaceAll(label, `"`, `\"`)
 		fmt.Printf("  %s[\"%s\"]\n", id, label)
 	}
 
