@@ -1160,6 +1160,52 @@ func TestFeatureStoreDeadSymbolsTypeLikeKindsDefaultIncludedAfterRefFixes(t *tes
 	}
 }
 
+func TestFeatureStoreDeadSymbolsNestedTypeLikeIsLowConfidence(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+
+	fid, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash1", now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertSymbols(fid, []symbols.Symbol{
+		{Name: "LocalStruct", Kind: "struct", Parent: "helper", Depth: 1, File: "/repo/main.go", StartLine: 3, EndLine: 6, Language: "go"},
+		{Name: "TopStruct", Kind: "struct", File: "/repo/main.go", StartLine: 10, EndLine: 15, Language: "go"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := store.FindDeadSymbols(DeadSymbolQuery{Kind: "struct", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 struct results, got %d", len(results))
+	}
+
+	seenNested := false
+	seenTop := false
+	for _, r := range results {
+		switch r.Name {
+		case "LocalStruct":
+			seenNested = true
+			if r.Confidence != "low" {
+				t.Fatalf("expected nested type-like symbol low confidence, got %q", r.Confidence)
+			}
+		case "TopStruct":
+			seenTop = true
+			if r.Confidence != "medium" {
+				t.Fatalf("expected top-level exported Go struct medium confidence, got %q", r.Confidence)
+			}
+		}
+	}
+
+	if !seenNested || !seenTop {
+		t.Fatalf("expected both LocalStruct and TopStruct, got %+v", results)
+	}
+}
+
 func TestFeatureStoreDeadSymbolsMinConfidenceNormalized(t *testing.T) {
 	store, _ := newTestStore(t)
 	now := time.Now()

@@ -1470,7 +1470,7 @@ func (s *Store) FindDeadSymbols(q DeadSymbolQuery) ([]DeadSymbol, error) {
 			continue
 		}
 
-		confidence, reason := classifyDeadConfidence(sym.Name, sym.Kind, sym.Language, sym.Parent)
+		confidence, reason := classifyDeadConfidence(sym.Name, sym.Kind, sym.Language, sym.Parent, sym.Depth)
 
 		// Filter by minimum confidence.
 		if !meetsMinConfidence(confidence, q.MinConfidence) {
@@ -1593,9 +1593,13 @@ func isTestSymbol(name, lang, relPath string) bool {
 //   - "high":   very likely truly dead — private/unexported, no refs, not a special method
 //   - "medium": probably dead — exported/public or visibility unknown, no refs
 //   - "low":    uncertain — methods (could implement interfaces), or dynamic-dispatch languages
-func classifyDeadConfidence(name, kind, language, parent string) (confidence, reason string) {
+func classifyDeadConfidence(name, kind, language, parent string, depth int) (confidence, reason string) {
 	if kind == "variable" || kind == "constant" {
 		return "low", "variable/constant refs are not fully tracked by call-site extraction"
+	}
+
+	if depth > 0 && isTypeLikeKind(kind) {
+		return "low", "nested type declaration — may be scope-local and harder to validate reliably"
 	}
 
 	// Python parser can emit class methods as kind="function" with non-empty parent.
@@ -1726,6 +1730,15 @@ func normalizeMinConfidence(minConfidence string) (string, error) {
 		return v, nil
 	default:
 		return "", fmt.Errorf("invalid MinConfidence %q: must be high, medium, or low", minConfidence)
+	}
+}
+
+func isTypeLikeKind(kind string) bool {
+	switch kind {
+	case "struct", "class", "interface", "type", "enum", "object", "trait", "mixin", "extension":
+		return true
+	default:
+		return false
 	}
 }
 
