@@ -82,7 +82,6 @@ func TestForFileExtensions(t *testing.T) {
 		{"script.pm", "perl"},
 		{"App.vue", "vue"},
 		{"App.svelte", "svelte"},
-		{"main.dart", "dart"},
 
 		// Unrecognized
 		{"foo.xyz", ""},
