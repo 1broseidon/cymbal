@@ -25,30 +25,26 @@ Or grab a binary from [releases](https://github.com/1broseidon/cymbal/releases).
 ## Quick Start
 
 ```sh
-# Index the current project (~100ms for most repos)
-cymbal index .
+# Investigate any symbol — one call, right answer
+cymbal investigate handleAuth
+cymbal investigate UserService
 
-# Browse the file tree
-cymbal ls
+# Trace execution downward
+cymbal trace handleAuth
 
-# Find a symbol
+# Assess upstream impact
+cymbal impact handleAuth
+
+# Use specific commands when you need more control
 cymbal search handleAuth
-
-# Read its source
 cymbal show handleAuth
-
-# File outline — all symbols in a file
 cymbal outline internal/auth/handler.go
-
-# Who calls this?
 cymbal refs handleAuth
-
-# What breaks if I change this?
-cymbal refs handleAuth --impact
-
-# Everything you need in one call
 cymbal context handleAuth
+cymbal ls --stats
 ```
+
+The index auto-builds on first use, so a manual `cymbal index .` step is optional rather than required.
 
 ## Agent Integration
 
@@ -57,11 +53,16 @@ cymbal is designed to be an AI agent's code comprehension layer. Add this to you
 ```markdown
 ## Code Exploration Policy
 Use `cymbal` CLI for code navigation — prefer it over Read, Grep, Glob, or Bash for code exploration.
+- **New to a repo?**: `cymbal structure` — entry points, hotspots, central packages. Start here.
+- **To understand a symbol**: `cymbal investigate <symbol>` — returns source, callers, impact, or members based on what the symbol is.
+- **To understand multiple symbols**: `cymbal investigate Foo Bar Baz` — batch mode, one invocation.
+- **To trace an execution path**: `cymbal trace <symbol>` — follows the call graph downward.
+- **To assess change risk**: `cymbal impact <symbol>` — follows the call graph upward.
 - Before reading a file: `cymbal outline <file>` or `cymbal show <file:L1-L2>`
 - Before searching: `cymbal search <query>` (symbols) or `cymbal search <query> --text` (grep)
 - Before exploring structure: `cymbal ls` (tree) or `cymbal ls --stats` (overview)
 - To find usage: `cymbal refs <symbol>` or `cymbal refs <symbol> --importers`
-- If a project is not indexed, run `cymbal index .` first (takes <100ms).
+- The index auto-builds on first use — no manual indexing step needed. Queries auto-refresh incrementally.
 - Use `cymbal show <symbol>` to read a specific function/type instead of reading the whole file.
 - All commands support `--json` for structured output.
 ```
@@ -70,8 +71,12 @@ This tells the agent to prefer cymbal over grep/find/cat, reducing tool calls an
 
 ## Supported Languages
 
-cymbal uses tree-sitter grammars. Currently supported:
+cymbal currently parses and indexes:
 
-Go, Python, JavaScript, TypeScript, TSX, Rust, C, C++, C#, Java, Ruby, Swift, Kotlin, Scala, PHP, Lua, Bash, HCL, Dockerfile, YAML, TOML, HTML, CSS
+Go, Python, JavaScript, TypeScript, Rust, C, C++, C#, Java, Apex, Ruby, Swift, Kotlin, Scala, PHP, Lua, Bash, YAML, Elixir, HCL/Terraform, Protobuf, and Dart.
 
-Adding a language requires a tree-sitter grammar and a symbol extraction query — see `internal/parser/` for details.
+Notable extension coverage includes `.pyw`, `.mjs`, `.cjs`, `.mts`, `.cts`, `.kts`, `.rake`, `.gemspec`, `.sc`, `.tfvars`, `.cxx`, `.hxx`, and `.hh`.
+
+cymbal also recognizes additional file types for classification and CLI path heuristics, even when they are not parseable/indexable: `Dockerfile`, `Makefile`, `Jenkinsfile`, `CMakeLists.txt`, JSON, TOML, Markdown, SQL, Vue, Svelte, Zig, Erlang, Haskell, OCaml, R, and Perl.
+
+Adding a language requires a tree-sitter grammar and a symbol extraction query.

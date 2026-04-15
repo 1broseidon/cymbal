@@ -1,6 +1,6 @@
 # Library Guide
 
-cymbal exposes four Go packages for embedding code indexing and navigation into your own tools.
+cymbal exposes five Go packages for embedding code indexing and navigation into your own tools.
 
 ## Install
 
@@ -15,11 +15,35 @@ CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go get github.com/1broseidon/cymbal@latest
 | Package | Import | Purpose |
 |---------|--------|---------|
 | `index` | `github.com/1broseidon/cymbal/index` | Indexing engine, SQLite store, and all query APIs |
+| `lang` | `github.com/1broseidon/cymbal/lang` | Unified language registry for names, extensions, special filenames, and parser availability |
 | `parser` | `github.com/1broseidon/cymbal/parser` | Tree-sitter parsing for 22 languages |
 | `symbols` | `github.com/1broseidon/cymbal/symbols` | Core data types: `Symbol`, `Import`, `Ref`, `ParseResult` |
 | `walker` | `github.com/1broseidon/cymbal/walker` | Concurrent file discovery with language detection |
 
 Most consumers only need `index`. The other packages are useful if you want to parse files without indexing, walk directories with custom filters, or work with raw symbol data.
+
+---
+
+## Language registry
+
+The `lang` package is the canonical source of truth for language support in cymbal. It models both:
+
+- **known / recognized languages** — files cymbal can classify by extension or special filename
+- **supported / parseable languages** — files with a tree-sitter grammar that can be parsed and indexed
+
+```go
+import "github.com/1broseidon/cymbal/lang"
+
+fmt.Println(lang.Default.Supported("go"))            // true
+fmt.Println(lang.Default.Known("dockerfile"))       // true
+fmt.Println(lang.Default.LangForFile("Dockerfile")) // "dockerfile"
+
+l := lang.Default.ForFile("notes.toml")
+fmt.Println(l.Name)        // "toml"
+fmt.Println(l.Parseable()) // false
+```
+
+Use `lang.Default.Supported` when you need the parseable subset for indexing or parsing. Use `Known` / `LangForFile` when classification alone is enough.
 
 ---
 
@@ -280,14 +304,46 @@ for _, sym := range result.Symbols {
 Check language support:
 
 ```go
+import "github.com/1broseidon/cymbal/lang"
+
 if parser.SupportedLanguage("go") {
     // ...
 }
+
+if lang.Default.Known("dockerfile") {
+    // recognized for classification, but not parseable/indexable
+}
 ```
+
+`parser.SupportedLanguage` delegates to `lang.Default.Supported`.
 
 ### Supported languages
 
-Go, Python, JavaScript, TypeScript, TSX, Rust, C, C++, C#, Java, Ruby, Swift, Kotlin, Scala, PHP, Lua, Bash, YAML, Elixir, HCL/Terraform, Protobuf, Dart
+Parseable/indexed languages:
+
+- Go
+- Python (`.py`, `.pyw`)
+- JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`)
+- TypeScript (`.ts`, `.tsx`, `.mts`, `.cts`)
+- Rust
+- C / C++
+- C#
+- Java
+- Apex
+- Ruby (`.rb`, `.rake`, `.gemspec`)
+- Swift
+- Kotlin (`.kt`, `.kts`)
+- Scala (`.scala`, `.sc`)
+- PHP
+- Lua
+- Bash / shell
+- YAML
+- Elixir
+- HCL / Terraform (`.tf`, `.hcl`, `.tfvars`)
+- Protobuf
+- Dart
+
+Recognized but not parseable/indexable examples: `Dockerfile`, `Makefile`, `Jenkinsfile`, `CMakeLists.txt`, JSON, TOML, Markdown, SQL, Vue, Svelte, Zig, Erlang, Haskell, OCaml, R, and Perl.
 
 ---
 
@@ -296,23 +352,27 @@ Go, Python, JavaScript, TypeScript, TSX, Rust, C, C++, C#, Java, Ruby, Swift, Ko
 Use the `walker` package to find source files with concurrent directory traversal:
 
 ```go
-import "github.com/1broseidon/cymbal/walker"
+import (
+    "github.com/1broseidon/cymbal/lang"
+    "github.com/1broseidon/cymbal/walker"
+)
 
-// Walk with default language filter
-files, err := walker.Walk("/path/to/repo", 0, parser.SupportedLanguage)
+// Walk only parseable/indexable files
+files, err := walker.Walk("/path/to/repo", 0, lang.Default.Supported)
 
 for _, f := range files {
     fmt.Printf("%s (%s, %d bytes)\n", f.RelPath, f.Language, f.Size)
 }
 ```
 
-`Walk` skips dot-directories, `node_modules`, `vendor`, `__pycache__`, build output, etc. Pass `nil` for the language filter to include all recognized file types.
+`Walk` skips dot-directories, `node_modules`, `vendor`, `__pycache__`, build output, etc. Pass `nil` for the language filter to include all recognized file types, including non-parseable ones such as `Dockerfile` and `Makefile`.
 
 Detect a file's language:
 
 ```go
 lang := walker.LangForFile("handler.go") // "go"
-lang := walker.LangForFile("styles.css") // "" (not a supported language)
+lang := walker.LangForFile("Dockerfile") // "dockerfile"
+lang := walker.LangForFile("styles.css") // "" (unrecognized)
 ```
 
 Build a directory tree (for `cymbal ls`-style output):

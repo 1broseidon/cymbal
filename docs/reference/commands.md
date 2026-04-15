@@ -1,6 +1,8 @@
 # Commands
 
-All commands support `--json` for structured output. Each repo gets its own database at `~/.cymbal/repos/<hash>/index.db`, auto-resolved from your working directory.
+All commands support `--json` for structured output. Each repo gets its own database in the OS cache directory, auto-resolved from your working directory (`~/.cache/cymbal/repos/<hash>/index.db` on Linux, `~/Library/Caches/cymbal/repos/<hash>/index.db` on macOS, `%LOCALAPPDATA%\cymbal\repos\<hash>\index.db` on Windows).
+
+Path/language heuristics recognize some special filenames such as `Dockerfile`, `Makefile`, `Jenkinsfile`, and `CMakeLists.txt` even though they are not parseable/indexable languages.
 
 ## Global Flags
 

@@ -194,11 +194,33 @@ An agent tracing an auth flow typically makes 15-20 sequential tool calls: show 
 
 ## Supported languages
 
-cymbal uses tree-sitter grammars. Currently supported:
+cymbal currently parses and indexes these languages with tree-sitter:
 
-Go, Python, JavaScript, TypeScript, TSX, Rust, C, C++, C#, Java, Ruby, Swift, Kotlin, Scala, PHP, Lua, Bash, YAML, Elixir, HCL/Terraform, Protobuf, Dart
+- Go
+- Python (`.py`, `.pyw`)
+- JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`)
+- TypeScript (`.ts`, `.tsx`, `.mts`, `.cts`)
+- Rust
+- C / C++ (`.c`, `.h`, `.cpp`, `.cc`, `.hpp`, `.cxx`, `.hxx`, `.hh`)
+- C#
+- Java
+- Apex
+- Ruby (`.rb`, `.rake`, `.gemspec`)
+- Swift
+- Kotlin (`.kt`, `.kts`)
+- Scala (`.scala`, `.sc`)
+- PHP
+- Lua
+- Bash / shell
+- YAML
+- Elixir
+- HCL / Terraform (`.tf`, `.hcl`, `.tfvars`)
+- Protobuf
+- Dart
 
-Adding a language requires a tree-sitter grammar and a symbol extraction query — see `internal/parser/` for examples.
+cymbal also recognizes additional file types for classification and CLI path heuristics, even when they are not parseable/indexable: `Dockerfile`, `Makefile`, `Jenkinsfile`, `CMakeLists.txt`, JSON, TOML, Markdown, SQL, Vue, Svelte, Zig, Erlang, Haskell, OCaml, R, and Perl.
+
+Adding a language requires a tree-sitter grammar and a symbol extraction query.
 
 ## How it works
 
@@ -233,11 +255,12 @@ go run ./bench run     # run all benchmarks → bench/RESULTS.md
 CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go get github.com/1broseidon/cymbal@latest
 ```
 
-Four packages are exported:
+Five packages are exported:
 
 | Package | What it does |
 |---------|-------------|
 | `index` | Indexing engine, SQLite store, and all query APIs |
+| `lang` | Unified language registry for names, extensions, special filenames, and parser availability |
 | `parser` | Tree-sitter parsing for 22 languages |
 | `symbols` | Core data types (Symbol, Import, Ref) |
 | `walker` | Concurrent file discovery with language detection |
@@ -260,6 +283,15 @@ inv, _ := index.Investigate(dbPath, "handleAuth")
 trace, _ := index.FindTrace(dbPath, "handleAuth", 3, 50)
 impact, _ := index.FindImpact(dbPath, "handleAuth", 2, 100)
 refs, _ := index.FindReferences(dbPath, "handleAuth", 50)
+```
+
+```go
+import "github.com/1broseidon/cymbal/lang"
+
+fmt.Println(lang.Default.Supported("typescript"))     // true
+fmt.Println(lang.Default.Known("dockerfile"))        // true
+fmt.Println(lang.Default.LangForFile("Dockerfile"))  // "dockerfile"
+fmt.Println(lang.Default.LangForFile("notes.toml"))  // "toml"
 ```
 
 For the full API reference, streaming patterns, and lower-level store access, see the [library guide](./docs/guide/library.md).
