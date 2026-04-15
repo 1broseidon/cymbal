@@ -540,11 +540,10 @@ func TextSearch(dbPath, query, lang string, limit int) ([]TextResult, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	store, err := OpenStore(dbPath)
+	store, err := openCached(dbPath)
 	if err != nil {
 		return nil, err
 	}
-	defer store.Close()
 
 	files, err := store.AllFiles(lang)
 	if err != nil {

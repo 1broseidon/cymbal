@@ -44,7 +44,9 @@ Results are ranked: exact match > prefix > fuzzy.`,
 			return fmt.Errorf("no results found for '%s'", query)
 		}
 
-		index.RankSymbols(results)
+		// Ranking is already applied by the store layer:
+		// exact queries use RankSymbols; FTS queries use rankWithinFTSTiers.
+		// A second flat RankSymbols here would break FTS tier order.
 
 		var content strings.Builder
 		for _, r := range results {

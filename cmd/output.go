@@ -144,6 +144,10 @@ func flexResolve(dbPath, arg string) (*ResolveResult, error) {
 	}
 
 	// Step 5: rank by canonical heuristic (shared with store layer).
+	// flexResolve always calls SearchSymbols with exact=true, so all results
+	// share the same name — flat RankSymbols is safe and idempotent here
+	// (the store already ranked them; this re-rank after parent-hint filtering
+	// ensures the filtered set is also ordered correctly).
 	if len(results) > 1 {
 		index.RankSymbols(results)
 	}
