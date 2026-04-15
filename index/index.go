@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/1broseidon/cymbal/lang"
 	"github.com/1broseidon/cymbal/parser"
 	"github.com/1broseidon/cymbal/symbols"
 	"github.com/1broseidon/cymbal/walker"
@@ -207,7 +208,7 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 		return nil, fmt.Errorf("setting repo metadata: %w", err)
 	}
 
-	files, err := walker.Walk(root, workers, parser.SupportedLanguage)
+	files, err := walker.Walk(root, workers, lang.Default.Supported)
 	if err != nil {
 		return nil, fmt.Errorf("walking directory: %w", err)
 	}
@@ -256,7 +257,7 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 		go func() {
 			defer parseWg.Done()
 			for f := range parseCh {
-				if !parser.SupportedLanguage(f.Language) {
+				if !lang.Default.Supported(f.Language) {
 					unsup.Add(1)
 					continue
 				}

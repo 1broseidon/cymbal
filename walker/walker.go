@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/1broseidon/cymbal/lang"
 )
 
 // FileEntry is a file discovered during walking.
@@ -47,77 +49,10 @@ var skipDirs = map[string]bool{
 	".vscode":      true,
 }
 
-// Language extension mapping.
-var extToLang = map[string]string{
-	".go":      "go",
-	".py":      "python",
-	".js":      "javascript",
-	".jsx":     "javascript",
-	".ts":      "typescript",
-	".tsx":     "typescript",
-	".rs":      "rust",
-	".rb":      "ruby",
-	".java":    "java",
-	".c":       "c",
-	".h":       "c",
-	".cpp":     "cpp",
-	".cc":      "cpp",
-	".hpp":     "cpp",
-	".cls":     "apex",
-	".trigger": "apex",
-	".cs":      "csharp",
-	".swift":   "swift",
-	".kt":      "kotlin",
-	".lua":     "lua",
-	".php":     "php",
-	".sh":      "bash",
-	".bash":    "bash",
-	".zsh":     "bash",
-	".zig":     "zig",
-	".toml":    "toml",
-	".yaml":    "yaml",
-	".yml":     "yaml",
-	".json":    "json",
-	".md":      "markdown",
-	".sql":     "sql",
-	".proto":   "protobuf",
-	".tf":      "hcl",
-	".hcl":     "hcl",
-	".ex":      "elixir",
-	".exs":     "elixir",
-	".erl":     "erlang",
-	".hs":      "haskell",
-	".ml":      "ocaml",
-	".mli":     "ocaml",
-	".scala":   "scala",
-	".r":       "r",
-	".R":       "r",
-	".pl":      "perl",
-	".pm":      "perl",
-	".dart":    "dart",
-	".vue":     "vue",
-	".svelte":  "svelte",
-}
-
 // LangForFile returns the language identifier for a file path.
+// It delegates to the unified language registry in lang.Default.
 func LangForFile(path string) string {
-	ext := filepath.Ext(path)
-	if lang, ok := extToLang[ext]; ok {
-		return lang
-	}
-	// Check special filenames
-	base := filepath.Base(path)
-	switch base {
-	case "Makefile", "makefile", "GNUmakefile":
-		return "make"
-	case "Dockerfile":
-		return "dockerfile"
-	case "Jenkinsfile":
-		return "groovy"
-	case "CMakeLists.txt":
-		return "cmake"
-	}
-	return ""
+	return lang.Default.LangForFile(path)
 }
 
 // Walk concurrently discovers all source files under root.

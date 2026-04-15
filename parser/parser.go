@@ -6,69 +6,23 @@ import (
 	"os"
 	"strings"
 
-	dart "github.com/UserNobody14/tree-sitter-dart/bindings/go"
-	apex "github.com/lynxbat/go-tree-sitter-apex"
 	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/bash"
-	"github.com/smacker/go-tree-sitter/c"
-	"github.com/smacker/go-tree-sitter/cpp"
-	"github.com/smacker/go-tree-sitter/csharp"
-	"github.com/smacker/go-tree-sitter/elixir"
-	"github.com/smacker/go-tree-sitter/golang"
-	"github.com/smacker/go-tree-sitter/hcl"
-	"github.com/smacker/go-tree-sitter/java"
-	"github.com/smacker/go-tree-sitter/javascript"
-	"github.com/smacker/go-tree-sitter/kotlin"
-	"github.com/smacker/go-tree-sitter/lua"
-	"github.com/smacker/go-tree-sitter/php"
-	"github.com/smacker/go-tree-sitter/protobuf"
-	"github.com/smacker/go-tree-sitter/python"
-	"github.com/smacker/go-tree-sitter/ruby"
-	"github.com/smacker/go-tree-sitter/rust"
-	"github.com/smacker/go-tree-sitter/scala"
-	"github.com/smacker/go-tree-sitter/swift"
-	"github.com/smacker/go-tree-sitter/typescript/typescript"
-	"github.com/smacker/go-tree-sitter/yaml"
 
+	"github.com/1broseidon/cymbal/lang"
 	"github.com/1broseidon/cymbal/symbols"
 )
 
-var languages = map[string]*sitter.Language{
-	"apex":       apex.GetLanguage(),
-	"go":         golang.GetLanguage(),
-	"python":     python.GetLanguage(),
-	"javascript": javascript.GetLanguage(),
-	"typescript": typescript.GetLanguage(),
-	"rust":       rust.GetLanguage(),
-	"ruby":       ruby.GetLanguage(),
-	"java":       java.GetLanguage(),
-	"c":          c.GetLanguage(),
-	"cpp":        cpp.GetLanguage(),
-	"csharp":     csharp.GetLanguage(),
-	"dart":       sitter.NewLanguage(dart.Language()),
-	"swift":      swift.GetLanguage(),
-	"kotlin":     kotlin.GetLanguage(),
-	"lua":        lua.GetLanguage(),
-	"php":        php.GetLanguage(),
-	"bash":       bash.GetLanguage(),
-	"scala":      scala.GetLanguage(),
-	"yaml":       yaml.GetLanguage(),
-	"elixir":     elixir.GetLanguage(),
-	"hcl":        hcl.GetLanguage(),
-	"protobuf":   protobuf.GetLanguage(),
-}
-
 // SupportedLanguage returns true if tree-sitter can parse this language.
-func SupportedLanguage(lang string) bool {
-	_, ok := languages[lang]
-	return ok
+// It delegates to the unified language registry.
+func SupportedLanguage(l string) bool {
+	return lang.Default.Supported(l)
 }
 
 // ParseFile parses a source file and extracts symbols, imports, and refs.
-func ParseFile(filePath, lang string) (*symbols.ParseResult, error) {
-	tsLang, ok := languages[lang]
-	if !ok {
-		return nil, fmt.Errorf("unsupported language: %s", lang)
+func ParseFile(filePath, l string) (*symbols.ParseResult, error) {
+	tsLang := lang.Default.TreeSitter(l)
+	if tsLang == nil {
+		return nil, fmt.Errorf("unsupported language: %s", l)
 	}
 
 	src, err := os.ReadFile(filePath)
@@ -76,17 +30,17 @@ func ParseFile(filePath, lang string) (*symbols.ParseResult, error) {
 		return nil, fmt.Errorf("reading file: %w", err)
 	}
 
-	return ParseSource(src, filePath, lang, tsLang)
+	return ParseSource(src, filePath, l, tsLang)
 }
 
 // ParseBytes parses source bytes (already read) and extracts symbols, imports, and refs.
 // Use this when you already have the file contents to avoid a redundant ReadFile.
-func ParseBytes(src []byte, filePath, lang string) (*symbols.ParseResult, error) {
-	tsLang, ok := languages[lang]
-	if !ok {
-		return nil, fmt.Errorf("unsupported language: %s", lang)
+func ParseBytes(src []byte, filePath, l string) (*symbols.ParseResult, error) {
+	tsLang := lang.Default.TreeSitter(l)
+	if tsLang == nil {
+		return nil, fmt.Errorf("unsupported language: %s", l)
 	}
-	return ParseSource(src, filePath, lang, tsLang)
+	return ParseSource(src, filePath, l, tsLang)
 }
 
 // ParseSource parses source bytes and extracts symbols, imports, and refs.

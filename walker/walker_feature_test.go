@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/1broseidon/cymbal/lang"
 )
 
 func createTestTree(t *testing.T) string {
@@ -208,6 +210,91 @@ func TestFeatureWalkerUnknownExtension(t *testing.T) {
 	lang := LangForFile("test.xyz")
 	if lang != "" {
 		t.Errorf("expected empty language for unknown extension, got %q", lang)
+	}
+}
+
+func TestFeatureWalkerRegistryIssue19Extensions(t *testing.T) {
+	tests := []struct {
+		file string
+		lang string
+	}{
+		{"test.cxx", "cpp"},
+		{"test.hxx", "cpp"},
+		{"test.hh", "cpp"},
+		{"test.mjs", "javascript"},
+		{"test.cjs", "javascript"},
+		{"test.mts", "typescript"},
+		{"test.cts", "typescript"},
+		{"test.pyw", "python"},
+		{"test.kts", "kotlin"},
+		{"test.rake", "ruby"},
+		{"test.gemspec", "ruby"},
+		{"test.sc", "scala"},
+		{"test.tfvars", "hcl"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			got := LangForFile(tt.file)
+			if got != tt.lang {
+				t.Errorf("LangForFile(%q) = %q, want %q", tt.file, got, tt.lang)
+			}
+		})
+	}
+}
+
+func TestFeatureWalkerWithSupportedFilterSkipsRecognitionOnly(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"main.go":       "package main",
+		"module.mjs":    "export const x = 1",
+		"vars.tfvars":   "name = \"demo\"",
+		"config.json":   "{}",
+		"README.md":     "# hi",
+		"Dockerfile":    "FROM alpine",
+		"Makefile":      "all:\n\techo hi\n",
+		"settings.toml": "title = \"demo\"",
+	}
+	for rel, content := range files {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	walked, err := Walk(dir, 2, lang.Default.Supported)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := make(map[string]string, len(walked))
+	for _, f := range walked {
+		got[f.RelPath] = f.Language
+		if !lang.Default.Supported(f.Language) {
+			t.Fatalf("Walk returned unsupported language %q for %s", f.Language, f.RelPath)
+		}
+	}
+
+	want := map[string]string{
+		"main.go":     "go",
+		"module.mjs":  "javascript",
+		"vars.tfvars": "hcl",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d parseable files, got %d: %#v", len(want), len(got), got)
+	}
+	for rel, language := range want {
+		if got[rel] != language {
+			t.Errorf("Walk(..., lang.Default.Supported) missing or wrong for %s: got %q want %q", rel, got[rel], language)
+		}
+	}
+	for _, rel := range []string{"config.json", "README.md", "Dockerfile", "Makefile", "settings.toml"} {
+		if _, ok := got[rel]; ok {
+			t.Errorf("Walk(..., lang.Default.Supported) should skip non-parseable file %s", rel)
+		}
 	}
 }
 

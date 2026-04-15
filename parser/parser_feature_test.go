@@ -3,6 +3,7 @@ package parser
 import (
 	"testing"
 
+	"github.com/1broseidon/cymbal/lang"
 	"github.com/1broseidon/cymbal/symbols"
 )
 
@@ -88,7 +89,7 @@ func Add(a, b int) int {
 	return a + b
 }
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func (s *Server) Start() error {
 func (s *Server) Stop() {
 }
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +167,7 @@ type Handler interface {
 
 type Duration int64
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +198,7 @@ const (
 	StatusError = 500
 )
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +232,7 @@ func main() {
 	fmt.Println("hello")
 }
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +265,7 @@ func main() {
 	greet("world")
 }
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +288,7 @@ func Calculate(x int, y int) int {
 	return x + y
 }
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +315,7 @@ func TestFeaturePythonFunctions(t *testing.T) {
 def calculate(a, b):
     return a + b
 `)
-	result, err := ParseSource(src, "test.py", "python", languages["python"])
+	result, err := ParseSource(src, "test.py", "python", lang.Default.TreeSitter("python"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +343,7 @@ class Dog(Animal):
     def speak(self):
         return "Woof!"
 `)
-	result, err := ParseSource(src, "test.py", "python", languages["python"])
+	result, err := ParseSource(src, "test.py", "python", lang.Default.TreeSitter("python"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +375,7 @@ def _private_func():
 def __very_private():
     pass
 `)
-	result, err := ParseSource(src, "test.py", "python", languages["python"])
+	result, err := ParseSource(src, "test.py", "python", lang.Default.TreeSitter("python"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +407,7 @@ def cached_func(x):
 def static_method():
     pass
 `)
-	result, err := ParseSource(src, "test.py", "python", languages["python"])
+	result, err := ParseSource(src, "test.py", "python", lang.Default.TreeSitter("python"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +426,7 @@ func TestFeaturePythonImports(t *testing.T) {
 from pathlib import Path
 from collections import defaultdict
 `)
-	result, err := ParseSource(src, "test.py", "python", languages["python"])
+	result, err := ParseSource(src, "test.py", "python", lang.Default.TreeSitter("python"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +458,7 @@ class UserService {
     }
 }
 `)
-	result, err := ParseSource(src, "test.js", "javascript", languages["javascript"])
+	result, err := ParseSource(src, "test.js", "javascript", lang.Default.TreeSitter("javascript"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +481,7 @@ const multiply = (a, b) => {
     return a * b;
 };
 `)
-	result, err := ParseSource(src, "test.js", "javascript", languages["javascript"])
+	result, err := ParseSource(src, "test.js", "javascript", lang.Default.TreeSitter("javascript"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,7 +509,7 @@ export class ApiClient {
     request(endpoint) {}
 }
 `)
-	result, err := ParseSource(src, "test.js", "javascript", languages["javascript"])
+	result, err := ParseSource(src, "test.js", "javascript", lang.Default.TreeSitter("javascript"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +539,7 @@ interface Repository<T> {
     save(item: T): void;
 }
 `)
-	result, err := ParseSource(src, "test.ts", "typescript", languages["typescript"])
+	result, err := ParseSource(src, "test.ts", "typescript", lang.Default.TreeSitter("typescript"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +563,7 @@ type Result<T> = {
     error: string | null;
 };
 `)
-	result, err := ParseSource(src, "test.ts", "typescript", languages["typescript"])
+	result, err := ParseSource(src, "test.ts", "typescript", lang.Default.TreeSitter("typescript"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -592,7 +593,7 @@ enum Direction {
     Right,
 }
 `)
-	result, err := ParseSource(src, "test.ts", "typescript", languages["typescript"])
+	result, err := ParseSource(src, "test.ts", "typescript", lang.Default.TreeSitter("typescript"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +620,7 @@ pub fn add(a: i32, b: i32) -> i32 {
     a + b
 }
 `)
-	result, err := ParseSource(src, "test.rs", "rust", languages["rust"])
+	result, err := ParseSource(src, "test.rs", "rust", lang.Default.TreeSitter("rust"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -647,7 +648,7 @@ enum Shape {
     Triangle(f64, f64, f64),
 }
 `)
-	result, err := ParseSource(src, "test.rs", "rust", languages["rust"])
+	result, err := ParseSource(src, "test.rs", "rust", lang.Default.TreeSitter("rust"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -669,7 +670,7 @@ func TestFeatureRustTraits(t *testing.T) {
     fn area(&self) -> f64;
 }
 `)
-	result, err := ParseSource(src, "test.rs", "rust", languages["rust"])
+	result, err := ParseSource(src, "test.rs", "rust", lang.Default.TreeSitter("rust"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -695,7 +696,7 @@ impl Circle {
     }
 }
 `)
-	result, err := ParseSource(src, "test.rs", "rust", languages["rust"])
+	result, err := ParseSource(src, "test.rs", "rust", lang.Default.TreeSitter("rust"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -729,7 +730,7 @@ fn main() {
     helper();
 }
 `)
-	result, err := ParseSource(src, "test.rs", "rust", languages["rust"])
+	result, err := ParseSource(src, "test.rs", "rust", lang.Default.TreeSitter("rust"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -788,7 +789,7 @@ fun topLevel(a: Int): Int = a + 1
 
 val GLOBAL = 42
 `)
-	result, err := ParseSource(src, "test.kt", "kotlin", languages["kotlin"])
+	result, err := ParseSource(src, "test.kt", "kotlin", lang.Default.TreeSitter("kotlin"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -939,7 +940,7 @@ void main() {
 
 void doSomething() {}
 `)
-	result, err := ParseSource(src, "test.dart", "dart", languages["dart"])
+	result, err := ParseSource(src, "test.dart", "dart", lang.Default.TreeSitter("dart"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1144,7 +1145,7 @@ int main() {
     return 0;
 }
 `)
-	result, err := ParseSource(src, "test.c", "c", languages["c"])
+	result, err := ParseSource(src, "test.c", "c", lang.Default.TreeSitter("c"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1264,7 +1265,7 @@ int main() {
     return 0;
 }
 `)
-	result, err := ParseSource(src, "test.cpp", "cpp", languages["cpp"])
+	result, err := ParseSource(src, "test.cpp", "cpp", lang.Default.TreeSitter("cpp"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1441,7 +1442,7 @@ fn main() {}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ParseSource([]byte(tt.src), tt.file, tt.lang, languages[tt.lang])
+			result, err := ParseSource([]byte(tt.src), tt.file, tt.lang, lang.Default.TreeSitter(tt.lang))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1475,7 +1476,7 @@ func Second() {}
 
 func Third() {}
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1510,7 +1511,7 @@ func main() {
 	_ = s
 }
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1536,7 +1537,7 @@ func main() {
 	_ = m
 }
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1564,7 +1565,7 @@ func main() {
 	_ = items
 }
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1585,7 +1586,7 @@ func main() {
 	_ = http.Client{Timeout: 30}
 }
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1607,7 +1608,7 @@ func main() {
 	_ = m
 }
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1635,7 +1636,7 @@ func main() {
 	_ = items
 }
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1657,7 +1658,7 @@ func main() {
 	_ = items
 }
 `)
-	result, err := ParseSource(src, "test.go", "go", languages["go"])
+	result, err := ParseSource(src, "test.go", "go", lang.Default.TreeSitter("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1680,7 +1681,7 @@ func TestFeatureJSNewExpressionRef(t *testing.T) {
 
 const obj = new UsedClass("test");
 `)
-	result, err := ParseSource(src, "test.js", "javascript", languages["javascript"])
+	result, err := ParseSource(src, "test.js", "javascript", lang.Default.TreeSitter("javascript"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1705,7 +1706,7 @@ func TestFeatureTSNewExpressionRef(t *testing.T) {
 
 const svc = new Service("api");
 `)
-	result, err := ParseSource(src, "test.ts", "typescript", languages["typescript"])
+	result, err := ParseSource(src, "test.ts", "typescript", lang.Default.TreeSitter("typescript"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1723,7 +1724,7 @@ const svc = new Service("api");
 func TestFeatureJSNewExpressionMemberRef(t *testing.T) {
 	src := []byte(`const ws = new WebSocket.Server({ port: 8080 });
 `)
-	result, err := ParseSource(src, "test.js", "javascript", languages["javascript"])
+	result, err := ParseSource(src, "test.js", "javascript", lang.Default.TreeSitter("javascript"))
 	if err != nil {
 		t.Fatal(err)
 	}
