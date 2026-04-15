@@ -162,6 +162,7 @@ type BenchReport struct {
 	Entries     map[string]OpTiming `json:"entries"`
 	Accuracy    AccuracySummary     `json:"accuracy"`
 	GroundTruth GroundTruthSummary  `json:"ground_truth"`
+	Canonical   CanonicalSummary    `json:"canonical"`
 	Footguns    AccuracySummary     `json:"footguns"`
 }
 
@@ -189,7 +190,7 @@ func entryKey(repo, tool string, op Op, symbol string) string {
 	return fmt.Sprintf("%s/%s/%s/%s", repo, tool, op, symbol)
 }
 
-func buildReport(results []Result, accuracy []AccuracyCheck, groundTruth GroundTruthSummary, footguns []FootgunResult) *BenchReport {
+func buildReport(results []Result, accuracy []AccuracyCheck, groundTruth GroundTruthSummary, canonical CanonicalSummary, footguns []FootgunResult) *BenchReport {
 	report := &BenchReport{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Platform:  fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
@@ -211,6 +212,7 @@ func buildReport(results []Result, accuracy []AccuracyCheck, groundTruth GroundT
 	}
 	report.Accuracy = AccuracySummary{Passed: passed, Total: len(accuracy)}
 	report.GroundTruth = groundTruth
+	report.Canonical = canonical
 
 	footgunPassed := 0
 	for _, f := range footguns {
@@ -316,6 +318,29 @@ func compareResults(current, baseline *BenchReport) (bool, string) {
 		if current.GroundTruth.ShowExactRate+0.001 < baseline.GroundTruth.ShowExactRate {
 			fmt.Fprintf(&b, "  FAIL   | show exactness regression: %.1f%% -> %.1f%%\n",
 				baseline.GroundTruth.ShowExactRate, current.GroundTruth.ShowExactRate)
+			allPassed = false
+		}
+	}
+	if baseline.Canonical.Total > 0 {
+		if current.Canonical.Passed < baseline.Canonical.Passed {
+			fmt.Fprintf(&b, "  FAIL   | canonical regression: %d/%d -> %d/%d\n",
+				baseline.Canonical.Passed, baseline.Canonical.Total,
+				current.Canonical.Passed, current.Canonical.Total)
+			allPassed = false
+		}
+		if current.Canonical.SearchTop1Rate+0.001 < baseline.Canonical.SearchTop1Rate {
+			fmt.Fprintf(&b, "  FAIL   | canonical search@1 regression: %.1f%% -> %.1f%%\n",
+				baseline.Canonical.SearchTop1Rate, current.Canonical.SearchTop1Rate)
+			allPassed = false
+		}
+		if current.Canonical.SearchMRR+0.001 < baseline.Canonical.SearchMRR {
+			fmt.Fprintf(&b, "  FAIL   | canonical search MRR regression: %.2f -> %.2f\n",
+				baseline.Canonical.SearchMRR, current.Canonical.SearchMRR)
+			allPassed = false
+		}
+		if current.Canonical.ShowExactRate+0.001 < baseline.Canonical.ShowExactRate {
+			fmt.Fprintf(&b, "  FAIL   | canonical show exact regression: %.1f%% -> %.1f%%\n",
+				baseline.Canonical.ShowExactRate, current.Canonical.ShowExactRate)
 			allPassed = false
 		}
 	}
@@ -893,6 +918,8 @@ type benchOutput struct {
 	accuracy           []AccuracyCheck
 	groundTruth        []GroundTruthCheck
 	groundTruthSummary GroundTruthSummary
+	canonical          []CanonicalCaseResult
+	canonicalSummary   CanonicalSummary
 	footguns           []FootgunResult
 	freshness          []FreshnessResult
 	workflows          []WorkflowResult
@@ -1012,8 +1039,36 @@ func executeBench(corpus Corpus, corpusDir, cymbalBin string) (*benchOutput, err
 		)
 	}
 
-	// Phase 4: Grep Footguns
-	fmt.Println("\n=== Phase 4: Grep Footguns ===")
+	// Phase 4: Canonical Ranking Hard Mode
+	fmt.Println("\n=== Phase 4: Canonical Ranking Hard Mode ===")
+	canonical := benchCanonicalCases(cymbalBin, corpus.Repos, corpusDir)
+	canonicalSummary := summarizeCanonicalCases(canonical)
+	for _, c := range canonical {
+		status := "✓"
+		if !c.Passed {
+			status = "✗"
+		}
+		fmt.Printf("  %s %s/%s | cymbal rank=%d show=%v | grep rank=%d\n",
+			status, c.Repo, c.Symbol, c.SearchRank, c.ShowExact, c.GrepRank)
+		if !c.Passed && c.Details != "" {
+			fmt.Printf("    %s\n", c.Details)
+		}
+	}
+	if len(canonical) > 0 {
+		fmt.Printf("\n  Canonical: %d/%d (%.0f%%) | cymbal @1 %.0f%% | cymbal MRR %.2f | show exact %.0f%% | tuned grep @1 %.0f%% | tuned grep MRR %.2f\n",
+			canonicalSummary.Passed,
+			canonicalSummary.Total,
+			pct(canonicalSummary.Passed, canonicalSummary.Total),
+			canonicalSummary.SearchTop1Rate,
+			canonicalSummary.SearchMRR,
+			canonicalSummary.ShowExactRate,
+			canonicalSummary.GrepTop1Rate,
+			canonicalSummary.GrepMRR,
+		)
+	}
+
+	// Phase 5: Grep Footguns
+	fmt.Println("\n=== Phase 5: Grep Footguns ===")
 	footguns := benchFootguns(cymbalBin, corpus.Repos, corpusDir)
 	footgunPassed := 0
 	for _, f := range footguns {
@@ -1028,15 +1083,15 @@ func executeBench(corpus Corpus, corpusDir, cymbalBin string) (*benchOutput, err
 		fmt.Printf("\n  Footgun avoidance: %d/%d (%.0f%%)\n", footgunPassed, len(footguns), pct(footgunPassed, len(footguns)))
 	}
 
-	// Phase 5: JIT Freshness
-	fmt.Println("\n=== Phase 5: JIT Freshness ===")
+	// Phase 6: JIT Freshness
+	fmt.Println("\n=== Phase 6: JIT Freshness ===")
 	freshness := benchFreshness(cymbalBin, corpus.Repos, corpusDir)
 	for _, f := range freshness {
 		fmt.Printf("  %s | %-25s | %v\n", f.Repo, f.Scenario, f.Latency.Round(time.Millisecond))
 	}
 
-	// Phase 6: Agent Workflow
-	fmt.Println("\n=== Phase 6: Agent Workflow ===")
+	// Phase 7: Agent Workflow
+	fmt.Println("\n=== Phase 7: Agent Workflow ===")
 	workflows := benchWorkflow(cymbalBin, corpus.Repos, corpusDir)
 	for _, w := range workflows {
 		savings := 0
@@ -1053,10 +1108,12 @@ func executeBench(corpus Corpus, corpusDir, cymbalBin string) (*benchOutput, err
 		accuracy:           accuracy,
 		groundTruth:        groundTruth,
 		groundTruthSummary: groundTruthSummary,
+		canonical:          canonical,
+		canonicalSummary:   canonicalSummary,
 		footguns:           footguns,
 		freshness:          freshness,
 		workflows:          workflows,
-		report:             buildReport(results, accuracy, groundTruthSummary, footguns),
+		report:             buildReport(results, accuracy, groundTruthSummary, canonicalSummary, footguns),
 	}, nil
 }
 
@@ -1067,7 +1124,7 @@ func cmdRun(corpus Corpus, corpusDir, cymbalBin string) error {
 	}
 
 	// Write markdown report
-	md := generateReport(out.results, out.available, out.accuracy, out.groundTruth, out.groundTruthSummary, out.footguns, out.freshness, out.workflows)
+	md := generateReport(out.results, out.available, out.accuracy, out.groundTruth, out.groundTruthSummary, out.canonical, out.canonicalSummary, out.footguns, out.freshness, out.workflows)
 	mdPath := filepath.Join("bench", "RESULTS.md")
 	if err := os.WriteFile(mdPath, []byte(md), 0o644); err != nil {
 		return err
@@ -1086,7 +1143,7 @@ func cmdRun(corpus Corpus, corpusDir, cymbalBin string) error {
 
 // ── Report generation ──────────────────────────────────────────────
 
-func generateReport(results []Result, tools []Tool, accuracy []AccuracyCheck, groundTruth []GroundTruthCheck, groundTruthSummary GroundTruthSummary, footguns []FootgunResult, freshness []FreshnessResult, workflows []WorkflowResult) string {
+func generateReport(results []Result, tools []Tool, accuracy []AccuracyCheck, groundTruth []GroundTruthCheck, groundTruthSummary GroundTruthSummary, canonical []CanonicalCaseResult, canonicalSummary CanonicalSummary, footguns []FootgunResult, freshness []FreshnessResult, workflows []WorkflowResult) string {
 	var b strings.Builder
 
 	b.WriteString("# Cymbal Benchmark Results\n\n")
@@ -1234,6 +1291,31 @@ func generateReport(results []Result, tools []Tool, accuracy []AccuracyCheck, gr
 		b.WriteString(fmt.Sprintf("**Search precision / recall:** %.0f%% / %.0f%%  \n", groundTruthSummary.SearchPrecision, groundTruthSummary.SearchRecall))
 		b.WriteString(fmt.Sprintf("**Refs precision / recall:** %.0f%% / %.0f%%  \n", groundTruthSummary.RefsPrecision, groundTruthSummary.RefsRecall))
 		b.WriteString(fmt.Sprintf("**Show exactness:** %.0f%%\n\n", groundTruthSummary.ShowExactRate))
+	}
+
+	// ── Canonical ranking ──
+	b.WriteString("## Canonical Ranking Hard Mode\n\n")
+	b.WriteString("| Repo | Symbol | Expected | cymbal rank | show exact | tuned grep rank | Result |\n")
+	b.WriteString("|---|---|---|---|---|---|---|\n")
+	if len(canonical) == 0 {
+		b.WriteString("| — | — | — | — | — | — | No canonical cases configured |\n")
+	} else {
+		for _, c := range canonical {
+			mark := "✓"
+			if !c.Passed {
+				mark = "✗ " + c.Details
+			}
+			show := "no"
+			if c.ShowExact {
+				show = "yes"
+			}
+			b.WriteString(fmt.Sprintf("| %s | `%s` | `%s` | %d | %s | %d | %s |\n", c.Repo, c.Symbol, c.Expected, c.SearchRank, show, c.GrepRank, mark))
+		}
+		b.WriteString(fmt.Sprintf("\n**Overall: %d/%d (%.0f%%)**  \n", canonicalSummary.Passed, canonicalSummary.Total, pct(canonicalSummary.Passed, canonicalSummary.Total)))
+		b.WriteString(fmt.Sprintf("**cymbal search@1:** %.0f%%  \n", canonicalSummary.SearchTop1Rate))
+		b.WriteString(fmt.Sprintf("**cymbal search MRR:** %.2f  \n", canonicalSummary.SearchMRR))
+		b.WriteString(fmt.Sprintf("**cymbal show exactness:** %.0f%%  \n", canonicalSummary.ShowExactRate))
+		b.WriteString(fmt.Sprintf("**tuned grep @1 / MRR:** %.0f%% / %.2f\n\n", canonicalSummary.GrepTop1Rate, canonicalSummary.GrepMRR))
 	}
 
 	// ── Grep Footguns ──

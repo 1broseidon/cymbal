@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -19,9 +21,12 @@ type GroundTruthSpec struct {
 }
 
 type GroundTruthSearchSpec struct {
-	Exact    bool                `yaml:"exact"`
-	Limit    int                 `yaml:"limit"`
-	Expected []GroundTruthSymbol `yaml:"expected"`
+	Exact       bool                `yaml:"exact"`
+	Limit       int                 `yaml:"limit"`
+	Expected    []GroundTruthSymbol `yaml:"expected"`
+	Canonical   *GroundTruthSymbol  `yaml:"canonical"`
+	PreferPaths []string            `yaml:"prefer_paths"`
+	AvoidPaths  []string            `yaml:"avoid_paths"`
 }
 
 type GroundTruthRefsSpec struct {
@@ -72,6 +77,33 @@ type GroundTruthSummary struct {
 	ShowExactRate   float64 `json:"show_exact_rate"`
 }
 
+type CanonicalCaseResult struct {
+	Repo       string  `json:"repo"`
+	Symbol     string  `json:"symbol"`
+	Expected   string  `json:"expected"`
+	SearchRank int     `json:"search_rank"`
+	SearchTop1 bool    `json:"search_top_1"`
+	SearchMRR  float64 `json:"search_mrr"`
+	ShowExact  bool    `json:"show_exact"`
+	ShowActual string  `json:"show_actual,omitempty"`
+	GrepRank   int     `json:"grep_rank"`
+	GrepTop1   bool    `json:"grep_top_1"`
+	GrepMRR    float64 `json:"grep_mrr"`
+	GrepActual string  `json:"grep_actual,omitempty"`
+	Passed     bool    `json:"passed"`
+	Details    string  `json:"details,omitempty"`
+}
+
+type CanonicalSummary struct {
+	Passed         int     `json:"passed"`
+	Total          int     `json:"total"`
+	SearchTop1Rate float64 `json:"search_top_1_rate"`
+	SearchMRR      float64 `json:"search_mrr"`
+	ShowExactRate  float64 `json:"show_exact_rate"`
+	GrepTop1Rate   float64 `json:"grep_top_1_rate"`
+	GrepMRR        float64 `json:"grep_mrr"`
+}
+
 type groundTruthSearchResponse struct {
 	Results []struct {
 		Name      string `json:"name"`
@@ -101,6 +133,12 @@ type gtLoc struct {
 	File string
 	Line int
 	Kind string
+}
+
+type grepCandidate struct {
+	Loc   gtLoc
+	Score int
+	Line  string
 }
 
 func benchGroundTruth(cymbalBin string, repos []Repo, corpusDir string) []GroundTruthCheck {
@@ -159,6 +197,236 @@ func summarizeGroundTruth(checks []GroundTruthCheck) GroundTruthSummary {
 	summary.RefsRecall = ratioPct(refsTP, refsTP+refsFN)
 	summary.ShowExactRate = ratioPct(showPassed, showTotal)
 	return summary
+}
+
+func benchCanonicalCases(cymbalBin string, repos []Repo, corpusDir string) []CanonicalCaseResult {
+	var cases []CanonicalCaseResult
+	for _, repo := range repos {
+		repoDir := filepath.Join(corpusDir, repo.Name)
+		for _, sym := range repo.Symbols {
+			if sym.GroundTruth == nil || sym.GroundTruth.Search == nil || sym.GroundTruth.Search.Canonical == nil {
+				continue
+			}
+			cases = append(cases, runCanonicalCase(cymbalBin, repo.Name, repoDir, sym))
+		}
+	}
+	return cases
+}
+
+func summarizeCanonicalCases(cases []CanonicalCaseResult) CanonicalSummary {
+	var summary CanonicalSummary
+	var searchMRR, grepMRR float64
+	var searchTop1, showExact, grepTop1 int
+
+	summary.Total = len(cases)
+	for _, c := range cases {
+		if c.Passed {
+			summary.Passed++
+		}
+		searchMRR += c.SearchMRR
+		grepMRR += c.GrepMRR
+		if c.SearchTop1 {
+			searchTop1++
+		}
+		if c.ShowExact {
+			showExact++
+		}
+		if c.GrepTop1 {
+			grepTop1++
+		}
+	}
+	summary.SearchTop1Rate = ratioPct(searchTop1, summary.Total)
+	summary.ShowExactRate = ratioPct(showExact, summary.Total)
+	summary.GrepTop1Rate = ratioPct(grepTop1, summary.Total)
+	if summary.Total > 0 {
+		summary.SearchMRR = searchMRR / float64(summary.Total)
+		summary.GrepMRR = grepMRR / float64(summary.Total)
+	}
+	return summary
+}
+
+func runCanonicalCase(cymbalBin, repoName, repoDir string, sym Symbol) CanonicalCaseResult {
+	spec := sym.GroundTruth.Search
+	canonical := gtLoc{
+		File: normalizeGTPath(spec.Canonical.File),
+		Line: spec.Canonical.Line,
+		Kind: spec.Canonical.Kind,
+	}
+	result := CanonicalCaseResult{
+		Repo:     repoName,
+		Symbol:   sym.Name,
+		Expected: formatGTLoc(canonical),
+	}
+
+	searchArgs := []string{"--json", "search"}
+	if spec.Exact {
+		searchArgs = append(searchArgs, "--exact")
+	}
+	limit := spec.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	searchArgs = append(searchArgs, "--limit", fmt.Sprintf("%d", limit), sym.Name)
+	searchOut, err := runGroundTruthCmd(repoDir, cymbalBin, searchArgs...)
+	if err != nil {
+		result.Details = err.Error()
+		return result
+	}
+	var searchPayload groundTruthSearchResponse
+	if err := json.Unmarshal(searchOut, &searchPayload); err != nil {
+		result.Details = fmt.Sprintf("parse search json: %v", err)
+		return result
+	}
+	var searchActual []gtLoc
+	for _, item := range searchPayload.Results {
+		searchActual = append(searchActual, gtLoc{File: normalizeGTPath(item.RelPath), Line: item.StartLine, Kind: item.Kind})
+	}
+	result.SearchRank = gtRank(searchActual, canonical, true)
+	result.SearchTop1 = result.SearchRank == 1
+	result.SearchMRR = reciprocalRank(result.SearchRank)
+
+	showOut, err := runGroundTruthCmd(repoDir, cymbalBin, "--json", "show", sym.Name)
+	if err == nil {
+		var showPayload groundTruthShowResponse
+		if err := json.Unmarshal(showOut, &showPayload); err == nil {
+			showLoc := gtLoc{File: normalizeGTPath(relToRepo(repoDir, showPayload.Results.File))}
+			if len(showPayload.Results.Lines) > 0 {
+				showLoc.Line = showPayload.Results.Lines[0].Line
+			}
+			result.ShowActual = formatGTLoc(showLoc)
+			result.ShowExact = sameGTLoc(showLoc, canonical, false)
+		} else {
+			result.Details = appendDetail(result.Details, fmt.Sprintf("parse show json: %v", err))
+		}
+	} else {
+		result.Details = appendDetail(result.Details, err.Error())
+	}
+
+	grepCandidates := tunedGrepCandidates(repoDir, sym, spec)
+	result.GrepRank = grepRank(grepCandidates, canonical)
+	result.GrepTop1 = result.GrepRank == 1
+	result.GrepMRR = reciprocalRank(result.GrepRank)
+	if len(grepCandidates) > 0 {
+		result.GrepActual = formatGTLoc(grepCandidates[0].Loc)
+	}
+
+	if result.SearchRank == 0 {
+		result.Details = appendDetail(result.Details, "canonical result missing from cymbal search")
+	} else if !result.SearchTop1 {
+		result.Details = appendDetail(result.Details, fmt.Sprintf("canonical ranked #%d in cymbal search", result.SearchRank))
+	}
+	if !result.ShowExact {
+		result.Details = appendDetail(result.Details, fmt.Sprintf("show resolved to %s", result.ShowActual))
+	}
+	if result.GrepRank == 0 {
+		result.Details = appendDetail(result.Details, "tuned grep missed canonical definition")
+	}
+	result.Passed = result.SearchTop1 && result.ShowExact
+	return result
+}
+
+func tunedGrepCandidates(repoDir string, sym Symbol, spec *GroundTruthSearchSpec) []grepCandidate {
+	pattern := `\b` + regexp.QuoteMeta(sym.Name) + `\b`
+	cmd := exec.Command("rg", "--no-heading", "-n", "-P", pattern)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil && len(out) == 0 {
+		return nil
+	}
+
+	seen := map[string]bool{}
+	var candidates []grepCandidate
+	for _, raw := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if raw == "" {
+			continue
+		}
+		parts := strings.SplitN(raw, ":", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		line, err := strconv.Atoi(parts[1])
+		if err != nil {
+			continue
+		}
+		candidate := grepCandidate{
+			Loc:  gtLoc{File: normalizeGTPath(parts[0]), Line: line},
+			Line: parts[2],
+		}
+		candidate.Score = tunedGrepScore(candidate, sym, spec)
+		key := fmt.Sprintf("%s:%d", candidate.Loc.File, candidate.Loc.Line)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		candidates = append(candidates, candidate)
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Score != candidates[j].Score {
+			return candidates[i].Score > candidates[j].Score
+		}
+		if candidates[i].Loc.File != candidates[j].Loc.File {
+			return candidates[i].Loc.File < candidates[j].Loc.File
+		}
+		return candidates[i].Loc.Line < candidates[j].Loc.Line
+	})
+	return candidates
+}
+
+func tunedGrepScore(candidate grepCandidate, sym Symbol, spec *GroundTruthSearchSpec) int {
+	score := 0
+	path := strings.ToLower(candidate.Loc.File)
+	line := strings.ToLower(strings.TrimSpace(candidate.Line))
+	name := strings.ToLower(sym.Name)
+	kind := strings.ToLower(sym.Kind)
+	if spec.Canonical != nil && spec.Canonical.Kind != "" {
+		kind = strings.ToLower(spec.Canonical.Kind)
+	}
+
+	if strings.Contains(line, name) {
+		score += 8
+	}
+	if strings.Contains(line, "func ") || strings.Contains(line, "def ") || strings.Contains(line, "class ") || strings.Contains(line, "type ") || strings.Contains(line, "interface ") || strings.Contains(line, "struct ") || strings.Contains(line, "impl ") {
+		score += 40
+	}
+	if strings.Contains(line, "func "+name) || strings.Contains(line, "class "+name) || strings.Contains(line, "type "+name) || strings.Contains(line, "interface "+name) || strings.Contains(line, "struct "+name) || strings.Contains(line, "def "+name) || strings.Contains(line, "async def "+name) {
+		score += 60
+	}
+	if kind != "" && strings.Contains(line, kind) {
+		score += 20
+	}
+	if kind == "constructor" && strings.Contains(line, name+"(") {
+		score += 30
+	}
+
+	for _, prefer := range spec.PreferPaths {
+		if strings.Contains(candidate.Loc.File, prefer) {
+			score += 90
+		}
+	}
+	for _, avoid := range spec.AvoidPaths {
+		if strings.Contains(candidate.Loc.File, avoid) {
+			score -= 90
+		}
+	}
+
+	for _, noisy := range []string{"/playground/", "/example/", "/examples/", "/demo/", "/demos/", "/docs/", "/docs_src/", "/vendor/", "/node_modules/"} {
+		if strings.Contains(path, noisy) {
+			score -= 35
+		}
+	}
+	for _, testLike := range []string{"_test.go", "/test/", "/tests/", "test_", "_spec."} {
+		if strings.Contains(path, testLike) {
+			score -= 45
+		}
+	}
+	for _, sourceLike := range []string{"/src/", "/pkg/", "/crates/", "/fastapi/", "/packages/"} {
+		if strings.Contains(path, sourceLike) {
+			score += 10
+		}
+	}
+
+	return score
 }
 
 func runGroundTruthSearch(cymbalBin, repoName, repoDir string, sym Symbol) GroundTruthCheck {
@@ -311,6 +579,51 @@ func compareGroundTruth(repoName, symbol string, op Op, actual, expected []gtLoc
 		Actual:         len(actualSet),
 		Details:        detail,
 	}
+}
+
+func sameGTLoc(a, b gtLoc, matchKind bool) bool {
+	if normalizeGTPath(a.File) != normalizeGTPath(b.File) || a.Line != b.Line {
+		return false
+	}
+	if !matchKind || a.Kind == "" || b.Kind == "" {
+		return true
+	}
+	return a.Kind == b.Kind
+}
+
+func gtRank(actual []gtLoc, target gtLoc, matchKind bool) int {
+	for i, loc := range actual {
+		if sameGTLoc(loc, target, matchKind) {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func grepRank(candidates []grepCandidate, target gtLoc) int {
+	for i, candidate := range candidates {
+		if sameGTLoc(candidate.Loc, target, false) {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func reciprocalRank(rank int) float64 {
+	if rank <= 0 {
+		return 0
+	}
+	return 1.0 / float64(rank)
+}
+
+func appendDetail(existing, detail string) string {
+	if detail == "" {
+		return existing
+	}
+	if existing == "" {
+		return detail
+	}
+	return existing + "; " + detail
 }
 
 func runGroundTruthCmd(repoDir, cymbalBin string, args ...string) ([]byte, error) {
