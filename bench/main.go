@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,19 +34,45 @@ type Corpus struct {
 }
 
 type Repo struct {
-	Name     string   `yaml:"name"`
-	URL      string   `yaml:"url"`
-	Ref      string   `yaml:"ref"`
-	Language string   `yaml:"language"`
-	Symbols  []Symbol `yaml:"symbols"`
+	Name       string        `yaml:"name"`
+	URL        string        `yaml:"url"`
+	Ref        string        `yaml:"ref"`
+	Language   string        `yaml:"language"`
+	Tier       string        `yaml:"tier"`
+	Complexity string        `yaml:"complexity"`
+	Subset     string        `yaml:"subset"`
+	Tags       []string      `yaml:"tags"`
+	Symbols    []Symbol      `yaml:"symbols"`
+	Footguns   []FootgunCase `yaml:"footguns"`
 }
 
 type Symbol struct {
-	Name         string `yaml:"name"`
-	FileContains string `yaml:"file_contains"`
-	Kind         string `yaml:"kind"`
-	ShowContains string `yaml:"show_contains"`
-	RefsMin      int    `yaml:"refs_min"`
+	Name                string           `yaml:"name"`
+	FileContains        string           `yaml:"file_contains"`
+	Kind                string           `yaml:"kind"`
+	ShowContains        string           `yaml:"show_contains"`
+	RefsMin             int              `yaml:"refs_min"`
+	GroundTruth         *GroundTruthSpec `yaml:"ground_truth"`
+	SearchContains      []string         `yaml:"search_contains"`
+	SearchExcludes      []string         `yaml:"search_excludes"`
+	ShowContainsAll     []string         `yaml:"show_contains_all"`
+	ShowExcludes        []string         `yaml:"show_excludes"`
+	InvestigateContains []string         `yaml:"investigate_contains"`
+	InvestigateExcludes []string         `yaml:"investigate_excludes"`
+	RefsContains        []string         `yaml:"refs_contains"`
+	RefsExcludes        []string         `yaml:"refs_excludes"`
+}
+
+type FootgunCase struct {
+	Name                string   `yaml:"name"`
+	Symbol              string   `yaml:"symbol"`
+	Op                  Op       `yaml:"op"`
+	Why                 string   `yaml:"why"`
+	GrepNoiseMin        int      `yaml:"grep_noise_min"`
+	CymbalContains      []string `yaml:"cymbal_contains"`
+	CymbalExcludes      []string `yaml:"cymbal_excludes"`
+	CymbalMaxMatches    int      `yaml:"cymbal_max_matches"`
+	ExpectSmallerOutput bool     `yaml:"expect_smaller_output"`
 }
 
 // ── Tool abstraction ───────────────────────────────────────────────
@@ -104,6 +131,19 @@ type FreshnessResult struct {
 	FilesHit int
 }
 
+type FootgunResult struct {
+	Repo        string
+	Name        string
+	Symbol      string
+	Op          Op
+	Passed      bool
+	GrepHits    int
+	GrepBytes   int
+	CymbalHits  int
+	CymbalBytes int
+	Details     string
+}
+
 type WorkflowResult struct {
 	Repo          string
 	Symbol        string
@@ -116,11 +156,13 @@ type WorkflowResult struct {
 // ── JSON output / baseline ────────────────────────────────────────
 
 type BenchReport struct {
-	Timestamp string              `json:"timestamp"`
-	Platform  string              `json:"platform"`
-	CPUs      int                 `json:"cpus"`
-	Entries   map[string]OpTiming `json:"entries"`
-	Accuracy  AccuracySummary     `json:"accuracy"`
+	Timestamp   string              `json:"timestamp"`
+	Platform    string              `json:"platform"`
+	CPUs        int                 `json:"cpus"`
+	Entries     map[string]OpTiming `json:"entries"`
+	Accuracy    AccuracySummary     `json:"accuracy"`
+	GroundTruth GroundTruthSummary  `json:"ground_truth"`
+	Footguns    AccuracySummary     `json:"footguns"`
 }
 
 type OpTiming struct {
@@ -147,7 +189,7 @@ func entryKey(repo, tool string, op Op, symbol string) string {
 	return fmt.Sprintf("%s/%s/%s/%s", repo, tool, op, symbol)
 }
 
-func buildReport(results []Result, accuracy []AccuracyCheck) *BenchReport {
+func buildReport(results []Result, accuracy []AccuracyCheck, groundTruth GroundTruthSummary, footguns []FootgunResult) *BenchReport {
 	report := &BenchReport{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Platform:  fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
@@ -168,6 +210,15 @@ func buildReport(results []Result, accuracy []AccuracyCheck) *BenchReport {
 		}
 	}
 	report.Accuracy = AccuracySummary{Passed: passed, Total: len(accuracy)}
+	report.GroundTruth = groundTruth
+
+	footgunPassed := 0
+	for _, f := range footguns {
+		if f.Passed {
+			footgunPassed++
+		}
+	}
+	report.Footguns = AccuracySummary{Passed: footgunPassed, Total: len(footguns)}
 	return report
 }
 
@@ -233,6 +284,45 @@ func compareResults(current, baseline *BenchReport) (bool, string) {
 		fmt.Fprintf(&b, "  FAIL   | accuracy regression: %d/%d -> %d/%d\n",
 			baseline.Accuracy.Passed, baseline.Accuracy.Total,
 			current.Accuracy.Passed, current.Accuracy.Total)
+		allPassed = false
+	}
+	if baseline.GroundTruth.Total > 0 {
+		if current.GroundTruth.Passed < baseline.GroundTruth.Passed {
+			fmt.Fprintf(&b, "  FAIL   | ground-truth regression: %d/%d -> %d/%d\n",
+				baseline.GroundTruth.Passed, baseline.GroundTruth.Total,
+				current.GroundTruth.Passed, current.GroundTruth.Total)
+			allPassed = false
+		}
+		if current.GroundTruth.SearchPrecision+0.001 < baseline.GroundTruth.SearchPrecision {
+			fmt.Fprintf(&b, "  FAIL   | search precision regression: %.1f%% -> %.1f%%\n",
+				baseline.GroundTruth.SearchPrecision, current.GroundTruth.SearchPrecision)
+			allPassed = false
+		}
+		if current.GroundTruth.SearchRecall+0.001 < baseline.GroundTruth.SearchRecall {
+			fmt.Fprintf(&b, "  FAIL   | search recall regression: %.1f%% -> %.1f%%\n",
+				baseline.GroundTruth.SearchRecall, current.GroundTruth.SearchRecall)
+			allPassed = false
+		}
+		if current.GroundTruth.RefsPrecision+0.001 < baseline.GroundTruth.RefsPrecision {
+			fmt.Fprintf(&b, "  FAIL   | refs precision regression: %.1f%% -> %.1f%%\n",
+				baseline.GroundTruth.RefsPrecision, current.GroundTruth.RefsPrecision)
+			allPassed = false
+		}
+		if current.GroundTruth.RefsRecall+0.001 < baseline.GroundTruth.RefsRecall {
+			fmt.Fprintf(&b, "  FAIL   | refs recall regression: %.1f%% -> %.1f%%\n",
+				baseline.GroundTruth.RefsRecall, current.GroundTruth.RefsRecall)
+			allPassed = false
+		}
+		if current.GroundTruth.ShowExactRate+0.001 < baseline.GroundTruth.ShowExactRate {
+			fmt.Fprintf(&b, "  FAIL   | show exactness regression: %.1f%% -> %.1f%%\n",
+				baseline.GroundTruth.ShowExactRate, current.GroundTruth.ShowExactRate)
+			allPassed = false
+		}
+	}
+	if current.Footguns.Passed < baseline.Footguns.Passed {
+		fmt.Fprintf(&b, "  FAIL   | footgun regression: %d/%d -> %d/%d\n",
+			baseline.Footguns.Passed, baseline.Footguns.Total,
+			current.Footguns.Passed, current.Footguns.Total)
 		allPassed = false
 	}
 
@@ -356,6 +446,85 @@ func runBench(tool Tool, op Op, repoDir, symbol string, iters int, before ...pre
 
 // ── Accuracy checks ────────────────────────────────────────────────
 
+func containsAll(out string, needles []string) bool {
+	for _, needle := range needles {
+		if needle == "" {
+			continue
+		}
+		if !strings.Contains(out, needle) {
+			return false
+		}
+	}
+	return true
+}
+
+func firstMissing(out string, needles []string) string {
+	for _, needle := range needles {
+		if needle == "" {
+			continue
+		}
+		if !strings.Contains(out, needle) {
+			return needle
+		}
+	}
+	return ""
+}
+
+func firstUnexpected(out string, needles []string) string {
+	for _, needle := range needles {
+		if needle == "" {
+			continue
+		}
+		if strings.Contains(out, needle) {
+			return needle
+		}
+	}
+	return ""
+}
+
+func countStructuredMatches(out string) int {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "_count:") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+func countIndicatorLines(out string) int {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	count := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "---" || strings.HasPrefix(line, "query:") || strings.HasPrefix(line, "symbol:") || strings.HasPrefix(line, "file:") || strings.HasPrefix(line, "kind:") {
+			continue
+		}
+		if strings.Contains(line, ">") || strings.Contains(line, ":") {
+			count++
+		}
+	}
+	return count
+}
+
+func accuracyPass(out string, contains []string, excludes []string) (bool, string) {
+	if missing := firstMissing(out, contains); missing != "" {
+		return false, fmt.Sprintf("missing %q", missing)
+	}
+	if unexpected := firstUnexpected(out, excludes); unexpected != "" {
+		return false, fmt.Sprintf("unexpected %q", unexpected)
+	}
+	return true, ""
+}
+
 func checkAccuracy(results []Result, repos []Repo) []AccuracyCheck {
 	var checks []AccuracyCheck
 
@@ -363,12 +532,11 @@ func checkAccuracy(results []Result, repos []Repo) []AccuracyCheck {
 		for _, sym := range repo.Symbols {
 			// Check search
 			if r := findResult2(results, "cymbal", OpSearch, repo.Name, sym.Name); r != nil {
-				passed := strings.Contains(r.RawOut, sym.FileContains) &&
-					strings.Contains(r.RawOut, sym.Kind)
-				detail := ""
-				if !passed {
-					detail = fmt.Sprintf("expected file=%q kind=%q in output", sym.FileContains, sym.Kind)
+				contains := append([]string{}, sym.SearchContains...)
+				if len(contains) == 0 {
+					contains = []string{sym.FileContains, sym.Kind}
 				}
+				passed, detail := accuracyPass(r.RawOut, contains, sym.SearchExcludes)
 				checks = append(checks, AccuracyCheck{
 					Repo: repo.Name, Symbol: sym.Name, Op: OpSearch,
 					Passed: passed, Details: detail,
@@ -377,11 +545,11 @@ func checkAccuracy(results []Result, repos []Repo) []AccuracyCheck {
 
 			// Check show
 			if r := findResult2(results, "cymbal", OpShow, repo.Name, sym.Name); r != nil {
-				passed := strings.Contains(r.RawOut, sym.ShowContains)
-				detail := ""
-				if !passed {
-					detail = fmt.Sprintf("expected %q in show output", sym.ShowContains)
+				contains := append([]string{}, sym.ShowContainsAll...)
+				if sym.ShowContains != "" {
+					contains = append(contains, sym.ShowContains)
 				}
+				passed, detail := accuracyPass(r.RawOut, contains, sym.ShowExcludes)
 				checks = append(checks, AccuracyCheck{
 					Repo: repo.Name, Symbol: sym.Name, Op: OpShow,
 					Passed: passed, Details: detail,
@@ -391,18 +559,14 @@ func checkAccuracy(results []Result, repos []Repo) []AccuracyCheck {
 			// Check refs
 			if sym.RefsMin > 0 {
 				if r := findResult2(results, "cymbal", OpRefs, repo.Name, sym.Name); r != nil {
-					// Count non-empty, non-header lines as ref indicators
-					lines := strings.Split(strings.TrimSpace(r.RawOut), "\n")
-					refLines := 0
-					for _, l := range lines {
-						if strings.Contains(l, ">") || strings.Contains(l, ":") {
-							refLines++
-						}
+					refLines := countStructuredMatches(r.RawOut)
+					if refLines == 0 {
+						refLines = countIndicatorLines(r.RawOut)
 					}
-					passed := refLines >= sym.RefsMin
-					detail := ""
-					if !passed {
-						detail = fmt.Sprintf("expected >=%d refs, got %d indicator lines", sym.RefsMin, refLines)
+					passed, detail := accuracyPass(r.RawOut, sym.RefsContains, sym.RefsExcludes)
+					if passed && refLines < sym.RefsMin {
+						passed = false
+						detail = fmt.Sprintf("expected >=%d refs, got %d", sym.RefsMin, refLines)
 					}
 					checks = append(checks, AccuracyCheck{
 						Repo: repo.Name, Symbol: sym.Name, Op: OpRefs,
@@ -413,11 +577,11 @@ func checkAccuracy(results []Result, repos []Repo) []AccuracyCheck {
 
 			// Check investigate
 			if r := findResult2(results, "cymbal", OpInvestigate, repo.Name, sym.Name); r != nil {
-				passed := strings.Contains(r.RawOut, sym.ShowContains)
-				detail := ""
-				if !passed {
-					detail = fmt.Sprintf("expected %q in investigate output", sym.ShowContains)
+				contains := append([]string{}, sym.InvestigateContains...)
+				if len(contains) == 0 && sym.ShowContains != "" {
+					contains = []string{sym.ShowContains}
 				}
+				passed, detail := accuracyPass(r.RawOut, contains, sym.InvestigateExcludes)
 				checks = append(checks, AccuracyCheck{
 					Repo: repo.Name, Symbol: sym.Name, Op: OpInvestigate,
 					Passed: passed, Details: detail,
@@ -426,6 +590,110 @@ func checkAccuracy(results []Result, repos []Repo) []AccuracyCheck {
 		}
 	}
 	return checks
+}
+
+func grepCmd(op Op, symbol string) *exec.Cmd {
+	switch op {
+	case OpRefs, OpSearch:
+		return exec.Command("rg", "--no-heading", "-n", symbol)
+	case OpShow:
+		pattern := "(?:def |func |class |type |interface |struct |async def )" + symbol
+		return exec.Command("rg", "--no-heading", "-n", "-A", "30", pattern)
+	case OpInvestigate:
+		return exec.Command("rg", "--no-heading", "-n", symbol)
+	default:
+		return exec.Command("rg", "--no-heading", "-n", symbol)
+	}
+}
+
+func cymbalCmd(cymbalBin string, op Op, symbol string) *exec.Cmd {
+	switch op {
+	case OpSearch:
+		return exec.Command(cymbalBin, "search", symbol)
+	case OpRefs:
+		return exec.Command(cymbalBin, "refs", symbol)
+	case OpShow:
+		return exec.Command(cymbalBin, "show", symbol)
+	case OpInvestigate:
+		return exec.Command(cymbalBin, "investigate", symbol)
+	default:
+		return exec.Command(cymbalBin, "search", symbol)
+	}
+}
+
+func outputMatchCount(op Op, out string) int {
+	if count := countStructuredMatches(out); count > 0 {
+		return count
+	}
+	if op == OpShow {
+		if strings.TrimSpace(out) == "" {
+			return 0
+		}
+		return 1
+	}
+	return countIndicatorLines(out)
+}
+
+func benchFootguns(cymbalBin string, repos []Repo, corpusDir string) []FootgunResult {
+	var results []FootgunResult
+
+	for _, repo := range repos {
+		dir := filepath.Join(corpusDir, repo.Name)
+		for _, fc := range repo.Footguns {
+			op := fc.Op
+			if op == "" {
+				op = OpSearch
+			}
+
+			rgCmd := grepCmd(op, fc.Symbol)
+			rgCmd.Dir = dir
+			rgOut, _ := rgCmd.CombinedOutput()
+
+			cyCmd := cymbalCmd(cymbalBin, op, fc.Symbol)
+			cyCmd.Dir = dir
+			cyOut, cyErr := cyCmd.CombinedOutput()
+
+			grepHits := countIndicatorLines(string(rgOut))
+			cymbalHits := outputMatchCount(op, string(cyOut))
+
+			passed := true
+			detail := ""
+			if cyErr != nil {
+				passed = false
+				detail = cyErr.Error()
+			}
+			if passed && fc.GrepNoiseMin > 0 && grepHits < fc.GrepNoiseMin {
+				passed = false
+				detail = fmt.Sprintf("grep noise too low: expected >=%d hits, got %d", fc.GrepNoiseMin, grepHits)
+			}
+			if passed {
+				passed, detail = accuracyPass(string(cyOut), fc.CymbalContains, fc.CymbalExcludes)
+			}
+			if passed && fc.CymbalMaxMatches > 0 && cymbalHits > fc.CymbalMaxMatches {
+				passed = false
+				detail = fmt.Sprintf("expected <=%d cymbal matches, got %d", fc.CymbalMaxMatches, cymbalHits)
+			}
+			if passed && fc.ExpectSmallerOutput && len(cyOut) >= len(rgOut) {
+				passed = false
+				detail = fmt.Sprintf("expected cymbal output smaller than grep (%dB >= %dB)", len(cyOut), len(rgOut))
+			}
+
+			results = append(results, FootgunResult{
+				Repo:        repo.Name,
+				Name:        fc.Name,
+				Symbol:      fc.Symbol,
+				Op:          op,
+				Passed:      passed,
+				GrepHits:    grepHits,
+				GrepBytes:   len(rgOut),
+				CymbalHits:  cymbalHits,
+				CymbalBytes: len(cyOut),
+				Details:     detail,
+			})
+		}
+	}
+
+	return results
 }
 
 // ── JIT Freshness benchmark ────────────────────────────────────────
@@ -620,12 +888,15 @@ func cmdSetup(corpus Corpus, corpusDir string) error {
 // ── Run command ────────────────────────────────────────────────────
 
 type benchOutput struct {
-	results   []Result
-	available []Tool
-	accuracy  []AccuracyCheck
-	freshness []FreshnessResult
-	workflows []WorkflowResult
-	report    *BenchReport
+	results            []Result
+	available          []Tool
+	accuracy           []AccuracyCheck
+	groundTruth        []GroundTruthCheck
+	groundTruthSummary GroundTruthSummary
+	footguns           []FootgunResult
+	freshness          []FreshnessResult
+	workflows          []WorkflowResult
+	report             *BenchReport
 }
 
 func executeBench(corpus Corpus, corpusDir, cymbalBin string) (*benchOutput, error) {
@@ -707,17 +978,65 @@ func executeBench(corpus Corpus, corpusDir, cymbalBin string) (*benchOutput, err
 			fmt.Printf("  ✗ %s/%s/%s: %s\n", a.Repo, a.Symbol, a.Op, a.Details)
 		}
 	}
-	fmt.Printf("\n  Accuracy: %d/%d (%.0f%%)\n", passed, total, float64(passed)/float64(total)*100)
+	fmt.Printf("\n  Accuracy: %d/%d (%.0f%%)\n", passed, total, pct(passed, total))
 
-	// Phase 3: JIT Freshness
-	fmt.Println("\n=== Phase 3: JIT Freshness ===")
+	// Phase 3: Ground Truth Precision / Recall
+	fmt.Println("\n=== Phase 3: Ground Truth Precision / Recall ===")
+	groundTruth := benchGroundTruth(cymbalBin, corpus.Repos, corpusDir)
+	groundTruthSummary := summarizeGroundTruth(groundTruth)
+	for _, gt := range groundTruth {
+		if gt.Op == OpShow {
+			if gt.Passed {
+				fmt.Printf("  ✓ %s/%s/%s | exact\n", gt.Repo, gt.Symbol, gt.Op)
+			} else {
+				fmt.Printf("  ✗ %s/%s/%s: %s\n", gt.Repo, gt.Symbol, gt.Op, gt.Details)
+			}
+			continue
+		}
+		if gt.Passed {
+			fmt.Printf("  ✓ %s/%s/%s | P=%.0f%% R=%.0f%% (%d/%d)\n", gt.Repo, gt.Symbol, gt.Op, gt.Precision, gt.Recall, gt.TruePositives, gt.Expected)
+		} else {
+			fmt.Printf("  ✗ %s/%s/%s: %s\n", gt.Repo, gt.Symbol, gt.Op, gt.Details)
+		}
+	}
+	if len(groundTruth) > 0 {
+		fmt.Printf("\n  Ground truth: %d/%d (%.0f%%) | search P/R %.0f%%/%.0f%% | refs P/R %.0f%%/%.0f%% | show exact %.0f%%\n",
+			groundTruthSummary.Passed,
+			groundTruthSummary.Total,
+			pct(groundTruthSummary.Passed, groundTruthSummary.Total),
+			groundTruthSummary.SearchPrecision,
+			groundTruthSummary.SearchRecall,
+			groundTruthSummary.RefsPrecision,
+			groundTruthSummary.RefsRecall,
+			groundTruthSummary.ShowExactRate,
+		)
+	}
+
+	// Phase 4: Grep Footguns
+	fmt.Println("\n=== Phase 4: Grep Footguns ===")
+	footguns := benchFootguns(cymbalBin, corpus.Repos, corpusDir)
+	footgunPassed := 0
+	for _, f := range footguns {
+		if f.Passed {
+			footgunPassed++
+			fmt.Printf("  ✓ %s/%s/%s | grep=%d hits, cymbal=%d hits\n", f.Repo, f.Name, f.Op, f.GrepHits, f.CymbalHits)
+		} else {
+			fmt.Printf("  ✗ %s/%s/%s: %s\n", f.Repo, f.Name, f.Op, f.Details)
+		}
+	}
+	if len(footguns) > 0 {
+		fmt.Printf("\n  Footgun avoidance: %d/%d (%.0f%%)\n", footgunPassed, len(footguns), pct(footgunPassed, len(footguns)))
+	}
+
+	// Phase 5: JIT Freshness
+	fmt.Println("\n=== Phase 5: JIT Freshness ===")
 	freshness := benchFreshness(cymbalBin, corpus.Repos, corpusDir)
 	for _, f := range freshness {
 		fmt.Printf("  %s | %-25s | %v\n", f.Repo, f.Scenario, f.Latency.Round(time.Millisecond))
 	}
 
-	// Phase 4: Agent Workflow
-	fmt.Println("\n=== Phase 4: Agent Workflow ===")
+	// Phase 6: Agent Workflow
+	fmt.Println("\n=== Phase 6: Agent Workflow ===")
 	workflows := benchWorkflow(cymbalBin, corpus.Repos, corpusDir)
 	for _, w := range workflows {
 		savings := 0
@@ -729,12 +1048,15 @@ func executeBench(corpus Corpus, corpusDir, cymbalBin string) (*benchOutput, err
 	}
 
 	return &benchOutput{
-		results:   results,
-		available: available,
-		accuracy:  accuracy,
-		freshness: freshness,
-		workflows: workflows,
-		report:    buildReport(results, accuracy),
+		results:            results,
+		available:          available,
+		accuracy:           accuracy,
+		groundTruth:        groundTruth,
+		groundTruthSummary: groundTruthSummary,
+		footguns:           footguns,
+		freshness:          freshness,
+		workflows:          workflows,
+		report:             buildReport(results, accuracy, groundTruthSummary, footguns),
 	}, nil
 }
 
@@ -745,7 +1067,7 @@ func cmdRun(corpus Corpus, corpusDir, cymbalBin string) error {
 	}
 
 	// Write markdown report
-	md := generateReport(out.results, out.available, out.accuracy, out.freshness, out.workflows)
+	md := generateReport(out.results, out.available, out.accuracy, out.groundTruth, out.groundTruthSummary, out.footguns, out.freshness, out.workflows)
 	mdPath := filepath.Join("bench", "RESULTS.md")
 	if err := os.WriteFile(mdPath, []byte(md), 0o644); err != nil {
 		return err
@@ -764,7 +1086,7 @@ func cmdRun(corpus Corpus, corpusDir, cymbalBin string) error {
 
 // ── Report generation ──────────────────────────────────────────────
 
-func generateReport(results []Result, tools []Tool, accuracy []AccuracyCheck, freshness []FreshnessResult, workflows []WorkflowResult) string {
+func generateReport(results []Result, tools []Tool, accuracy []AccuracyCheck, groundTruth []GroundTruthCheck, groundTruthSummary GroundTruthSummary, footguns []FootgunResult, freshness []FreshnessResult, workflows []WorkflowResult) string {
 	var b strings.Builder
 
 	b.WriteString("# Cymbal Benchmark Results\n\n")
@@ -884,7 +1206,55 @@ func generateReport(results []Result, tools []Tool, accuracy []AccuracyCheck, fr
 		}
 		b.WriteString(fmt.Sprintf("| %s | `%s` | %s | %s |\n", a.Repo, a.Symbol, a.Op, mark))
 	}
-	b.WriteString(fmt.Sprintf("\n**Overall: %d/%d (%.0f%%)**\n\n", passed, total, float64(passed)/float64(total)*100))
+	b.WriteString(fmt.Sprintf("\n**Overall: %d/%d (%.0f%%)**\n\n", passed, total, pct(passed, total)))
+
+	// ── Ground Truth ──
+	b.WriteString("## Ground Truth Precision / Recall\n\n")
+	b.WriteString("| Repo | Symbol | Op | Precision | Recall | Result |\n")
+	b.WriteString("|---|---|---|---|---|---|\n")
+	if len(groundTruth) == 0 {
+		b.WriteString("| — | — | — | — | — | No ground truth configured |\n")
+	} else {
+		for _, gt := range groundTruth {
+			precision := "—"
+			recall := "—"
+			if gt.Op != OpShow {
+				precision = fmt.Sprintf("%.0f%%", gt.Precision)
+				recall = fmt.Sprintf("%.0f%%", gt.Recall)
+			}
+			mark := "✓"
+			if !gt.Passed {
+				mark = "✗ " + gt.Details
+			} else if gt.Op == OpShow {
+				mark = "✓ exact"
+			}
+			b.WriteString(fmt.Sprintf("| %s | `%s` | %s | %s | %s | %s |\n", gt.Repo, gt.Symbol, gt.Op, precision, recall, mark))
+		}
+		b.WriteString(fmt.Sprintf("\n**Overall: %d/%d (%.0f%%)**  \n", groundTruthSummary.Passed, groundTruthSummary.Total, pct(groundTruthSummary.Passed, groundTruthSummary.Total)))
+		b.WriteString(fmt.Sprintf("**Search precision / recall:** %.0f%% / %.0f%%  \n", groundTruthSummary.SearchPrecision, groundTruthSummary.SearchRecall))
+		b.WriteString(fmt.Sprintf("**Refs precision / recall:** %.0f%% / %.0f%%  \n", groundTruthSummary.RefsPrecision, groundTruthSummary.RefsRecall))
+		b.WriteString(fmt.Sprintf("**Show exactness:** %.0f%%\n\n", groundTruthSummary.ShowExactRate))
+	}
+
+	// ── Grep Footguns ──
+	b.WriteString("## Grep Footguns\n\n")
+	b.WriteString("| Repo | Case | Op | grep hits | cymbal hits | Result |\n")
+	b.WriteString("|---|---|---|---|---|---|\n")
+	footgunPassed := 0
+	for _, f := range footguns {
+		mark := "✓"
+		if !f.Passed {
+			mark = "✗ " + f.Details
+		} else {
+			footgunPassed++
+		}
+		b.WriteString(fmt.Sprintf("| %s | `%s` | %s | %d | %d | %s |\n", f.Repo, f.Name, f.Op, f.GrepHits, f.CymbalHits, mark))
+	}
+	if len(footguns) > 0 {
+		b.WriteString(fmt.Sprintf("\n**Overall: %d/%d (%.0f%%)**\n\n", footgunPassed, len(footguns), pct(footgunPassed, len(footguns))))
+	} else {
+		b.WriteString("\n_No footgun scenarios configured._\n\n")
+	}
 
 	// ── JIT Freshness ──
 	b.WriteString("## JIT Freshness\n\n")
@@ -976,6 +1346,13 @@ func fmtBytes(n int) string {
 		return fmt.Sprintf("%.1fKB", float64(n)/1024)
 	}
 	return fmt.Sprintf("%.1fMB", float64(n)/(1024*1024))
+}
+
+func pct(passed, total int) float64 {
+	if total == 0 {
+		return 100
+	}
+	return float64(passed) / float64(total) * 100
 }
 
 // ── Entrypoint ─────────────────────────────────────────────────────

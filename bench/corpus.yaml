@@ -7,140 +7,567 @@ repos:
     url: https://github.com/gin-gonic/gin
     ref: v1.10.0
     language: go
+    tier: simple
+    complexity: low
+    tags: [web, common-names, request-context]
     symbols:
       - name: New
         file_contains: "gin.go"
         kind: function
         show_contains: "func New("
         refs_min: 1
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "gin.go"
+                line: 188
+                kind: "function"
+          show:
+            file: "gin.go"
+            line: 188
       - name: ServeHTTP
         file_contains: "gin.go"
         kind: method
         show_contains: "func (engine *Engine) ServeHTTP"
         refs_min: 1
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "utils_test.go"
+                line: 31
+                kind: "method"
+              - file: "gin.go"
+                line: 583
+                kind: "method"
+          show:
+            file: "gin.go"
+            line: 583
+          refs:
+            expected:
+              - file: "auth_test.go"
+                line: 95
+              - file: "auth_test.go"
+                line: 114
+              - file: "auth_test.go"
+                line: 134
+              - file: "auth_test.go"
+                line: 152
+              - file: "auth_test.go"
+                line: 171
+              - file: "benchmarks_test.go"
+                line: 158
+              - file: "context.go"
+                line: 1086
+              - file: "gin_integration_test.go"
+                line: 409
+              - file: "gin_test.go"
+                line: 753
+              - file: "githubapi_test.go"
+                line: 455
+              - file: "githubapi_test.go"
+                line: 471
+              - file: "routergroup.go"
+                line: 237
+              - file: "routes_test.go"
+                line: 30
+              - file: "utils.go"
+                line: 49
       - name: HandlerFunc
         file_contains: "gin.go"
         kind: type
         show_contains: "type HandlerFunc"
         refs_min: 1
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "gin.go"
+                line: 48
+                kind: "type"
+          show:
+            file: "gin.go"
+            line: 48
+          refs:
+            expected:
+              - file: "context_test.go"
+                line: 2588
+              - file: "response_writer_test.go"
+                line: 127
       - name: Context
         file_contains: "context.go"
         kind: struct
         show_contains: "type Context struct"
         refs_min: 1
+        search_contains:
+          - "struct Context context.go:55"
+        refs_contains:
+          - "context.go:"
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "context.go"
+                line: 55
+                kind: "struct"
+          show:
+            file: "context.go"
+            line: 55
+          refs:
+            expected:
+              - file: "context.go"
+                line: 1220
+              - file: "context.go"
+                line: 1229
+              - file: "context.go"
+                line: 1237
+              - file: "context.go"
+                line: 1245
+              - file: "context.go"
+                line: 1266
+    footguns:
+      - name: common_name_context
+        symbol: Context
+        op: search
+        why: Generic name with many text hits across request context usage.
+        grep_noise_min: 500
+        cymbal_contains:
+          - "struct Context context.go:55"
+        cymbal_max_matches: 8
+        expect_smaller_output: true
 
   - name: kubectl
     url: https://github.com/kubernetes/kubectl
     ref: v0.32.1
     language: go
+    tier: medium
+    complexity: medium
+    tags: [cli, interfaces, factory-pattern]
     symbols:
       - name: NewCmdApply
         file_contains: "apply.go"
         kind: function
         show_contains: "func NewCmdApply"
         refs_min: 0
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "pkg/cmd/apply/apply.go"
+                line: 198
+                kind: "function"
+          show:
+            file: "pkg/cmd/apply/apply.go"
+            line: 198
       - name: NewCmdGet
         file_contains: "get.go"
         kind: function
         show_contains: "func NewCmdGet"
         refs_min: 0
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "pkg/cmd/get/get.go"
+                line: 161
+                kind: "function"
+          show:
+            file: "pkg/cmd/get/get.go"
+            line: 161
       - name: Factory
         file_contains: "factory.go"
         kind: interface
         show_contains: "type Factory interface"
         refs_min: 0
+        search_contains:
+          - "interface Factory pkg/cmd/util/factory.go:41"
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "pkg/cmd/util/factory.go"
+                line: 41
+                kind: "interface"
+          show:
+            file: "pkg/cmd/util/factory.go"
+            line: 41
+    footguns:
+      - name: interface_name_factory
+        symbol: Factory
+        op: search
+        why: Broad interface name creates high grep noise and variable collisions.
+        grep_noise_min: 300
+        cymbal_contains:
+          - "interface Factory pkg/cmd/util/factory.go:41"
+        cymbal_max_matches: 5
+        expect_smaller_output: true
 
   - name: fastapi
     url: https://github.com/fastapi/fastapi
     ref: "0.115.6"
     language: python
+    tier: medium
+    complexity: medium
+    tags: [framework, decorators, classes, large-surface-area]
     symbols:
       - name: FastAPI
         file_contains: "applications.py"
         kind: class
         show_contains: "class FastAPI"
         refs_min: 1
+        search_contains:
+          - "class FastAPI fastapi/applications.py:48"
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "fastapi/applications.py"
+                line: 48
+                kind: "class"
+          show:
+            file: "fastapi/applications.py"
+            line: 48
       - name: Depends
         file_contains: "params.py"
         kind: class
         show_contains: "class Depends"
         refs_min: 1
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "fastapi/params.py"
+                line: 764
+                kind: "class"
+              - file: "fastapi/param_functions.py"
+                line: 2220
+                kind: "function"
+          show:
+            file: "fastapi/params.py"
+            line: 764
       - name: APIRouter
         file_contains: "routing.py"
         kind: class
         show_contains: "class APIRouter"
         refs_min: 1
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "fastapi/routing.py"
+                line: 595
+                kind: "class"
+          show:
+            file: "fastapi/routing.py"
+            line: 595
+    footguns:
+      - name: framework_name_fastapi
+        symbol: FastAPI
+        op: search
+        why: Repo name, docs, tests, and error types all contain FastAPI.
+        grep_noise_min: 5000
+        cymbal_contains:
+          - "class FastAPI fastapi/applications.py:48"
+        cymbal_max_matches: 10
+        expect_smaller_output: true
 
   - name: vite
     url: https://github.com/vitejs/vite
     ref: v6.0.0
     language: typescript
+    tier: medium
+    complexity: medium
+    tags: [typescript, monorepo, server, overlapping-symbols]
     symbols:
       - name: createServer
         file_contains: "server/index.ts"
         kind: function
         show_contains: "createServer("
         refs_min: 1
+        search_contains:
+          - "function createServer packages/vite/src/node/server/index.ts:408"
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "packages/vite/src/node/server/index.ts"
+                line: 408
+                kind: "function"
+              - file: "playground/css-lightningcss-proxy/server.js"
+                line: 17
+                kind: "function"
+              - file: "playground/optimize-missing-deps/server.js"
+                line: 10
+                kind: "function"
+              - file: "playground/ssr-deps/server.js"
+                line: 18
+                kind: "function"
+              - file: "playground/ssr-pug/server.js"
+                line: 20
+                kind: "function"
+              - file: "playground/ssr-webworker/worker.js"
+                line: 9
+                kind: "function"
+              - file: "playground/ssr-html/server.js"
+                line: 26
+                kind: "function"
+              - file: "playground/ssr-conditions/server.js"
+                line: 11
+                kind: "function"
+              - file: "playground/ssr-noexternal/server.js"
+                line: 10
+                kind: "function"
+              - file: "playground/ssr/server.js"
+                line: 9
+                kind: "function"
+          show:
+            file: "packages/vite/src/node/server/index.ts"
+            line: 408
       - name: ViteDevServer
         file_contains: "server/index.ts"
         kind: interface
         show_contains: "ViteDevServer"
         refs_min: 0
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "packages/vite/src/node/server/index.ts"
+                line: 228
+                kind: "interface"
+          show:
+            file: "packages/vite/src/node/server/index.ts"
+            line: 228
       - name: defineConfig
         file_contains: "config.ts"
         kind: function
         show_contains: "defineConfig("
         refs_min: 1
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "packages/vite/src/node/config.ts"
+                line: 147
+                kind: "function"
+          show:
+            file: "packages/vite/src/node/config.ts"
+            line: 147
+    footguns:
+      - name: overloaded_create_server
+        symbol: createServer
+        op: search
+        why: Helper name appears in real implementation plus playground examples.
+        grep_noise_min: 200
+        cymbal_contains:
+          - "function createServer packages/vite/src/node/server/index.ts:408"
+        cymbal_max_matches: 20
+        expect_smaller_output: true
 
   - name: ripgrep
     url: https://github.com/BurntSushi/ripgrep
     ref: "14.1.1"
     language: rust
+    tier: medium
+    complexity: medium
+    tags: [rust, impl-blocks, builder-pattern]
     symbols:
       - name: Searcher
         file_contains: "mod.rs"
         kind: struct
         show_contains: "struct Searcher"
         refs_min: 0
+        search_contains:
+          - "struct Searcher crates/searcher/src/searcher/mod.rs:577"
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "crates/searcher/src/searcher/mod.rs"
+                line: 577
+                kind: "struct"
+              - file: "crates/searcher/src/searcher/mod.rs"
+                line: 607
+                kind: "impl"
+              - file: "crates/searcher/src/searcher/mod.rs"
+                line: 813
+                kind: "impl"
+          show:
+            file: "crates/searcher/src/searcher/mod.rs"
+            line: 577
       - name: SearchWorker
         file_contains: "search.rs"
         kind: struct
         show_contains: "struct SearchWorker"
         refs_min: 0
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "crates/core/search.rs"
+                line: 233
+                kind: "struct"
+          show:
+            file: "crates/core/search.rs"
+            line: 233
+    footguns:
+      - name: builder_and_impl_searcher
+        symbol: Searcher
+        op: search
+        why: Searcher shows up in struct, impl, builder, and helper names.
+        grep_noise_min: 200
+        cymbal_contains:
+          - "struct Searcher crates/searcher/src/searcher/mod.rs:577"
+        cymbal_max_matches: 12
+        expect_smaller_output: true
 
   - name: guava
     url: https://github.com/google/guava
     ref: v33.4.8
     language: java
+    tier: medium
+    complexity: medium
+    tags: [java, duplicated-android-tree, common-names]
     symbols:
       - name: ImmutableList
         file_contains: "ImmutableList.java"
         kind: class
         show_contains: "class ImmutableList"
         refs_min: 0
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "android/guava/src/com/google/common/collect/ImmutableList.java"
+                line: 59
+                kind: "class"
+              - file: "android/guava/src/com/google/common/collect/ImmutableList.java"
+                line: 365
+                kind: "constructor"
+              - file: "guava-gwt/src-super/com/google/common/collect/super/com/google/common/collect/ImmutableList.java"
+                line: 40
+                kind: "class"
+              - file: "guava-gwt/src-super/com/google/common/collect/super/com/google/common/collect/ImmutableList.java"
+                line: 44
+                kind: "constructor"
+              - file: "guava/src/com/google/common/collect/ImmutableList.java"
+                line: 63
+                kind: "class"
+              - file: "guava/src/com/google/common/collect/ImmutableList.java"
+                line: 392
+                kind: "constructor"
+          show:
+            file: "guava/src/com/google/common/collect/ImmutableList.java"
+            line: 63
       - name: Preconditions
         file_contains: "Preconditions.java"
         kind: class
         show_contains: "class Preconditions"
         refs_min: 0
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "android/guava/src/com/google/common/base/Preconditions.java"
+                line: 115
+                kind: "class"
+              - file: "android/guava/src/com/google/common/base/Preconditions.java"
+                line: 117
+                kind: "constructor"
+              - file: "guava/src/com/google/common/base/Preconditions.java"
+                line: 115
+                kind: "class"
+              - file: "guava/src/com/google/common/base/Preconditions.java"
+                line: 117
+                kind: "constructor"
+          show:
+            file: "guava/src/com/google/common/base/Preconditions.java"
+            line: 115
       - name: Optional
         file_contains: "Optional.java"
         kind: class
         show_contains: "class Optional"
         refs_min: 0
+        search_contains:
+          - "class Optional guava/src/com/google/common/base/Optional.java:87"
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "android/guava/src/com/google/common/base/Optional.java"
+                line: 87
+                kind: "class"
+              - file: "android/guava/src/com/google/common/base/Optional.java"
+                line: 183
+                kind: "constructor"
+              - file: "guava/src/com/google/common/base/Optional.java"
+                line: 87
+                kind: "class"
+              - file: "guava/src/com/google/common/base/Optional.java"
+                line: 171
+                kind: "constructor"
+          show:
+            file: "guava/src/com/google/common/base/Optional.java"
+            line: 87
+    footguns:
+      - name: duplicated_tree_optional
+        symbol: Optional
+        op: search
+        why: Optional exists in main tree, android mirror, tests, and helper types.
+        grep_noise_min: 500
+        cymbal_contains:
+          - "class Optional guava/src/com/google/common/base/Optional.java:87"
+        cymbal_max_matches: 25
+        expect_smaller_output: true
 
   - name: jq
     url: https://github.com/jqlang/jq
     ref: jq-1.7.1
     language: c
+    tier: simple
+    complexity: low
+    tags: [c, parser, mixed-struct-function-names]
     symbols:
       - name: jv_parse
         file_contains: "jv_parse.c"
         kind: function
         show_contains: "jv_parse"
         refs_min: 0
+        search_contains:
+          - "function jv_parse src/jv_parse.c:905"
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "src/jv_parse.c"
+                line: 905
+                kind: "function"
+          show:
+            file: "src/jv_parse.c"
+            line: 905
       - name: jq_next
         file_contains: "execute.c"
         kind: function
         show_contains: "jq_next"
         refs_min: 0
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "src/execute.c"
+                line: 341
+                kind: "function"
+          show:
+            file: "src/execute.c"
+            line: 341
+    footguns:
+      - name: parser_name_collision
+        symbol: jv_parse
+        op: search
+        why: Parser function name collides with parser structs and declarations.
+        grep_noise_min: 50
+        cymbal_contains:
+          - "function jv_parse src/jv_parse.c:905"
+        cymbal_max_matches: 20
+        expect_smaller_output: true
