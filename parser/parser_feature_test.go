@@ -1235,6 +1235,39 @@ var counter = 0
 	}
 }
 
+func TestFeatureSwiftActor(t *testing.T) {
+	// Swift concurrency `actor` is a `class_declaration` with keyword `actor`
+	// in tree-sitter-swift; it must be classified as its own kind rather than
+	// dropped.
+	src := []byte(`actor DataStore {
+    var items: [Int] = []
+    func append(_ x: Int) { items.append(x) }
+}
+
+distributed actor Worker {
+    func tick() {}
+}
+`)
+	result, err := ParseSource(src, "test.swift", "swift", lang.Default.TreeSitter("swift"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findSymbolKind(result.Symbols, "DataStore", "actor") == nil {
+		t.Error("expected DataStore actor")
+	}
+	if findSymbolKind(result.Symbols, "Worker", "actor") == nil {
+		t.Error("expected distributed Worker actor")
+	}
+	// Members should still be classified with DataStore as parent.
+	m := findSymbolKind(result.Symbols, "append", "method")
+	if m == nil {
+		t.Fatal("expected append method inside actor body")
+	}
+	if m.Parent != "DataStore" {
+		t.Errorf("expected append parent DataStore, got %q", m.Parent)
+	}
+}
+
 func TestFeatureSwiftRefs(t *testing.T) {
 	src := []byte(`protocol BabyTrackingService {}
 

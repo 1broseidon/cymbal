@@ -1291,8 +1291,8 @@ func (e *symbolExtractor) classifySwift(nodeType string, node *sitter.Node) (str
 }
 
 // swiftClassKindAndName reads the leading keyword of a class_declaration to
-// distinguish struct/class/enum/extension. For extensions the name lives one
-// level deeper, under `user_type`.
+// distinguish struct/class/actor/enum/extension. For extensions the name lives
+// one level deeper, under `user_type`.
 func swiftClassKindAndName(node *sitter.Node) (string, *sitter.Node) {
 	var kind string
 	for i := range int(node.ChildCount()) {
@@ -1302,6 +1302,8 @@ func swiftClassKindAndName(node *sitter.Node) (string, *sitter.Node) {
 			kind = "struct"
 		case "class":
 			kind = "class"
+		case "actor":
+			kind = "actor"
 		case "enum":
 			kind = "enum"
 		case "extension":
