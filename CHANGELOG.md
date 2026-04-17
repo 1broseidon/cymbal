@@ -2,6 +2,21 @@
 
 All notable changes to cymbal are documented here.
 
+## [0.10.1] - 2026-04-17
+
+### Fixed
+
+- **Swift references, impact, and trace now work** — Swift files were parsed for symbols but had no reference-extraction dispatch, so `refs`, `impact`, and `trace` always returned empty on Swift code. The new `extractRefSwift` emits refs for call expressions (including `x.y.z()` navigation-expression callees) and every `user_type` occurrence, which covers type annotations (`let foo: BabyTrackingService`), inheritance and protocol conformance, generic arguments (`Array<Foo>`), dictionary and array element types, parameter types, and return types.
+- **Swift declaration classification** — Swift previously fell through to the generic classifier, so structs, protocols, enums, extensions, properties, and enum members were not recognized. `classifySwift` now handles `class_declaration` (keyword-disambiguated into struct / class / enum / extension), `protocol_declaration`, `function_declaration` and `protocol_function_declaration` (method vs function based on enclosing body), `init_declaration`, `deinit_declaration`, `property_declaration` (field / constant / variable), `enum_entry`, and `typealias_declaration`. Function signatures are sliced from `(` through the return clause up to the body.
+
+### Added
+
+- **`search -i` / `--ignore-case`** — case-insensitive match for `search --exact`. Backed by a `COLLATE NOCASE` predicate; leaves FTS5 prefix/fuzzy search (already case-insensitive) untouched. Exposed on `index.SearchQuery` as `IgnoreCase`.
+
+### Breaking (library API)
+
+- **`store.SearchSymbols` gained an `ignoreCase bool` parameter** — new signature is `SearchSymbols(query, kind, lang string, exact, ignoreCase bool, limit int)`. The existing `SearchSymbolsCI` helper is unchanged.
+
 ## [0.10.0] - 2026-04-15
 
 ### Highlights
