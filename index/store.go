@@ -61,7 +61,8 @@ CREATE TABLE IF NOT EXISTS refs (
 	file_id   INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
 	line      INTEGER NOT NULL,
 	name      TEXT NOT NULL,
-	language  TEXT NOT NULL
+	language  TEXT NOT NULL,
+	kind      TEXT NOT NULL DEFAULT 'use'
 );
 
 CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
@@ -115,6 +116,10 @@ func OpenStore(dbPath string) (*Store, error) {
 	db.Exec("ALTER TABLE files ADD COLUMN mtime DATETIME")
 	db.Exec("ALTER TABLE files ADD COLUMN mtime_ns INTEGER")
 	db.Exec("ALTER TABLE files ADD COLUMN size INTEGER")
+	db.Exec("ALTER TABLE refs ADD COLUMN kind TEXT NOT NULL DEFAULT 'use'")
+	// Create kind index *after* the ALTER so existing databases don't fail the
+	// initial schema CREATE INDEX on a column that doesn't exist yet.
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_refs_kind ON refs(kind)")
 
 	db.Exec("PRAGMA cache_size = -64000")
 	db.Exec("PRAGMA mmap_size = 268435456")
@@ -377,14 +382,18 @@ func (s *Store) InsertRefs(fileID int64, refs []symbols.Ref) error {
 }
 
 func insertRefsTx(tx *sql.Tx, fileID int64, refs []symbols.Ref) error {
-	stmt, err := tx.Prepare("INSERT INTO refs (file_id, line, name, language) VALUES (?, ?, ?, ?)")
+	stmt, err := tx.Prepare("INSERT INTO refs (file_id, line, name, language, kind) VALUES (?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	for _, ref := range refs {
-		if _, err := stmt.Exec(fileID, ref.Line, ref.Name, ref.Language); err != nil {
+		kind := ref.Kind
+		if kind == "" {
+			kind = symbols.RefKindUse
+		}
+		if _, err := stmt.Exec(fileID, ref.Line, ref.Name, ref.Language, kind); err != nil {
 			return err
 		}
 	}
@@ -473,7 +482,7 @@ func PrepareBatchStmts(tx *sql.Tx) (*BatchStmts, error) {
 		b.Close()
 		return nil, err
 	}
-	b.insRef, err = tx.Prepare("INSERT INTO refs (file_id, line, name, language) VALUES (?, ?, ?, ?)")
+	b.insRef, err = tx.Prepare("INSERT INTO refs (file_id, line, name, language, kind) VALUES (?, ?, ?, ?, ?)")
 	if err != nil {
 		b.Close()
 		return nil, err
@@ -529,7 +538,11 @@ func InsertFileAllStmts(b *BatchStmts, filePath, relPath, lang, hash string, mti
 		}
 	}
 	for _, ref := range refs {
-		if _, err := b.insRef.Exec(fileID, ref.Line, ref.Name, ref.Language); err != nil {
+		kind := ref.Kind
+		if kind == "" {
+			kind = symbols.RefKindUse
+		}
+		if _, err := b.insRef.Exec(fileID, ref.Line, ref.Name, ref.Language, kind); err != nil {
 			return err
 		}
 	}
@@ -990,14 +1003,45 @@ type RefResult struct {
 }
 
 // FindReferences finds files that reference a symbol name.
-func (s *Store) FindReferences(name string, limit int) ([]RefResult, error) {
+// By default this surfaces any ref kind (call, use, implements); pass
+// explicit kinds to restrict (e.g. "call" to skip type-mentions).
+func (s *Store) FindReferences(name string, limit int, kinds ...string) ([]RefResult, error) {
+	if len(kinds) == 0 {
+		rows, err := s.db.Query(`
+			SELECT f.path, f.rel_path, r.line, r.name
+			FROM refs r JOIN files f ON r.file_id = f.id
+			WHERE r.name = ?
+			ORDER BY f.rel_path, r.line
+			LIMIT ?
+		`, name, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var results []RefResult
+		for rows.Next() {
+			var r RefResult
+			if err := rows.Scan(&r.File, &r.RelPath, &r.Line, &r.Name); err != nil {
+				return nil, err
+			}
+			results = append(results, r)
+		}
+		return results, rows.Err()
+	}
+	kindPlaceholders := strings.Repeat("?,", len(kinds))
+	kindPlaceholders = kindPlaceholders[:len(kindPlaceholders)-1]
+	args := []interface{}{name}
+	for _, k := range kinds {
+		args = append(args, k)
+	}
+	args = append(args, limit)
 	rows, err := s.db.Query(`
 		SELECT f.path, f.rel_path, r.line, r.name
 		FROM refs r JOIN files f ON r.file_id = f.id
-		WHERE r.name = ?
+		WHERE r.name = ? AND r.kind IN (`+kindPlaceholders+`)
 		ORDER BY f.rel_path, r.line
 		LIMIT ?
-	`, name, limit)
+	`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1009,6 +1053,118 @@ func (s *Store) FindReferences(name string, limit int) ([]RefResult, error) {
 		if err := rows.Scan(&r.File, &r.RelPath, &r.Line, &r.Name); err != nil {
 			return nil, err
 		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// ImplementorResult holds a type that implements / conforms to / extends a target.
+type ImplementorResult struct {
+	// Implementer is the local declaring type name (e.g. "TimerActivityIntent").
+	// Empty if the declaring symbol could not be resolved from the line range.
+	Implementer string `json:"implementer"`
+	// Target is the protocol / interface / superclass name as written in source.
+	Target string `json:"target"`
+	// File + Line locate the inheritance clause in source.
+	File     string `json:"file"`
+	RelPath  string `json:"rel_path"`
+	Line     int    `json:"line"`
+	Language string `json:"language"`
+	// Resolved is true when Target matches a locally-indexed symbol (i.e. the
+	// protocol/interface is declared in this repo, not an external framework).
+	Resolved bool `json:"resolved"`
+}
+
+// FindImplementors finds types that declare themselves as implementing /
+// conforming to / extending the given target name. Name-based, best-effort;
+// external (framework) targets are returned with Resolved=false.
+func (s *Store) FindImplementors(target string, limit int) ([]ImplementorResult, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`
+		SELECT
+			f.path,
+			f.rel_path,
+			r.line,
+			r.language,
+			COALESCE((
+				SELECT s.name FROM symbols s
+				WHERE s.file_id = r.file_id
+				  AND s.start_line <= r.line
+				  AND s.end_line   >= r.line
+				  AND s.kind IN ('class','struct','enum','interface','protocol','trait','record','object','mixin','actor')
+				ORDER BY (s.end_line - s.start_line) ASC
+				LIMIT 1
+			), '') AS implementer,
+			EXISTS(
+				SELECT 1 FROM symbols s2
+				WHERE s2.name = r.name
+				  AND s2.kind IN ('class','struct','enum','interface','protocol','trait','record','object','mixin','actor')
+			) AS resolved
+		FROM refs r JOIN files f ON r.file_id = f.id
+		WHERE r.kind = ? AND r.name = ?
+		ORDER BY f.rel_path, r.line
+		LIMIT ?
+	`, symbols.RefKindImplements, target, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []ImplementorResult
+	for rows.Next() {
+		r := ImplementorResult{Target: target}
+		var resolvedInt int
+		if err := rows.Scan(&r.File, &r.RelPath, &r.Line, &r.Language, &r.Implementer, &resolvedInt); err != nil {
+			return nil, err
+		}
+		r.Resolved = resolvedInt != 0
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// FindImplements returns the inheritance / conformance edges declared by a
+// specific type (the inverse of FindImplementors). It resolves the type's
+// declaration line range via the symbols table, then returns implements-kind
+// refs inside that range.
+func (s *Store) FindImplements(typeName string, limit int) ([]ImplementorResult, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`
+		SELECT
+			f.path, f.rel_path, r.line, r.language, s.name, r.name,
+			EXISTS(
+				SELECT 1 FROM symbols s2
+				WHERE s2.name = r.name
+				  AND s2.kind IN ('class','struct','enum','interface','protocol','trait','record','object','mixin','actor')
+			) AS resolved
+		FROM symbols s
+		JOIN refs r
+		  ON r.file_id = s.file_id
+		 AND r.line BETWEEN s.start_line AND s.end_line
+		JOIN files f ON f.id = s.file_id
+		WHERE s.name = ?
+		  AND s.kind IN ('class','struct','enum','interface','protocol','trait','record','object','mixin','actor')
+		  AND r.kind = ?
+		ORDER BY f.rel_path, r.line
+		LIMIT ?
+	`, typeName, symbols.RefKindImplements, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []ImplementorResult
+	for rows.Next() {
+		var r ImplementorResult
+		var resolvedInt int
+		if err := rows.Scan(&r.File, &r.RelPath, &r.Line, &r.Language, &r.Implementer, &r.Target, &resolvedInt); err != nil {
+			return nil, err
+		}
+		r.Resolved = resolvedInt != 0
 		results = append(results, r)
 	}
 	return results, rows.Err()
@@ -1258,13 +1414,23 @@ type TraceResult struct {
 
 // FindTrace performs downward call graph traversal using BFS.
 // Starting from a symbol, it finds what that symbol calls, then what those call, etc.
-func (s *Store) FindTrace(symbolName string, depth, limit int) ([]TraceResult, error) {
+//
+// kinds filters which ref kinds count as trace edges. Nil/empty defaults to
+// {"call"} so trace surfaces only invocation edges, not every identifier.
+// Pass a broader set (e.g. {"call","use"}) to include type mentions and
+// other non-call identifier references.
+func (s *Store) FindTrace(symbolName string, depth, limit int, kinds ...string) ([]TraceResult, error) {
 	if depth <= 0 {
 		depth = 3
 	}
 	if depth > 5 {
 		depth = 5
 	}
+	if len(kinds) == 0 {
+		kinds = []string{symbols.RefKindCall}
+	}
+	kindPlaceholders := strings.Repeat("?,", len(kinds))
+	kindPlaceholders = kindPlaceholders[:len(kindPlaceholders)-1]
 
 	// Resolve the root symbol to get its file and line range.
 	type symLoc struct {
@@ -1297,11 +1463,16 @@ func (s *Store) FindTrace(symbolName string, depth, limit int) ([]TraceResult, e
 
 	// Find refs inside a symbol's line range (its callees).
 	calleesOf := func(loc symLoc) []TraceResult {
+		args := []interface{}{loc.file, loc.startLine, loc.endLine}
+		for _, k := range kinds {
+			args = append(args, k)
+		}
 		rows, err := s.db.Query(`
 			SELECT r.name, f.path, f.rel_path, r.line
 			FROM refs r JOIN files f ON r.file_id = f.id
 			WHERE f.path = ? AND r.line >= ? AND r.line <= ?
-		`, loc.file, loc.startLine, loc.endLine)
+			  AND r.kind IN (`+kindPlaceholders+`)
+		`, args...)
 		if err != nil {
 			return nil
 		}

@@ -128,6 +128,7 @@ The index auto-builds on first use — no manual `cymbal index .` required. Subs
 | `outline` | List all symbols in a file |
 | `refs` | Find references / call sites. `--file` to scope by path |
 | `importers` | Reverse import lookup — who imports this? |
+| `impls` | Types that implement / conform to / extend this symbol. `--of <type>` for inverse |
 | `impact` | Transitive callers — what's affected by a change? |
 | `diff` | Git diff scoped to a symbol's line range |
 | `context` | Bundled view: source + types + callers + imports |

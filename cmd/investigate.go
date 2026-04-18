@@ -158,6 +158,32 @@ func investigateOnePrint(dbPath, name string, jsonOut bool) error {
 		}
 	}
 
+	if len(result.Implementors) > 0 {
+		fmt.Fprintf(&content, "\n# Implementors (%d)\n", len(result.Implementors))
+		for _, imp := range result.Implementors {
+			name := imp.Implementer
+			if name == "" {
+				name = "(anonymous)"
+			}
+			tag := ""
+			if !imp.Resolved {
+				tag = "  (external)"
+			}
+			fmt.Fprintf(&content, "  %s  %s:%d%s\n", name, imp.RelPath, imp.Line, tag)
+		}
+	}
+
+	if len(result.Implements) > 0 {
+		fmt.Fprintf(&content, "\n# Implements (%d)\n", len(result.Implements))
+		for _, imp := range result.Implements {
+			tag := ""
+			if !imp.Resolved {
+				tag = "  (external)"
+			}
+			fmt.Fprintf(&content, "  %s  %s:%d%s\n", imp.Target, imp.RelPath, imp.Line, tag)
+		}
+	}
+
 	meta := []kv{
 		{"symbol", sym.Name},
 		{"kind", sym.Kind},

@@ -14,19 +14,25 @@ import (
 )
 
 var showCmd = &cobra.Command{
-	Use:   "show <symbol|file[:L1-L2]>",
+	Use:   "show <symbol|file[:L1-L2]> [symbol2 ...]",
 	Short: "Read source by symbol name or file path",
 	Long: `Show source code for a symbol or file.
 
 If the argument contains '/' or ends with a known extension, it's treated as a file path.
 Otherwise, it's treated as a symbol name.
 
+Multi-symbol mode: pass more than one symbol, or pipe newline-separated names
+via --stdin, and show will render each one under a "═══ <name> ═══" header.
+JSON mode returns a map keyed by the requested name so agents can dispatch
+multiple reads in a single turn.
+
 Examples:
-  cymbal show ParseFile              # show symbol source
-  cymbal show internal/index/store.go     # show full file
-  cymbal show internal/index/store.go:80-120  # show lines 80-120
-  cymbal show Foo Bar Baz                # batch: show multiple symbols`,
-	Args: cobra.MinimumNArgs(1),
+  cymbal show ParseFile                        # show symbol source
+  cymbal show internal/index/store.go          # show full file
+  cymbal show internal/index/store.go:80-120   # show lines 80-120
+  cymbal show Foo Bar Baz                      # batch: three symbols at once
+  cymbal outline big.go -s --names | cymbal show --stdin`,
+	Args: cobra.MinimumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbPath := getDBPath(cmd)
 		ensureFresh(dbPath)
@@ -36,9 +42,22 @@ Examples:
 		includes, _ := cmd.Flags().GetStringArray("path")
 		excludes, _ := cmd.Flags().GetStringArray("exclude")
 
-		for i, target := range args {
-			if i > 0 {
-				fmt.Println()
+		targets, err := collectSymbols(cmd, args)
+		if err != nil {
+			return err
+		}
+
+		// JSON multi mode: return a map keyed by the requested target name.
+		if jsonOut && len(targets) > 1 {
+			return showMultiJSON(dbPath, targets, ctx, showAll, includes, excludes)
+		}
+
+		multi := len(targets) > 1
+		anyOK := false
+		for i, target := range targets {
+			if multi {
+				multiSymbolBanner(target, i == 0)
+				multiSymbolHeader(target)
 			}
 			var err error
 			if isFilePath(target) {
@@ -48,7 +67,12 @@ Examples:
 			}
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", target, err)
+				continue
 			}
+			anyOK = true
+		}
+		if !anyOK && len(targets) > 0 {
+			return fmt.Errorf("no requested symbol or file resolved")
 		}
 		return nil
 	},
@@ -59,7 +83,116 @@ func init() {
 	showCmd.Flags().Bool("all", false, "show all matching symbol definitions")
 	showCmd.Flags().StringArray("path", nil, "include only results whose path matches this glob (repeatable)")
 	showCmd.Flags().StringArray("exclude", nil, "exclude results whose path matches this glob (repeatable)")
+	addStdinFlag(showCmd)
 	rootCmd.AddCommand(showCmd)
+}
+
+// showMultiJSON renders multi-symbol JSON output keyed by each requested name.
+// Files, symbol hits, and not-founds all live in one object so an agent can
+// dispatch in a single turn and handle partial failures cleanly.
+func showMultiJSON(dbPath string, targets []string, ctx int, showAll bool, includes, excludes []string) error {
+	out := make(map[string]any, len(targets))
+	for _, target := range targets {
+		if isFilePath(target) {
+			payload, err := buildShowFilePayload(target, ctx)
+			if err != nil {
+				out[target] = map[string]any{"error": err.Error()}
+				continue
+			}
+			out[target] = payload
+			continue
+		}
+		payload, err := buildShowSymbolPayload(dbPath, target, ctx, showAll, includes, excludes)
+		if err != nil {
+			out[target] = map[string]any{"error": err.Error()}
+			continue
+		}
+		out[target] = payload
+	}
+	return writeJSON(out)
+}
+
+// buildShowFilePayload returns the same data showFile would print, minus the
+// side-effectful stdout write. Used by multi-symbol JSON mode.
+func buildShowFilePayload(target string, ctx int) (any, error) {
+	path, startLine, endLine := parseFileTarget(target)
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("file not found: %s", path)
+	}
+	defer f.Close()
+
+	if startLine > 0 && ctx > 0 {
+		startLine = max(1, startLine-ctx)
+		endLine = endLine + ctx
+	}
+	var lines []lineEntry
+	scanner := bufio.NewScanner(f)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		if startLine > 0 && lineNum < startLine {
+			continue
+		}
+		if endLine > 0 && lineNum > endLine {
+			break
+		}
+		lines = append(lines, lineEntry{Line: lineNum, Content: scanner.Text()})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return map[string]any{"file": absPath, "lines": lines}, nil
+}
+
+// buildShowSymbolPayload mirrors showSymbol's JSON shape.
+func buildShowSymbolPayload(dbPath, name string, ctx int, showAll bool, includes, excludes []string) (any, error) {
+	res, err := flexResolve(dbPath, name)
+	if err != nil {
+		return nil, err
+	}
+	allResults := filterByPath(res.Results, func(r index.SymbolResult) string { return r.RelPath }, includes, excludes)
+	if len(allResults) == 0 {
+		return nil, fmt.Errorf("symbol not found: %s", name)
+	}
+	displayResults := allResults
+	if !showAll {
+		displayResults = allResults[:1]
+	}
+	payload := make([]map[string]any, 0, len(displayResults))
+	for i, sym := range displayResults {
+		lines, _, startLine, endLine, _, truncated, err := readSymbolLines(sym, ctx)
+		if err != nil {
+			return nil, err
+		}
+		item := map[string]any{
+			"symbol": sym,
+			"file":   sym.File,
+			"lines":  lines,
+		}
+		if truncated {
+			item["range"] = fmt.Sprintf("%s:%d-%d", sym.File, startLine, endLine)
+			item["truncated"] = true
+		}
+		if i == 0 {
+			if len(allResults) > 1 {
+				item["match_count"] = len(allResults)
+				item["also"] = allResults[1:]
+			}
+			if res.Fuzzy {
+				item["fuzzy"] = true
+			}
+		}
+		payload = append(payload, item)
+	}
+	if showAll {
+		return payload, nil
+	}
+	return payload[0], nil
 }
 
 // isFilePath returns true if the target looks like a file path (not file:Symbol).

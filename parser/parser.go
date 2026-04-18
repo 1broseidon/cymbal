@@ -92,6 +92,13 @@ func (e *symbolExtractor) walk(node *sitter.Node, parent string, depth int) {
 		e.refs = append(e.refs, ref)
 	}
 
+	// Check for inheritance / protocol conformance / interface implementation.
+	// These are emitted as refs with Kind=RefKindImplements so `cymbal impls`
+	// and impact-style queries can find them without polluting `trace`.
+	for _, ref := range e.extractImplements(node) {
+		e.refs = append(e.refs, ref)
+	}
+
 	sym, isSymbol := e.nodeToSymbol(node, parent, depth)
 	if isSymbol {
 		e.symbols = append(e.symbols, sym)
@@ -296,7 +303,7 @@ func (e *symbolExtractor) extractRefCallExpr(nodeType string, node *sitter.Node)
 	if funcNode != nil {
 		name := extractCallName(funcNode, e.src, e.lang)
 		if name != "" {
-			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 		}
 	}
 	return symbols.Ref{}, false
@@ -388,7 +395,7 @@ func (e *symbolExtractor) extractRefNewExpr(nodeType string, node *sitter.Node) 
 	if ctorNode != nil {
 		name := extractCallName(ctorNode, e.src, e.lang)
 		if name != "" {
-			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 		}
 	}
 	return symbols.Ref{}, false
@@ -402,7 +409,7 @@ func (e *symbolExtractor) extractRefPythonCall(nodeType string, node *sitter.Nod
 	if funcNode != nil {
 		name := extractCallName(funcNode, e.src, e.lang)
 		if name != "" {
-			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 		}
 	}
 	return symbols.Ref{}, false
@@ -414,7 +421,7 @@ func (e *symbolExtractor) extractRefJVM(nodeType string, node *sitter.Node) (sym
 	}
 	nameNode := node.ChildByFieldName("name")
 	if nameNode != nil {
-		return symbols.Ref{Name: nameNode.Content(e.src), Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+		return symbols.Ref{Name: nameNode.Content(e.src), Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 	}
 	return symbols.Ref{}, false
 }
@@ -425,7 +432,7 @@ func (e *symbolExtractor) extractRefRuby(nodeType string, node *sitter.Node) (sy
 	}
 	nameNode := node.ChildByFieldName("method")
 	if nameNode != nil {
-		return symbols.Ref{Name: nameNode.Content(e.src), Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+		return symbols.Ref{Name: nameNode.Content(e.src), Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 	}
 	return symbols.Ref{}, false
 }
@@ -438,7 +445,7 @@ func (e *symbolExtractor) extractRefKotlin(nodeType string, node *sitter.Node) (
 		callee := node.Child(0)
 		name := extractCallName(callee, e.src, e.lang)
 		if name != "" {
-			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 		}
 	}
 	return symbols.Ref{}, false
@@ -456,7 +463,7 @@ func (e *symbolExtractor) extractRefElixir(nodeType string, node *sitter.Node) (
 		for i := range int(first.ChildCount()) {
 			child := first.Child(i)
 			if child.Type() == "identifier" {
-				return symbols.Ref{Name: child.Content(e.src), Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+				return symbols.Ref{Name: child.Content(e.src), Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 			}
 		}
 	} else if first.Type() == "identifier" {
@@ -467,7 +474,7 @@ func (e *symbolExtractor) extractRefElixir(nodeType string, node *sitter.Node) (
 			"alias", "import", "use", "require":
 			return symbols.Ref{}, false
 		}
-		return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang}, true
+		return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 	}
 	return symbols.Ref{}, false
 }
@@ -1170,6 +1177,7 @@ func (e *symbolExtractor) extractRefDart(nodeType string, node *sitter.Node) (sy
 					Name:     id.Content(e.src),
 					Line:     int(node.StartPoint().Row) + 1,
 					Language: e.lang,
+					Kind:     symbols.RefKindCall,
 				}, true
 			}
 		}
@@ -1184,6 +1192,7 @@ func (e *symbolExtractor) extractRefDart(nodeType string, node *sitter.Node) (sy
 				Name:     name,
 				Line:     int(node.StartPoint().Row) + 1,
 				Language: e.lang,
+				Kind:     symbols.RefKindCall,
 			}, true
 		}
 	}
@@ -1217,11 +1226,14 @@ func (e *symbolExtractor) extractRefSwift(nodeType string, node *sitter.Node) (s
 			return symbols.Ref{}, false
 		}
 		if name := swiftCalleeName(node.Child(0), e.src); name != "" {
-			return symbols.Ref{Name: name, Line: line, Language: e.lang}, true
+			return symbols.Ref{Name: name, Line: line, Language: e.lang, Kind: symbols.RefKindCall}, true
 		}
 	case "user_type":
+		// Type mentions (annotations, generics, return types) — not calls.
+		// These are intentionally Kind=use so `trace` doesn't surface them
+		// while `cymbal impls` and type-level queries still can.
 		if id := findChildByType(node, "type_identifier"); id != nil {
-			return symbols.Ref{Name: id.Content(e.src), Line: line, Language: e.lang}, true
+			return symbols.Ref{Name: id.Content(e.src), Line: line, Language: e.lang, Kind: symbols.RefKindUse}, true
 		}
 	}
 	return symbols.Ref{}, false
@@ -1450,4 +1462,588 @@ func (e *symbolExtractor) extractSignature(node *sitter.Node, kind string) strin
 		return content
 	}
 	return ""
+}
+
+// extractImplements returns zero or more "implements" edges for this node.
+//
+// This is a cross-language, best-effort extractor for inheritance /
+// conformance / interface implementation. Edges are emitted as refs with
+// Kind=RefKindImplements and Name=<target type name>. Name-based only; no
+// type resolution is performed. External (e.g. framework) target types are
+// stored by name.
+//
+// Languages where the concept doesn't apply return nil.
+func (e *symbolExtractor) extractImplements(node *sitter.Node) []symbols.Ref {
+	switch e.lang {
+	case "swift":
+		return e.extractImplementsSwift(node)
+	case "go":
+		return e.extractImplementsGo(node)
+	case "java", "apex":
+		return e.extractImplementsJava(node)
+	case "csharp":
+		return e.extractImplementsCSharp(node)
+	case "kotlin":
+		return e.extractImplementsKotlin(node)
+	case "scala":
+		return e.extractImplementsScala(node)
+	case "typescript", "javascript":
+		return e.extractImplementsTSJS(node)
+	case "rust":
+		return e.extractImplementsRust(node)
+	case "dart":
+		return e.extractImplementsDart(node)
+	case "python":
+		return e.extractImplementsPython(node)
+	case "ruby":
+		return e.extractImplementsRuby(node)
+	case "php":
+		return e.extractImplementsPHP(node)
+	case "cpp":
+		return e.extractImplementsCpp(node)
+	}
+	return nil
+}
+
+// implementsRef builds an implements-kind ref from a type-name node.
+func (e *symbolExtractor) implementsRef(nameNode *sitter.Node, line int) (symbols.Ref, bool) {
+	if nameNode == nil {
+		return symbols.Ref{}, false
+	}
+	name := typeNameText(nameNode, e.src)
+	if name == "" {
+		return symbols.Ref{}, false
+	}
+	return symbols.Ref{
+		Name:     name,
+		Line:     line,
+		Language: e.lang,
+		Kind:     symbols.RefKindImplements,
+	}, true
+}
+
+// typeNameText extracts the simple type name from a tree-sitter node that
+// may wrap it in generics, qualifications, or type-specifier containers.
+// Returns the final identifier segment (e.g. "Foo" from "pkg.Foo<T>").
+func typeNameText(node *sitter.Node, src []byte) string {
+	if node == nil {
+		return ""
+	}
+	// Qualified-name-shaped nodes: we want the *final* segment, not the first.
+	// Python "attribute" (foo.Bar), TS "nested_identifier" / "nested_type_identifier",
+	// Java "scoped_type_identifier", C# "qualified_name", Ruby "scope_resolution",
+	// etc. Tree-sitter grammars expose the final segment as a named field when
+	// available; fall back to the last identifier-like child.
+	switch node.Type() {
+	case "attribute", "nested_identifier", "nested_type_identifier",
+		"scoped_type_identifier", "qualified_name", "qualified_type",
+		"scope_resolution":
+		if f := node.ChildByFieldName("attribute"); f != nil {
+			if t := typeNameText(f, src); t != "" {
+				return t
+			}
+		}
+		if f := node.ChildByFieldName("name"); f != nil {
+			if t := typeNameText(f, src); t != "" {
+				return t
+			}
+		}
+		// Last identifier-like child.
+		for i := int(node.ChildCount()) - 1; i >= 0; i-- {
+			c := node.Child(i)
+			switch c.Type() {
+			case "type_identifier", "identifier", "constant":
+				return c.Content(src)
+			}
+		}
+	}
+	// Prefer a direct identifier-like child if present.
+	for i := 0; i < int(node.ChildCount()); i++ {
+		c := node.Child(i)
+		switch c.Type() {
+		case "type_identifier", "identifier":
+			return c.Content(src)
+		}
+	}
+	// Fall back to textual content, trimming generics / qualifiers.
+	text := strings.TrimSpace(node.Content(src))
+	if text == "" {
+		return ""
+	}
+	if lt := strings.Index(text, "<"); lt > 0 {
+		text = text[:lt]
+	}
+	if lt := strings.Index(text, "["); lt > 0 {
+		text = text[:lt]
+	}
+	if lt := strings.Index(text, "("); lt > 0 {
+		text = text[:lt]
+	}
+	if dot := strings.LastIndex(text, "."); dot >= 0 {
+		text = text[dot+1:]
+	}
+	if dc := strings.LastIndex(text, "::"); dc >= 0 {
+		text = text[dc+2:]
+	}
+	return strings.TrimSpace(text)
+}
+
+// collectImplementsFromClause walks the direct children of a clause node and
+// emits one implements ref per child whose type matches any of itemTypes.
+func (e *symbolExtractor) collectImplementsFromClause(clause *sitter.Node, line int, itemTypes ...string) []symbols.Ref {
+	if clause == nil {
+		return nil
+	}
+	wanted := make(map[string]struct{}, len(itemTypes))
+	for _, t := range itemTypes {
+		wanted[t] = struct{}{}
+	}
+	var out []symbols.Ref
+	for i := 0; i < int(clause.ChildCount()); i++ {
+		c := clause.Child(i)
+		if _, ok := wanted[c.Type()]; !ok {
+			continue
+		}
+		if ref, ok := e.implementsRef(c, line); ok {
+			out = append(out, ref)
+		}
+	}
+	return out
+}
+
+// -----------------------------------------------------------------------------
+// Swift
+// class / struct / enum / actor / extension / protocol declarations can have an
+// inheritance clause with one or more inheritance_specifier children whose
+// contained type is a user_type.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsSwift(node *sitter.Node) []symbols.Ref {
+	switch node.Type() {
+	case "class_declaration", "protocol_declaration":
+	default:
+		return nil
+	}
+	line := int(node.StartPoint().Row) + 1
+
+	var out []symbols.Ref
+	for i := 0; i < int(node.ChildCount()); i++ {
+		c := node.Child(i)
+		switch c.Type() {
+		case "inheritance_specifier":
+			if ref, ok := e.implementsRef(c, line); ok {
+				out = append(out, ref)
+			}
+		case "type_inheritance_clause", "inheritance_clause":
+			for j := 0; j < int(c.ChildCount()); j++ {
+				gc := c.Child(j)
+				if gc.Type() == "inheritance_specifier" {
+					if ref, ok := e.implementsRef(gc, line); ok {
+						out = append(out, ref)
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// -----------------------------------------------------------------------------
+// Go
+// interface embedding is the closest explicit "implements" signal Cymbal can
+// see without type-checking. type T interface { io.Reader; Foo } → implements
+// io.Reader and Foo.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsGo(node *sitter.Node) []symbols.Ref {
+	if node.Type() != "type_spec" {
+		return nil
+	}
+	typeNode := node.ChildByFieldName("type")
+	if typeNode == nil || typeNode.Type() != "interface_type" {
+		return nil
+	}
+
+	var out []symbols.Ref
+	// Go's tree-sitter grammar wraps each interface element in a type_elem.
+	// Embedded types show up as `type_elem → type_identifier | qualified_type`
+	// (while method specs show up as `method_elem`). Older grammar versions
+	// may expose the identifier directly on interface_type; handle both.
+	emit := func(n *sitter.Node) {
+		switch n.Type() {
+		case "type_identifier":
+			if ref, ok := e.implementsRef(n, int(n.StartPoint().Row)+1); ok {
+				out = append(out, ref)
+			}
+		case "qualified_type":
+			nameNode := n.ChildByFieldName("name")
+			if nameNode == nil {
+				nameNode = n
+			}
+			if ref, ok := e.implementsRef(nameNode, int(n.StartPoint().Row)+1); ok {
+				out = append(out, ref)
+			}
+		}
+	}
+	for i := 0; i < int(typeNode.ChildCount()); i++ {
+		c := typeNode.Child(i)
+		switch c.Type() {
+		case "type_elem":
+			for j := 0; j < int(c.ChildCount()); j++ {
+				emit(c.Child(j))
+			}
+		case "type_identifier", "qualified_type":
+			emit(c)
+		}
+	}
+	return out
+}
+
+// -----------------------------------------------------------------------------
+// Java / Apex
+// class_declaration → superclass and super_interfaces clauses.
+// interface_declaration → extends_interfaces.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsJava(node *sitter.Node) []symbols.Ref {
+	switch node.Type() {
+	case "class_declaration", "interface_declaration":
+	default:
+		return nil
+	}
+	line := int(node.StartPoint().Row) + 1
+	var out []symbols.Ref
+
+	if sc := node.ChildByFieldName("superclass"); sc != nil {
+		// superclass is "extends X" — walk for type_identifier children.
+		if id := findChildByType(sc, "type_identifier"); id != nil {
+			if ref, ok := e.implementsRef(id, line); ok {
+				out = append(out, ref)
+			}
+		}
+	}
+	for i := 0; i < int(node.ChildCount()); i++ {
+		c := node.Child(i)
+		switch c.Type() {
+		case "super_interfaces", "extends_interfaces":
+			// Contains a type_list of type_identifier / generic_type entries.
+			list := findChildByType(c, "type_list")
+			if list == nil {
+				list = c
+			}
+			for j := 0; j < int(list.ChildCount()); j++ {
+				item := list.Child(j)
+				switch item.Type() {
+				case "type_identifier", "generic_type", "scoped_type_identifier":
+					if ref, ok := e.implementsRef(item, line); ok {
+						out = append(out, ref)
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// -----------------------------------------------------------------------------
+// C#
+// class_declaration / struct_declaration / interface_declaration → base_list
+// whose entries are identifier / qualified_name / generic_name.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsCSharp(node *sitter.Node) []symbols.Ref {
+	switch node.Type() {
+	case "class_declaration", "struct_declaration", "interface_declaration", "record_declaration":
+	default:
+		return nil
+	}
+	line := int(node.StartPoint().Row) + 1
+	base := findChildByType(node, "base_list")
+	if base == nil {
+		return nil
+	}
+	return e.collectImplementsFromClause(base, line,
+		"identifier", "qualified_name", "generic_name", "predefined_type")
+}
+
+// -----------------------------------------------------------------------------
+// Kotlin
+// class_declaration → delegation_specifier entries; each specifier has a
+// user_type (or constructor_invocation → user_type) child.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsKotlin(node *sitter.Node) []symbols.Ref {
+	switch node.Type() {
+	case "class_declaration", "object_declaration":
+	default:
+		return nil
+	}
+	line := int(node.StartPoint().Row) + 1
+	var out []symbols.Ref
+	for i := 0; i < int(node.ChildCount()); i++ {
+		c := node.Child(i)
+		if c.Type() != "delegation_specifier" {
+			continue
+		}
+		// Find the user_type inside (may be nested under constructor_invocation).
+		if ut := findDescendantByType(c, "user_type"); ut != nil {
+			if ref, ok := e.implementsRef(ut, line); ok {
+				out = append(out, ref)
+			}
+		}
+	}
+	return out
+}
+
+// -----------------------------------------------------------------------------
+// Scala
+// class / trait / object definitions with extends_clause + with_clauses.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsScala(node *sitter.Node) []symbols.Ref {
+	switch node.Type() {
+	case "class_definition", "trait_definition", "object_definition":
+	default:
+		return nil
+	}
+	line := int(node.StartPoint().Row) + 1
+	var out []symbols.Ref
+	for i := 0; i < int(node.ChildCount()); i++ {
+		c := node.Child(i)
+		switch c.Type() {
+		case "extends_clause", "template_body":
+			for j := 0; j < int(c.ChildCount()); j++ {
+				gc := c.Child(j)
+				switch gc.Type() {
+				case "type_identifier", "generic_type":
+					if ref, ok := e.implementsRef(gc, line); ok {
+						out = append(out, ref)
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// -----------------------------------------------------------------------------
+// TypeScript / JavaScript
+// class_declaration → class_heritage → extends_clause + implements_clause.
+// interface_declaration → extends_type_clause.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsTSJS(node *sitter.Node) []symbols.Ref {
+	switch node.Type() {
+	case "class_declaration", "class", "interface_declaration":
+	default:
+		return nil
+	}
+	line := int(node.StartPoint().Row) + 1
+	var out []symbols.Ref
+
+	// Walk any heritage clause children.
+	for i := 0; i < int(node.ChildCount()); i++ {
+		c := node.Child(i)
+		switch c.Type() {
+		case "class_heritage":
+			for j := 0; j < int(c.ChildCount()); j++ {
+				out = append(out, e.tsjsHeritageEntry(c.Child(j), line)...)
+			}
+		case "extends_clause", "implements_clause", "extends_type_clause":
+			out = append(out, e.tsjsHeritageEntry(c, line)...)
+		}
+	}
+	return out
+}
+
+func (e *symbolExtractor) tsjsHeritageEntry(node *sitter.Node, line int) []symbols.Ref {
+	if node == nil {
+		return nil
+	}
+	switch node.Type() {
+	case "extends_clause", "implements_clause", "extends_type_clause":
+		var out []symbols.Ref
+		for i := 0; i < int(node.ChildCount()); i++ {
+			c := node.Child(i)
+			switch c.Type() {
+			case "identifier", "type_identifier", "generic_type",
+				"nested_identifier", "nested_type_identifier":
+				if ref, ok := e.implementsRef(c, line); ok {
+					out = append(out, ref)
+				}
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// -----------------------------------------------------------------------------
+// Rust
+// impl Trait for Type { ... } → implements edge from Type to Trait.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsRust(node *sitter.Node) []symbols.Ref {
+	if node.Type() != "impl_item" {
+		return nil
+	}
+	trait := node.ChildByFieldName("trait")
+	if trait == nil {
+		return nil
+	}
+	line := int(node.StartPoint().Row) + 1
+	if ref, ok := e.implementsRef(trait, line); ok {
+		return []symbols.Ref{ref}
+	}
+	return nil
+}
+
+// -----------------------------------------------------------------------------
+// Dart
+// class_definition → superclass / interfaces / mixins clauses.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsDart(node *sitter.Node) []symbols.Ref {
+	switch node.Type() {
+	case "class_definition", "mixin_declaration":
+	default:
+		return nil
+	}
+	line := int(node.StartPoint().Row) + 1
+	var out []symbols.Ref
+	for i := 0; i < int(node.ChildCount()); i++ {
+		c := node.Child(i)
+		switch c.Type() {
+		case "superclass", "interfaces", "mixins":
+			for j := 0; j < int(c.ChildCount()); j++ {
+				gc := c.Child(j)
+				switch gc.Type() {
+				case "type_identifier", "type_name":
+					if ref, ok := e.implementsRef(gc, line); ok {
+						out = append(out, ref)
+					}
+				case "type_list":
+					for k := 0; k < int(gc.ChildCount()); k++ {
+						if ref, ok := e.implementsRef(gc.Child(k), line); ok {
+							out = append(out, ref)
+						}
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// -----------------------------------------------------------------------------
+// Python
+// class_definition with superclasses → argument_list of identifier/attribute.
+// Best-effort; structural protocols (PEP 544) are out of scope.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsPython(node *sitter.Node) []symbols.Ref {
+	if node.Type() != "class_definition" {
+		return nil
+	}
+	supers := node.ChildByFieldName("superclasses")
+	if supers == nil {
+		return nil
+	}
+	line := int(node.StartPoint().Row) + 1
+	var out []symbols.Ref
+	for i := 0; i < int(supers.ChildCount()); i++ {
+		c := supers.Child(i)
+		switch c.Type() {
+		case "identifier", "attribute", "subscript":
+			if ref, ok := e.implementsRef(c, line); ok {
+				out = append(out, ref)
+			}
+		}
+	}
+	return out
+}
+
+// -----------------------------------------------------------------------------
+// Ruby
+// class X < Y → implements Y. Module include/extend also emit implements edges.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsRuby(node *sitter.Node) []symbols.Ref {
+	line := int(node.StartPoint().Row) + 1
+	switch node.Type() {
+	case "class":
+		if sc := node.ChildByFieldName("superclass"); sc != nil {
+			// superclass node wraps the actual name.
+			if id := findDescendantByType(sc, "constant"); id != nil {
+				if ref, ok := e.implementsRef(id, line); ok {
+					return []symbols.Ref{ref}
+				}
+			}
+		}
+	case "call":
+		// include Foo / extend Foo
+		method := node.ChildByFieldName("method")
+		if method == nil {
+			return nil
+		}
+		m := method.Content(e.src)
+		if m != "include" && m != "extend" && m != "prepend" {
+			return nil
+		}
+		args := node.ChildByFieldName("arguments")
+		if args == nil {
+			return nil
+		}
+		var out []symbols.Ref
+		for i := 0; i < int(args.ChildCount()); i++ {
+			c := args.Child(i)
+			if c.Type() == "constant" || c.Type() == "scope_resolution" {
+				if ref, ok := e.implementsRef(c, line); ok {
+					out = append(out, ref)
+				}
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// -----------------------------------------------------------------------------
+// PHP
+// class_declaration → base_clause (extends) + class_interface_clause (implements).
+// interface_declaration → base_clause for extends.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsPHP(node *sitter.Node) []symbols.Ref {
+	switch node.Type() {
+	case "class_declaration", "interface_declaration", "trait_declaration":
+	default:
+		return nil
+	}
+	line := int(node.StartPoint().Row) + 1
+	var out []symbols.Ref
+	for i := 0; i < int(node.ChildCount()); i++ {
+		c := node.Child(i)
+		switch c.Type() {
+		case "base_clause", "class_interface_clause":
+			for j := 0; j < int(c.ChildCount()); j++ {
+				gc := c.Child(j)
+				switch gc.Type() {
+				case "name", "qualified_name":
+					if ref, ok := e.implementsRef(gc, line); ok {
+						out = append(out, ref)
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// -----------------------------------------------------------------------------
+// C++
+// class_specifier / struct_specifier → base_class_clause whose entries carry
+// identifier / qualified_identifier / template_type names.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) extractImplementsCpp(node *sitter.Node) []symbols.Ref {
+	switch node.Type() {
+	case "class_specifier", "struct_specifier":
+	default:
+		return nil
+	}
+	line := int(node.StartPoint().Row) + 1
+	base := findChildByType(node, "base_class_clause")
+	if base == nil {
+		return nil
+	}
+	return e.collectImplementsFromClause(base, line,
+		"type_identifier", "qualified_identifier", "template_type", "identifier")
 }

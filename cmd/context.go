@@ -66,6 +66,32 @@ Examples:
 				}
 			}
 
+			// Implementors / Implements sections (type-like symbols only).
+			if len(result.Implementors) > 0 {
+				fmt.Fprintf(&content, "\n# Implementors (%d)\n", len(result.Implementors))
+				for _, imp := range result.Implementors {
+					nm := imp.Implementer
+					if nm == "" {
+						nm = "(anonymous)"
+					}
+					tag := ""
+					if !imp.Resolved {
+						tag = "  (external)"
+					}
+					fmt.Fprintf(&content, "  %s  %s:%d%s\n", nm, imp.RelPath, imp.Line, tag)
+				}
+			}
+			if len(result.Implements) > 0 {
+				fmt.Fprintf(&content, "\n# Implements (%d)\n", len(result.Implements))
+				for _, imp := range result.Implements {
+					tag := ""
+					if !imp.Resolved {
+						tag = "  (external)"
+					}
+					fmt.Fprintf(&content, "  %s  %s:%d%s\n", imp.Target, imp.RelPath, imp.Line, tag)
+				}
+			}
+
 			// File imports section.
 			if len(result.FileImports) > 0 {
 				fmt.Fprintf(&content, "\n# Imports\n")
