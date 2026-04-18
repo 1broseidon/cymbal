@@ -27,3 +27,6 @@ docs/.vitepress/cache/
 
 # Benchmark corpus
 bench/.corpus/
+
+# Local planning scratchpad
+plans/
