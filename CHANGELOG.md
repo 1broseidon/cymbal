@@ -11,7 +11,7 @@ All notable changes to cymbal are documented here.
 
 ### Added
 
-- **`search -i` / `--ignore-case`** — case-insensitive match for `search --exact`. Backed by a `COLLATE NOCASE` predicate; leaves FTS5 prefix/fuzzy search (already case-insensitive) untouched. Exposed on `index.SearchQuery` as `IgnoreCase`.
+- **`search -i` / `--ignore-case`** — case-insensitive exact match for symbol search. `-i` now implies `--exact`, and remains unsupported with `--text`. Backed by a `COLLATE NOCASE` predicate; leaves FTS5 prefix/fuzzy search (already case-insensitive) untouched. Exposed on `index.SearchQuery` as `IgnoreCase`.
 
 ### Breaking (library API)
 

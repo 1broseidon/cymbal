@@ -31,6 +31,11 @@ Results are ranked: exact match > prefix > fuzzy.`,
 		excludes, _ := cmd.Flags().GetStringArray("exclude")
 		hasFilters := len(includes) > 0 || len(excludes) > 0
 
+		effectiveExact, err := normalizeSearchMode(exact, ignoreCase, textMode)
+		if err != nil {
+			return err
+		}
+
 		if textMode {
 			return searchText(dbPath, query, lang, limit, jsonOut, includes, excludes)
 		}
@@ -39,7 +44,7 @@ Results are ranked: exact match > prefix > fuzzy.`,
 			Text:       query,
 			Kind:       kind,
 			Language:   lang,
-			Exact:      exact,
+			Exact:      effectiveExact,
 			IgnoreCase: ignoreCase,
 			Limit:      widenPathFilterLimit(limit, hasFilters),
 		})
@@ -81,11 +86,26 @@ func init() {
 	searchCmd.Flags().IntP("limit", "n", 20, "max results")
 	searchCmd.Flags().StringP("lang", "l", "", "filter by language (go, python, typescript, etc.)")
 	searchCmd.Flags().BoolP("exact", "e", false, "exact name match only")
-	searchCmd.Flags().BoolP("ignore-case", "i", false, "case-insensitive match (applies to --exact)")
+	searchCmd.Flags().BoolP("ignore-case", "i", false, "case-insensitive exact match (implies --exact; not supported with --text)")
 	searchCmd.Flags().BoolP("text", "t", false, "full-text grep across file contents")
 	searchCmd.Flags().StringArray("path", nil, "include only results whose path matches this glob (repeatable)")
 	searchCmd.Flags().StringArray("exclude", nil, "exclude results whose path matches this glob (repeatable)")
 	rootCmd.AddCommand(searchCmd)
+}
+
+func normalizeSearchMode(exact, ignoreCase, textMode bool) (bool, error) {
+	if !ignoreCase {
+		return exact, nil
+	}
+	if textMode {
+		return exact, fmt.Errorf("--ignore-case is not supported with --text")
+	}
+	// FTS-backed non-exact search is already case-insensitive, so `-i`
+	// upgrades symbol search to an exact case-insensitive match.
+	if !exact {
+		return true, nil
+	}
+	return exact, nil
 }
 
 func searchText(dbPath, query, lang string, limit int, jsonOut bool, includes, excludes []string) error {
