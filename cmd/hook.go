@@ -15,7 +15,7 @@ import (
 // Agent hooks. See issue #23.
 //
 // Problem: coding agents ignore the "use cymbal first" prompt as context
-// grows and fall back to rg/grep/find. We give them three small, agent-
+// grows and fall back to rg/grep/find. We give them two small, agent-
 // agnostic subcommands that integration layers can wire into their native
 // hook points:
 //
@@ -26,12 +26,16 @@ import (
 //   cymbal hook remind   print a short system block an agent can inject at
 //                        session start or on reminders.
 //
-//   cymbal hook install / uninstall <agent>
-//                        wire the above into ~/.claude/settings.json,
-//                        .cursor/rules/cymbal.md, .windsurfrules, etc.
+// The nudge/remind surface is agent-agnostic. For the most popular agent we
+// also ship a one-liner installer:
 //
-// The CLI surface is agent-agnostic on purpose. Per-agent adapters
-// (below) are tiny and just format the same underlying content.
+//   cymbal hook install / uninstall claude-code
+//                        wire the above into ~/.claude/settings.json.
+//
+// Other agents (Cursor, Windsurf, aider, Cline, Continue, Zed, etc.) can
+// consume the same subcommands — see docs/AGENT_HOOKS.md for copy-paste
+// snippets per agent. Auto-installers for those are intentionally out of
+// scope so we don't maintain config adapters for every agent in the world.
 
 var hookCmd = &cobra.Command{
 	Use:   "hook",
@@ -93,13 +97,15 @@ Formats:
 
 var hookInstallCmd = &cobra.Command{
 	Use:   "install <agent>",
-	Short: "Install cymbal hooks into the given agent (claude-code, cursor, windsurf)",
-	Long: `Wire the nudge and remind hooks into the named agent's config. Supported
-agents:
+	Short: "Install cymbal hooks into the given agent (claude-code)",
+	Long: `Wire the nudge and remind hooks into the named agent's config.
 
+Supported agents:
   claude-code   ~/.claude/settings.json (or --scope project for .claude/settings.json)
-  cursor        .cursor/rules/cymbal.md
-  windsurf      .windsurfrules
+
+For other agents (Cursor, Windsurf, aider, Cline, Continue, Zed, ...), see
+docs/AGENT_HOOKS.md for copy-paste snippets that wire 'cymbal hook nudge'
+and 'cymbal hook remind' into each agent's native hook point.
 
 Use --dry-run to see the changes without writing. Use --scope=project to
 install into the current repo instead of the user home.`,
@@ -523,12 +529,10 @@ func lookupHookAdapter(name string) (hookAdapter, error) {
 	switch strings.ToLower(name) {
 	case "claude-code", "claudecode", "claude":
 		return hookAdapter{install: installClaudeCode, uninstall: uninstallClaudeCode}, nil
-	case "cursor":
-		return hookAdapter{install: installRulesFile(".cursor/rules/cymbal.md"), uninstall: uninstallRulesFile(".cursor/rules/cymbal.md")}, nil
-	case "windsurf":
-		return hookAdapter{install: installRulesFile(".windsurfrules"), uninstall: uninstallRulesFile(".windsurfrules")}, nil
 	}
-	return hookAdapter{}, fmt.Errorf("unknown agent %q (supported: claude-code, cursor, windsurf)", name)
+	return hookAdapter{}, fmt.Errorf("unknown agent %q (supported: claude-code). "+
+		"For other agents see docs/AGENT_HOOKS.md — 'cymbal hook nudge' and "+
+		"'cymbal hook remind' can be wired by hand into any agent's hook point.", name)
 }
 
 // ── Claude Code adapter ──
@@ -726,111 +730,4 @@ func uninstallClaudeCode(scope string, dryRun bool) (string, string, error) {
 		return path, "", err
 	}
 	return path, string(data), nil
-}
-
-// ── rules-file adapter (cursor, windsurf) ──
-
-const rulesMarkerStart = "<!-- cymbal-hook:begin -->"
-const rulesMarkerEnd = "<!-- cymbal-hook:end -->"
-
-// rulesBlock is the content we inject into .cursor/rules/cymbal.md or
-// .windsurfrules. Mirrors the reminder text so behavior is consistent with
-// Claude Code's UserPromptSubmit injection.
-var rulesBlock = rulesMarkerStart + "\n" +
-	"# cymbal\n\n" +
-	reminderText + "\n" +
-	rulesMarkerEnd + "\n"
-
-func installRulesFile(relPath string) func(string, bool) (string, string, error) {
-	return func(scope string, dryRun bool) (string, string, error) {
-		path, err := resolveRulesPath(relPath, scope)
-		if err != nil {
-			return "", "", err
-		}
-		existing, _ := os.ReadFile(path)
-		var updated string
-		if bytesContains(existing, rulesMarkerStart) {
-			updated = replaceMarkedBlock(string(existing), rulesBlock)
-		} else {
-			updated = strings.TrimRight(string(existing), "\n")
-			if updated != "" {
-				updated += "\n\n"
-			}
-			updated += rulesBlock
-		}
-		if dryRun {
-			return path, updated, nil
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return path, "", err
-		}
-		if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-			return path, "", err
-		}
-		return path, updated, nil
-	}
-}
-
-func uninstallRulesFile(relPath string) func(string, bool) (string, string, error) {
-	return func(scope string, dryRun bool) (string, string, error) {
-		path, err := resolveRulesPath(relPath, scope)
-		if err != nil {
-			return "", "", err
-		}
-		existing, err := os.ReadFile(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return path, "", nil
-			}
-			return path, "", err
-		}
-		updated := replaceMarkedBlock(string(existing), "")
-		updated = strings.TrimRight(updated, "\n") + "\n"
-		if strings.TrimSpace(updated) == "" {
-			if dryRun {
-				return path, "(file would be removed)", nil
-			}
-			_ = os.Remove(path)
-			return path, "", nil
-		}
-		if dryRun {
-			return path, updated, nil
-		}
-		return path, updated, os.WriteFile(path, []byte(updated), 0o644)
-	}
-}
-
-func resolveRulesPath(rel, scope string) (string, error) {
-	if scope == "user" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(home, rel), nil
-	}
-	return rel, nil
-}
-
-func bytesContains(b []byte, s string) bool {
-	return strings.Contains(string(b), s)
-}
-
-// replaceMarkedBlock replaces the first marker-delimited block in src with
-// replacement. If replacement is empty, the block (and its trailing newline)
-// is removed. If no marker is present, src is returned unchanged.
-func replaceMarkedBlock(src, replacement string) string {
-	i := strings.Index(src, rulesMarkerStart)
-	if i < 0 {
-		return src
-	}
-	j := strings.Index(src[i:], rulesMarkerEnd)
-	if j < 0 {
-		return src
-	}
-	end := i + j + len(rulesMarkerEnd)
-	// Consume trailing newline so repeated installs don't stack blank lines.
-	if end < len(src) && src[end] == '\n' {
-		end++
-	}
-	return src[:i] + replacement + src[end:]
 }

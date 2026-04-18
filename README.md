@@ -186,26 +186,24 @@ Run all cymbal commands as: `docker run --rm -v "$(pwd)":/workspace ghcr.io/1bro
 
 ### Agent hooks
 
-Prompting works, but agents drift back to `grep`/`find` as context grows (see [issue #23](https://github.com/1broseidon/cymbal/issues/23)). Cymbal ships three small, agent-agnostic hook commands:
+Prompting works, but agents drift back to `grep`/`find` as context grows (see [issue #23](https://github.com/1broseidon/cymbal/issues/23)). Cymbal ships two small, agent-agnostic hook commands:
 
 | Command | What it does |
 |---|---|
 | `cymbal hook nudge` | Inspect a would-be shell command and, if it looks like a code search, emit a short system-message suggesting the cymbal equivalent. Never blocks. |
-| `cymbal hook remind` | Print a tone-calibrated reminder block agents can inject at session start or on a trigger. |
-| `cymbal hook install <agent>` | Wire the above into the agent's native hook points. `uninstall` reverses it. `--dry-run` shows the diff. |
+| `cymbal hook remind` | Print a tone-calibrated reminder block agents can inject at session start or on demand. |
 
-**One-liner install:**
+**Claude Code — one-liner install:**
 
 ```bash
-cymbal hook install claude-code           # ~/.claude/settings.json (user scope)
+cymbal hook install claude-code                   # ~/.claude/settings.json
 cymbal hook install claude-code --scope project   # .claude/settings.json
-cymbal hook install cursor                # .cursor/rules/cymbal.md
-cymbal hook install windsurf              # .windsurfrules
+cymbal hook uninstall claude-code                 # clean removal
 ```
 
-Installers are idempotent, preserve unrelated config, and mark their own entries so `cymbal hook uninstall <agent>` cleans up without touching anything you added yourself.
+The installer is idempotent, preserves unrelated settings, and marks its own entries so `uninstall` is surgical.
 
-Any runtime that can shell out on a pre-tool or pre-prompt event can also consume `cymbal hook nudge --format=text` (stderr suggestion) or `--format=json` (structured payload) directly. Claude Code's `PreToolUse` + `UserPromptSubmit` get full JSON treatment; Cursor and Windsurf get a marker-delimited block in their rules file.
+**Other agents** (Cursor, Windsurf, aider, Cline, Continue, Zed, Codex/OpenAI Agents SDK, or anything that can shell out on a pre-tool event) — see [`docs/AGENT_HOOKS.md`](docs/AGENT_HOOKS.md) for copy-paste snippets. The same two subcommands work everywhere; `nudge` offers `--format=claude-code|json|text` and `remind` offers the same three formats, so every integration is one or two lines.
 
 ### Why this works
 

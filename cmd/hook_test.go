@@ -260,55 +260,14 @@ func TestClaudeCodeInstallIsIdempotent(t *testing.T) {
 	}
 }
 
-// ── rules-file install / uninstall round-trip ──
+// ── unknown agent hint ──
 
-func TestRulesFileInstallAndUninstallPreservesOtherContent(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".cursor", "rules", "cymbal.md")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+func TestLookupHookAdapterUnknownAgentMentionsDocs(t *testing.T) {
+	_, err := lookupHookAdapter("cursor")
+	if err == nil {
+		t.Fatal("expected error for unsupported agent")
 	}
-	// Pre-existing user rules that must survive.
-	seed := "# My rules\n\nBe helpful.\n"
-	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
-		t.Fatal(err)
+	if !strings.Contains(err.Error(), "docs/AGENT_HOOKS.md") {
+		t.Errorf("unknown-agent error should point users at the docs; got %q", err)
 	}
-
-	// install: append a marked block.
-	installed := installRulesFile("cymbal.md") // relPath unused because of resolver override below
-	// Resolve directly against our tempdir by faking project scope rooted
-	// at `dir`. installRulesFile uses resolveRulesPath; easier to bypass
-	// by reimplementing the same append-with-markers logic inline for test.
-	existing, _ := os.ReadFile(path)
-	updated := string(existing)
-	if strings.Contains(updated, rulesMarkerStart) {
-		t.Fatal("pre-seed should not contain our marker")
-	}
-	updated = strings.TrimRight(updated, "\n") + "\n\n" + rulesBlock
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(updated, "# My rules") {
-		t.Errorf("original content lost after install: %s", updated)
-	}
-	if !strings.Contains(updated, "cymbal search") {
-		t.Errorf("install should insert reminder text: %s", updated)
-	}
-
-	// install again — replaceMarkedBlock keeps one copy.
-	replaced := replaceMarkedBlock(updated, rulesBlock)
-	if strings.Count(replaced, rulesMarkerStart) != 1 {
-		t.Errorf("install must be idempotent; got %d marker copies", strings.Count(replaced, rulesMarkerStart))
-	}
-
-	// uninstall: remove the marked block, keep original content.
-	final := replaceMarkedBlock(replaced, "")
-	final = strings.TrimRight(final, "\n") + "\n"
-	if !strings.Contains(final, "# My rules") {
-		t.Errorf("uninstall dropped user content: %q", final)
-	}
-	if strings.Contains(final, rulesMarkerStart) {
-		t.Errorf("uninstall left marker behind: %q", final)
-	}
-	_ = installed // unused; see comment above
 }
