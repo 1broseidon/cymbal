@@ -693,16 +693,38 @@ func FindImportersByPath(dbPath, target string, depth, limit int) ([]ImporterRes
 	return store.FindImportersByPath(target, depth, limit)
 }
 
+// FindImplementors finds local types that declare themselves as implementing /
+// conforming to / extending the given target name.
+func FindImplementors(dbPath, target string, limit int) ([]ImplementorResult, error) {
+	store, err := openCached(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return store.FindImplementors(target, limit)
+}
+
+// FindImplements returns the inheritance / conformance edges declared by a
+// specific local type (the inverse of FindImplementors).
+func FindImplements(dbPath, typeName string, limit int) ([]ImplementorResult, error) {
+	store, err := openCached(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return store.FindImplements(typeName, limit)
+}
+
 // ContextResult bundles all context needed to understand a symbol.
 type ContextResult struct {
-	Symbol      SymbolResult   `json:"symbol"`
-	Source      string         `json:"source"`
-	TypeRefs    []SymbolResult `json:"type_refs"`
-	Callers     []RefResult    `json:"callers"`
-	FileImports []string       `json:"file_imports"`
-	Matches     []SymbolResult `json:"matches,omitempty"`
-	MatchCount  int            `json:"match_count,omitempty"`
-	Ambiguous   bool           `json:"ambiguous,omitempty"`
+	Symbol       SymbolResult        `json:"symbol"`
+	Source       string              `json:"source"`
+	TypeRefs     []SymbolResult      `json:"type_refs"`
+	Callers      []RefResult         `json:"callers"`
+	FileImports  []string            `json:"file_imports"`
+	Implementors []ImplementorResult `json:"implementors,omitempty"`
+	Implements   []ImplementorResult `json:"implements,omitempty"`
+	Matches      []SymbolResult      `json:"matches,omitempty"`
+	MatchCount   int                 `json:"match_count,omitempty"`
+	Ambiguous    bool                `json:"ambiguous,omitempty"`
 }
 
 // SymbolContext returns bundled context for a symbol: source, type refs, callers, and file imports.
@@ -748,15 +770,27 @@ func SymbolContext(dbPath, symbolName string, callerLimit int) (*ContextResult, 
 		return nil, err
 	}
 
+	// Inheritance / conformance edges for type-like symbols. Best-effort; empty
+	// for functions and modules.
+	var implementors, implements []ImplementorResult
+	switch sym.Kind {
+	case "class", "struct", "type", "interface", "trait", "enum",
+		"object", "mixin", "extension", "protocol", "record", "actor":
+		implementors, _ = store.FindImplementors(sym.Name, 20)
+		implements, _ = store.FindImplements(sym.Name, 20)
+	}
+
 	return &ContextResult{
-		Symbol:      sym,
-		Source:      source,
-		TypeRefs:    typeRefs,
-		Callers:     callers,
-		FileImports: imports,
-		Matches:     altMatches,
-		MatchCount:  len(altMatches),
-		Ambiguous:   len(altMatches) > 1,
+		Symbol:       sym,
+		Source:       source,
+		TypeRefs:     typeRefs,
+		Callers:      callers,
+		FileImports:  imports,
+		Implementors: implementors,
+		Implements:   implements,
+		Matches:      altMatches,
+		MatchCount:   len(altMatches),
+		Ambiguous:    len(altMatches) > 1,
 	}, nil
 }
 
@@ -773,13 +807,15 @@ func (e *AmbiguousError) Error() string {
 // InvestigateResult is a kind-adaptive response that returns
 // the right shape of information based on what the symbol is.
 type InvestigateResult struct {
-	Symbol  SymbolResult   `json:"symbol"`
-	Source  string         `json:"source"`
-	Kind    string         `json:"investigate_kind"`  // "function", "type", "module"
-	Refs    []RefResult    `json:"refs,omitempty"`    // callers/usages (functions)
-	Impact  []ImpactResult `json:"impact,omitempty"`  // transitive callers (functions)
-	Members []SymbolResult `json:"members,omitempty"` // methods/fields (types)
-	Outline []SymbolResult `json:"outline,omitempty"` // file overview (when symbol is a file-level type)
+	Symbol       SymbolResult        `json:"symbol"`
+	Source       string              `json:"source"`
+	Kind         string              `json:"investigate_kind"`       // "function", "type", "module"
+	Refs         []RefResult         `json:"refs,omitempty"`         // callers/usages (functions)
+	Impact       []ImpactResult      `json:"impact,omitempty"`       // transitive callers (functions)
+	Members      []SymbolResult      `json:"members,omitempty"`      // methods/fields (types)
+	Outline      []SymbolResult      `json:"outline,omitempty"`      // file overview (when symbol is a file-level type)
+	Implementors []ImplementorResult `json:"implementors,omitempty"` // types that implement/conform to this (for interface/protocol/trait kinds)
+	Implements   []ImplementorResult `json:"implements,omitempty"`   // what this type implements/extends (for class-like kinds)
 }
 
 // Investigate returns kind-adaptive context for a symbol.
@@ -839,11 +875,14 @@ func Investigate(dbPath, symbolName string, opts ...InvestigateOpts) (*Investiga
 		res.Refs, _ = store.FindReferences(sym.Name, 20)
 		res.Impact, _ = store.FindImpact(sym.Name, 2, 20)
 
-	case "class", "struct", "type", "interface", "trait", "enum", "object", "mixin", "extension":
+	case "class", "struct", "type", "interface", "trait", "enum", "object", "mixin", "extension", "protocol", "record", "actor":
 		res.Kind = "type"
 		res.Members, _ = store.ChildSymbols(sym.Name, 50, sym.File)
 		// For types, show who references the type name.
 		res.Refs, _ = store.FindReferences(sym.Name, 20)
+		// Inheritance / conformance edges (both directions, best-effort).
+		res.Implementors, _ = store.FindImplementors(sym.Name, 20)
+		res.Implements, _ = store.FindImplements(sym.Name, 20)
 
 	default:
 		// Unknown kind — return source + refs as best effort.
@@ -889,10 +928,12 @@ func InvestigateResolved(dbPath string, sym SymbolResult) (*InvestigateResult, e
 		res.Kind = "function"
 		res.Refs, _ = store.FindReferences(sym.Name, 20)
 		res.Impact, _ = store.FindImpact(sym.Name, 2, 20)
-	case "class", "struct", "type", "interface", "trait", "enum", "object", "mixin", "extension":
+	case "class", "struct", "type", "interface", "trait", "enum", "object", "mixin", "extension", "protocol", "record", "actor":
 		res.Kind = "type"
 		res.Members, _ = store.ChildSymbols(sym.Name, 50, sym.File)
 		res.Refs, _ = store.FindReferences(sym.Name, 20)
+		res.Implementors, _ = store.FindImplementors(sym.Name, 20)
+		res.Implements, _ = store.FindImplements(sym.Name, 20)
 	default:
 		res.Kind = sym.Kind
 		res.Refs, _ = store.FindReferences(sym.Name, 20)
@@ -914,7 +955,8 @@ func FindImpact(dbPath, symbolName string, depth, limit int) ([]ImpactResult, er
 }
 
 // FindTrace performs downward call graph traversal for a symbol.
-func FindTrace(dbPath, symbolName string, depth, limit int) ([]TraceResult, error) {
+// kinds filters which ref kinds count as edges (default: {"call"}).
+func FindTrace(dbPath, symbolName string, depth, limit int, kinds ...string) ([]TraceResult, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -922,7 +964,7 @@ func FindTrace(dbPath, symbolName string, depth, limit int) ([]TraceResult, erro
 	if err != nil {
 		return nil, err
 	}
-	return store.FindTrace(symbolName, depth, limit)
+	return store.FindTrace(symbolName, depth, limit, kinds...)
 }
 
 // SearchSymbolsFlex performs a flexible search: case-insensitive + prefix match.

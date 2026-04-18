@@ -18,6 +18,39 @@ type GroundTruthSpec struct {
 	Search *GroundTruthSearchSpec `yaml:"search"`
 	Show   *GroundTruthLocation   `yaml:"show"`
 	Refs   *GroundTruthRefsSpec   `yaml:"refs"`
+	Impls  *GroundTruthImplsSpec  `yaml:"impls"`
+	Trace  *GroundTruthTraceSpec  `yaml:"trace"`
+}
+
+// GroundTruthImplsSpec pins the exact set of local types that should be
+// returned as implementors/conformers of the symbol. Expected entries are
+// matched by implementer-name + file path. ForbidNoise names MUST NOT appear
+// in output (e.g. a Swift type that only mentions the protocol in a type
+// annotation, not in an inheritance clause).
+type GroundTruthImplsSpec struct {
+	Limit       int               `yaml:"limit"`
+	Expected    []GroundTruthImpl `yaml:"expected"`
+	ForbidNoise []string          `yaml:"forbid_noise"`
+	External    bool              `yaml:"external"` // target is a framework protocol (Resolved=false expected)
+	Of          string            `yaml:"of"`       // if set, run --of <type> instead of incoming direction
+}
+
+type GroundTruthImpl struct {
+	Implementer string `yaml:"implementer"`
+	File        string `yaml:"file"`
+	Line        int    `yaml:"line"`
+}
+
+// GroundTruthTraceSpec verifies that default trace is call-only. ExpectCallees
+// MUST appear; ForbidNoise (type-mention noise: UUID, Date, Sendable, String,
+// Int, etc.) MUST NOT. WideIncludes is what should reappear when --kinds
+// call,use is passed.
+type GroundTruthTraceSpec struct {
+	Depth         int      `yaml:"depth"`
+	Limit         int      `yaml:"limit"`
+	ExpectCallees []string `yaml:"expect_callees"`
+	ForbidNoise   []string `yaml:"forbid_noise"`
+	WideIncludes  []string `yaml:"wide_includes"` // must appear when --kinds call,use
 }
 
 type GroundTruthSearchSpec struct {
@@ -75,6 +108,9 @@ type GroundTruthSummary struct {
 	RefsPrecision   float64 `json:"refs_precision"`
 	RefsRecall      float64 `json:"refs_recall"`
 	ShowExactRate   float64 `json:"show_exact_rate"`
+	ImplsPrecision  float64 `json:"impls_precision"`
+	ImplsRecall     float64 `json:"impls_recall"`
+	TracePassRate   float64 `json:"trace_pass_rate"`
 }
 
 type CanonicalCaseResult struct {
@@ -158,6 +194,12 @@ func benchGroundTruth(cymbalBin string, repos []Repo, corpusDir string) []Ground
 			if sym.GroundTruth.Refs != nil {
 				checks = append(checks, runGroundTruthRefs(cymbalBin, repo.Name, repoDir, sym))
 			}
+			if sym.GroundTruth.Impls != nil {
+				checks = append(checks, runGroundTruthImpls(cymbalBin, repo.Name, repoDir, sym))
+			}
+			if sym.GroundTruth.Trace != nil {
+				checks = append(checks, runGroundTruthTrace(cymbalBin, repo.Name, repoDir, sym))
+			}
 		}
 	}
 	return checks
@@ -168,6 +210,9 @@ func summarizeGroundTruth(checks []GroundTruthCheck) GroundTruthSummary {
 	var searchTP, searchFP, searchFN int
 	var refsTP, refsFP, refsFN int
 	var showPassed, showTotal int
+
+	var implsTP, implsFP, implsFN int
+	var traceTotal, tracePassed int
 
 	summary.Total = len(checks)
 	for _, check := range checks {
@@ -188,6 +233,15 @@ func summarizeGroundTruth(checks []GroundTruthCheck) GroundTruthSummary {
 			if check.Passed {
 				showPassed++
 			}
+		case OpImpls:
+			implsTP += check.TruePositives
+			implsFP += check.FalsePositives
+			implsFN += check.FalseNegatives
+		case OpTrace:
+			traceTotal++
+			if check.Passed {
+				tracePassed++
+			}
 		}
 	}
 
@@ -196,6 +250,9 @@ func summarizeGroundTruth(checks []GroundTruthCheck) GroundTruthSummary {
 	summary.RefsPrecision = ratioPct(refsTP, refsTP+refsFP)
 	summary.RefsRecall = ratioPct(refsTP, refsTP+refsFN)
 	summary.ShowExactRate = ratioPct(showPassed, showTotal)
+	summary.ImplsPrecision = ratioPct(implsTP, implsTP+implsFP)
+	summary.ImplsRecall = ratioPct(implsTP, implsTP+implsFN)
+	summary.TracePassRate = ratioPct(tracePassed, traceTotal)
 	return summary
 }
 
@@ -520,6 +577,300 @@ func runGroundTruthRefs(cymbalBin, repoName, repoDir string, sym Symbol) GroundT
 		expected = append(expected, gtLoc{File: normalizeGTPath(e.File), Line: e.Line})
 	}
 	return compareGroundTruth(repoName, sym.Name, OpRefs, actual, expected)
+}
+
+// ── impls ground truth ─────────────────────────────────────────────
+
+type groundTruthImplsResponse struct {
+	Results []struct {
+		Implementer string `json:"implementer"`
+		Target      string `json:"target"`
+		RelPath     string `json:"rel_path"`
+		Line        int    `json:"line"`
+		Resolved    bool   `json:"resolved"`
+		Language    string `json:"language"`
+	} `json:"results"`
+}
+
+// implsRow is the flattened row shape we consume from `cymbal --json impls`.
+type implsRow struct {
+	Implementer string `json:"implementer"`
+	Target      string `json:"target"`
+	RelPath     string `json:"rel_path"`
+	Line        int    `json:"line"`
+	Resolved    bool   `json:"resolved"`
+	Language    string `json:"language"`
+}
+
+// parseImplsJSON accepts both the object-wrapped {"results": [...]} shape and
+// a bare array, matching however cymbal --json currently renders impls.
+func parseImplsJSON(out []byte) ([]implsRow, error) {
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" || trimmed == "null" {
+		return nil, nil
+	}
+	var obj struct {
+		Results []implsRow `json:"results"`
+	}
+	if err := json.Unmarshal(out, &obj); err == nil && len(obj.Results) > 0 {
+		return obj.Results, nil
+	}
+	var bare []implsRow
+	if err := json.Unmarshal(out, &bare); err != nil {
+		return nil, err
+	}
+	return bare, nil
+}
+
+// primaryName returns the name we compare against expected/forbidden sets.
+// For --of queries that's the target; otherwise it's the implementer.
+func (r implsRow) primaryName(ofMode bool) string {
+	nm := r.Implementer
+	if ofMode {
+		nm = r.Target
+	}
+	if nm == "" {
+		nm = "(anonymous)"
+	}
+	return nm
+}
+
+// evaluateImpls computes tp/fp/fn + forbidden + resolved-mismatch lists for a
+// set of impls rows against a spec. Pure, testable, and keeps
+// runGroundTruthImpls well below the cyclomatic threshold.
+type implsEval struct {
+	tp               int
+	missing          []string
+	unexpected       []string
+	forbidden        []string
+	resolvedMismatch []string
+}
+
+func evaluateImpls(rows []implsRow, spec *GroundTruthImplsSpec) implsEval {
+	var e implsEval
+	ofMode := spec.Of != ""
+
+	actualKeys := map[string]bool{}
+	actualNames := map[string]bool{}
+	for _, r := range rows {
+		nm := r.primaryName(ofMode)
+		actualKeys[nm+"|"+normalizeGTPath(r.RelPath)] = true
+		actualNames[nm] = true
+	}
+
+	expectedNames := map[string]bool{}
+	for _, exp := range spec.Expected {
+		expectedNames[exp.Implementer] = true
+		key := exp.Implementer + "|" + normalizeGTPath(exp.File)
+		if actualKeys[key] {
+			e.tp++
+			continue
+		}
+		e.missing = append(e.missing, fmt.Sprintf("%s@%s", exp.Implementer, normalizeGTPath(exp.File)))
+	}
+	for _, r := range rows {
+		nm := r.primaryName(ofMode)
+		if nm == "(anonymous)" || expectedNames[nm] {
+			continue
+		}
+		e.unexpected = append(e.unexpected, fmt.Sprintf("%s@%s", nm, normalizeGTPath(r.RelPath)))
+	}
+	for _, n := range spec.ForbidNoise {
+		if actualNames[n] {
+			e.forbidden = append(e.forbidden, n)
+		}
+	}
+	if spec.External {
+		for _, r := range rows {
+			if r.Resolved {
+				e.resolvedMismatch = append(e.resolvedMismatch, r.Implementer)
+			}
+		}
+	}
+	sort.Strings(e.missing)
+	sort.Strings(e.unexpected)
+	sort.Strings(e.forbidden)
+	sort.Strings(e.resolvedMismatch)
+	return e
+}
+
+func formatImplsDetail(e implsEval) string {
+	var parts []string
+	if len(e.missing) > 0 {
+		parts = append(parts, "missing "+truncateGTList(e.missing))
+	}
+	if len(e.unexpected) > 0 {
+		parts = append(parts, "unexpected "+truncateGTList(e.unexpected))
+	}
+	if len(e.forbidden) > 0 {
+		parts = append(parts, "forbid_noise leaked: "+truncateGTList(e.forbidden))
+	}
+	if len(e.resolvedMismatch) > 0 {
+		parts = append(parts, "expected external (resolved=false), got resolved=true for: "+truncateGTList(e.resolvedMismatch))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func runGroundTruthImpls(cymbalBin, repoName, repoDir string, sym Symbol) GroundTruthCheck {
+	spec := sym.GroundTruth.Impls
+	limit := spec.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	args := []string{"--json", "impls", "--limit", fmt.Sprintf("%d", limit)}
+	if spec.Of != "" {
+		args = append(args, "--of", spec.Of)
+	} else {
+		args = append(args, sym.Name)
+	}
+	out, err := runGroundTruthCmd(repoDir, cymbalBin, args...)
+	if err != nil {
+		return GroundTruthCheck{Repo: repoName, Symbol: sym.Name, Op: OpImpls, Details: err.Error()}
+	}
+	rows, perr := parseImplsJSON(out)
+	if perr != nil {
+		return GroundTruthCheck{Repo: repoName, Symbol: sym.Name, Op: OpImpls,
+			Details: fmt.Sprintf("parse impls json: %v", perr)}
+	}
+
+	eval := evaluateImpls(rows, spec)
+	fn := len(eval.missing)
+	fp := len(eval.unexpected)
+	passed := fn == 0 && fp == 0 && len(eval.forbidden) == 0 && len(eval.resolvedMismatch) == 0
+
+	return GroundTruthCheck{
+		Repo:           repoName,
+		Symbol:         sym.Name,
+		Op:             OpImpls,
+		Passed:         passed,
+		Precision:      ratioPct(eval.tp, eval.tp+fp),
+		Recall:         ratioPct(eval.tp, eval.tp+fn),
+		TruePositives:  eval.tp,
+		FalsePositives: fp,
+		FalseNegatives: fn,
+		Expected:       len(spec.Expected),
+		Actual:         len(rows),
+		Details:        formatImplsDetail(eval),
+	}
+}
+
+// ── trace noise-reduction ground truth ─────────────────────────────
+
+type groundTruthTraceResponse struct {
+	Results []struct {
+		Callee string `json:"callee"`
+		Line   int    `json:"line"`
+	} `json:"results"`
+}
+
+func runGroundTruthTrace(cymbalBin, repoName, repoDir string, sym Symbol) GroundTruthCheck {
+	spec := sym.GroundTruth.Trace
+	depth := spec.Depth
+	if depth <= 0 {
+		depth = 2
+	}
+	limit := spec.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+
+	// Default trace (call-only): expect_callees MUST appear, forbid_noise MUST NOT.
+	args := []string{"--json", "trace", "--depth", fmt.Sprintf("%d", depth), "-n", fmt.Sprintf("%d", limit), sym.Name}
+	out, err := runGroundTruthCmd(repoDir, cymbalBin, args...)
+	if err != nil {
+		return GroundTruthCheck{Repo: repoName, Symbol: sym.Name, Op: OpTrace, Details: err.Error()}
+	}
+	callees := parseTraceCallees(out)
+
+	var missing []string
+	for _, want := range spec.ExpectCallees {
+		if !callees[want] {
+			missing = append(missing, want)
+		}
+	}
+	var leaked []string
+	for _, bad := range spec.ForbidNoise {
+		if callees[bad] {
+			leaked = append(leaked, bad)
+		}
+	}
+
+	// Widened trace (call,use): wide_includes should reappear.
+	var wideMissing []string
+	if len(spec.WideIncludes) > 0 {
+		wideArgs := []string{"--json", "trace", "--depth", fmt.Sprintf("%d", depth),
+			"-n", fmt.Sprintf("%d", limit), "--kinds", "call,use", sym.Name}
+		if wideOut, werr := runGroundTruthCmd(repoDir, cymbalBin, wideArgs...); werr == nil {
+			wide := parseTraceCallees(wideOut)
+			for _, want := range spec.WideIncludes {
+				if !wide[want] {
+					wideMissing = append(wideMissing, want)
+				}
+			}
+		} else {
+			wideMissing = append(wideMissing, fmt.Sprintf("(widened trace failed: %v)", werr))
+		}
+	}
+
+	sort.Strings(missing)
+	sort.Strings(leaked)
+	sort.Strings(wideMissing)
+
+	detail := ""
+	parts := []string{}
+	if len(missing) > 0 {
+		parts = append(parts, "missing callees: "+truncateGTList(missing))
+	}
+	if len(leaked) > 0 {
+		parts = append(parts, "forbid_noise leaked as callee: "+truncateGTList(leaked))
+	}
+	if len(wideMissing) > 0 {
+		parts = append(parts, "widened trace missing: "+truncateGTList(wideMissing))
+	}
+	if len(parts) > 0 {
+		detail = strings.Join(parts, "; ")
+	}
+
+	tp := len(spec.ExpectCallees) - len(missing)
+	return GroundTruthCheck{
+		Repo:           repoName,
+		Symbol:         sym.Name,
+		Op:             OpTrace,
+		Passed:         len(missing) == 0 && len(leaked) == 0 && len(wideMissing) == 0,
+		Precision:      ratioPct(tp, tp+len(leaked)),
+		Recall:         ratioPct(tp, tp+len(missing)),
+		TruePositives:  tp,
+		FalsePositives: len(leaked),
+		FalseNegatives: len(missing),
+		Expected:       len(spec.ExpectCallees),
+		Actual:         len(callees),
+		Details:        detail,
+	}
+}
+
+func parseTraceCallees(out []byte) map[string]bool {
+	trimmed := strings.TrimSpace(string(out))
+	set := map[string]bool{}
+	if trimmed == "" || trimmed == "null" {
+		return set
+	}
+	// cymbal --json trace emits {"results": [...]} or bare array. Handle both.
+	var obj groundTruthTraceResponse
+	if err := json.Unmarshal(out, &obj); err == nil && len(obj.Results) > 0 {
+		for _, r := range obj.Results {
+			set[r.Callee] = true
+		}
+		return set
+	}
+	var arr []struct {
+		Callee string `json:"callee"`
+	}
+	if err := json.Unmarshal(out, &arr); err == nil {
+		for _, r := range arr {
+			set[r.Callee] = true
+		}
+	}
+	return set
 }
 
 func compareGroundTruth(repoName, symbol string, op Op, actual, expected []gtLoc) GroundTruthCheck {

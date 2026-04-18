@@ -2,6 +2,24 @@
 
 All notable changes to cymbal are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **`cymbal impls <symbol>`** — find types that implement / conform to / extend a protocol, interface, trait, or base class. Language-agnostic: Swift protocol conformance, Go interface embedding, Java/C#/Kotlin/TypeScript implements clauses, Scala extends/with, Rust `impl Trait for Type`, Dart interfaces/mixins, Python base classes, Ruby `include`/`extend`/`<`, PHP implements, and C++ base classes all register as implements-kind refs. External framework targets (e.g. `LiveActivityIntent` from ActivityKit) are stored by name and returned with `resolved=false`. Supports `--of <type>` for the inverse direction ("what does this type implement?"), `--resolved` / `--unresolved` filters, plus the standard `--lang`, `--path`, `--exclude`, `--json` flags.
+- **Implements / Implementors sections in `investigate` and `context`** — when a symbol is a type-like kind (class, struct, interface, protocol, trait, enum, record, object, mixin, actor, extension), the output now includes who implements it and what it implements. External vs. local targets are marked inline.
+- **Typed refs** — refs now carry a `Kind` field (`call`, `implements`, `use`). This is the foundation for the implements graph and for trace noise reduction.
+
+### Changed
+
+- **`cymbal trace` defaults to call-only edges** — previously `trace` surfaced every identifier seen inside a symbol's line range, which made Swift output noisy with type annotations (`UUID`, `Date`, `Sendable`, `@escaping`, etc.) that weren't actually callees. Trace now filters to `kind='call'` by default. Use `--kinds call,use` (or `--kinds call,use,implements`) to opt back into the wider behavior.
+- **`symbols.Ref.Kind`** — new field on the public `symbols.Ref` type. Empty is treated as `use` by the store, so older callers keep working without changes.
+
+### Migration
+
+- **`refs.kind` column added via `ALTER TABLE`** — existing databases are migrated automatically on first open; no action needed. Re-index (`cymbal index`) once to populate `kind` values for existing rows. Until you do, new commands (`impls`, investigate/context implements sections) will be empty while `trace` will correctly filter to the new default.
+- **`index.FindTrace` signature is now variadic** — `FindTrace(db, name, depth, limit, kinds...)`. Existing calls without `kinds` keep working and get the new call-only default.
+
 ## [0.10.1] - 2026-04-17
 
 ### Fixed

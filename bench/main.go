@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -86,6 +87,8 @@ const (
 	OpRefs        Op = "refs"
 	OpShow        Op = "show"
 	OpInvestigate Op = "investigate"
+	OpImpls       Op = "impls"
+	OpTrace       Op = "trace"
 )
 
 type Tool struct {
@@ -395,6 +398,12 @@ func defineTools(cymbalBin string) []Tool {
 				OpInvestigate: func(dir, sym string) *exec.Cmd {
 					return exec.Command(cymbalBin, "investigate", sym)
 				},
+				OpImpls: func(dir, sym string) *exec.Cmd {
+					return exec.Command(cymbalBin, "impls", sym)
+				},
+				OpTrace: func(dir, sym string) *exec.Cmd {
+					return exec.Command(cymbalBin, "trace", sym)
+				},
 			},
 			Cleanup: func(dir string) {
 				os.Remove(cymbalDBPath(dir))
@@ -413,6 +422,14 @@ func defineTools(cymbalBin string) []Tool {
 				OpShow: func(dir, sym string) *exec.Cmd {
 					pattern := "(?:def |func |class |type |interface |struct |async def )" + sym
 					return exec.Command("rg", "--no-heading", "-n", "-A", "30", pattern)
+				},
+				// rg parallel for impls: a regex that tries to catch `: Sym`, `extends Sym`,
+				// `implements Sym`, `impl Sym for`, `: Sym,` — the classic grep-for-conformance
+				// shotgun the Swift agent complained about. Deliberately broad so we can
+				// measure how much noise real codebases surface.
+				OpImpls: func(dir, sym string) *exec.Cmd {
+					pattern := `(?::|extends|implements|impl)\s+` + regexp.QuoteMeta(sym) + `\b`
+					return exec.Command("rg", "--no-heading", "-n", "-P", pattern)
 				},
 			},
 		},
@@ -459,7 +476,9 @@ func runBench(tool Tool, op Op, repoDir, symbol string, iters int, before ...pre
 		cmd := tool.Ops[op](repoDir, symbol)
 		cmd.Dir = repoDir
 		d, out, err := timeCmd(cmd)
-		if err != nil && op != OpSearch && op != OpRefs {
+		// rg exits 1 on "no matches", which is a valid result for ripgrep's
+		// imitation of impls and for OpSearch/OpRefs. Don't warn on those.
+		if err != nil && op != OpSearch && op != OpRefs && !(tool.Name == "ripgrep" && op == OpImpls) {
 			fmt.Fprintf(os.Stderr, "  WARN: %s %s %s %s: %v\n", tool.Name, op, r.Repo, symbol, err)
 		}
 		r.Timings = append(r.Timings, d)
@@ -980,7 +999,7 @@ func executeBench(corpus Corpus, corpusDir, cymbalBin string) (*benchOutput, err
 			}
 
 			for _, sym := range symNames {
-				for _, op := range []Op{OpSearch, OpRefs, OpShow, OpInvestigate} {
+				for _, op := range []Op{OpSearch, OpRefs, OpShow, OpInvestigate, OpImpls, OpTrace} {
 					if _, ok := tool.Ops[op]; !ok {
 						continue
 					}

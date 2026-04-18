@@ -26,6 +26,31 @@ repos:
           show:
             file: "gin.go"
             line: 188
+      - name: IRoutes
+        file_contains: "routergroup.go"
+        kind: interface
+        show_contains: "type IRoutes interface"
+        refs_min: 1
+        # Go interface embedding: IRouter embeds IRoutes in its type
+        # declaration, so cymbal should report IRouter as an implementor.
+        # Go struct→interface conformance is structural (not declarative),
+        # so concrete types like RouterGroup intentionally do NOT appear.
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "routergroup.go"
+                line: 33
+                kind: "interface"
+          impls:
+            expected:
+              - implementer: "IRouter"
+                file: "routergroup.go"
+            forbid_noise:
+              # Concrete types that satisfy IRoutes only via structural typing
+              # must NOT appear — cymbal is explicit-declaration only.
+              - "RouterGroup"
+              - "Engine"
       - name: ServeHTTP
         file_contains: "gin.go"
         kind: method
@@ -218,6 +243,19 @@ repos:
           show:
             file: "pkg/cmd/util/factory.go"
             line: 41
+          # Factory interface embeds two other interfaces by name. When --of
+          # is used the 'expected' list matches against the edge Target (what
+          # Factory itself declares as a parent/embedded type), not the
+          # implementer. factoryImpl is a struct that satisfies Factory via
+          # Go's structural typing — cymbal's declarative graph does not and
+          # should not include it anywhere.
+          impls:
+            of: "Factory"
+            expected:
+              - implementer: "RESTClientGetter"
+                file: "pkg/cmd/util/factory.go"
+              - implementer: "OpenAPIResourcesGetter"
+                file: "pkg/cmd/util/factory.go"
     footguns:
       - name: interface_name_factory
         symbol: Factory
@@ -289,6 +327,11 @@ repos:
           show:
             file: "fastapi/params.py"
             line: 764
+          # Python: class Security(Depends) — Security implements Depends.
+          impls:
+            expected:
+              - implementer: "Security"
+                file: "fastapi/params.py"
       - name: APIRouter
         file_contains: "routing.py"
         kind: class
@@ -304,6 +347,14 @@ repos:
           show:
             file: "fastapi/routing.py"
             line: 595
+          # Python: APIRouter(routing.Router) — the --of direction reports
+          # what APIRouter inherits from. Qualified base names resolve to
+          # their final segment ("routing.Router" -> "Router").
+          impls:
+            of: "APIRouter"
+            expected:
+              - implementer: "Router"
+                file: "fastapi/routing.py"
     footguns:
       - name: framework_name_fastapi
         symbol: FastAPI
@@ -390,6 +441,27 @@ repos:
           show:
             file: "packages/vite/src/node/server/index.ts"
             line: 228
+      - name: NormalizedHotChannel
+        file_contains: "hmr.ts"
+        kind: interface
+        show_contains: "NormalizedHotChannel"
+        refs_min: 0
+        # TypeScript: both WebSocketServer (in ws.ts) and HotBroadcaster
+        # (in hmr.ts) extend NormalizedHotChannel. The canonical declaration
+        # is in hmr.ts.
+        ground_truth:
+          search:
+            exact: true
+            expected:
+              - file: "packages/vite/src/node/server/hmr.ts"
+                line: 134
+                kind: "interface"
+          impls:
+            expected:
+              - implementer: "WebSocketServer"
+                file: "packages/vite/src/node/server/ws.ts"
+              - implementer: "HotBroadcaster"
+                file: "packages/vite/src/node/server/hmr.ts"
       - name: defineConfig
         file_contains: "config.ts"
         kind: function
