@@ -24,6 +24,7 @@ var outlineCmd = &cobra.Command{
 		ensureFresh(dbPath)
 		jsonOut := getJSONFlag(cmd)
 		sigs, _ := cmd.Flags().GetBool("signatures")
+		namesOnly, _ := cmd.Flags().GetBool("names")
 
 		symbols, err := index.FileOutline(dbPath, filePath)
 		if err != nil {
@@ -37,6 +38,25 @@ var outlineCmd = &cobra.Command{
 		}
 
 		relPath := args[0]
+
+		// --names: one symbol name per line, pipe-friendly for --stdin consumers.
+		if namesOnly {
+			var out strings.Builder
+			seen := make(map[string]struct{}, len(symbols))
+			for _, s := range symbols {
+				if s.Name == "" {
+					continue
+				}
+				if _, ok := seen[s.Name]; ok {
+					continue
+				}
+				seen[s.Name] = struct{}{}
+				out.WriteString(s.Name)
+				out.WriteByte('\n')
+			}
+			fmt.Print(out.String())
+			return nil
+		}
 
 		var content strings.Builder
 		for _, s := range symbols {
@@ -64,5 +84,6 @@ var outlineCmd = &cobra.Command{
 
 func init() {
 	outlineCmd.Flags().BoolP("signatures", "s", false, "show full parameter signatures")
+	outlineCmd.Flags().Bool("names", false, "emit one symbol name per line (pipe-friendly for --stdin)")
 	rootCmd.AddCommand(outlineCmd)
 }
