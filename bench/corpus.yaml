@@ -886,3 +886,236 @@ repos:
           - "function jv_parse src/jv_parse.c:905"
         cymbal_max_matches: 20
         expect_smaller_output: true
+
+  - name: dapper
+    url: https://github.com/DapperLib/Dapper
+    ref: "2.1.35"
+    language: csharp
+    tier: simple
+    complexity: low
+    tags: [csharp, orm, partial-classes, interfaces]
+    symbols:
+      # ITypeHandler is a nested interface inside SqlMapper's partial class
+      # hierarchy — exercising both C# nested-type classification and the
+      # name-uniqueness path. SqlMapper / DynamicParameters themselves are
+      # deliberately not part of the symbol list because they're partial
+      # classes spanning 28+ and 5+ files respectively, which Phase 2's
+      # single-file-contains assertion can't express.
+      - name: ITypeHandler
+        file_contains: "Dapper/SqlMapper.ITypeHandler.cs"
+        kind: interface
+        show_contains: "public interface ITypeHandler"
+        ground_truth:
+          search:
+            exact: true
+            canonical:
+              file: "Dapper/SqlMapper.ITypeHandler.cs"
+              line: 11
+              kind: "interface"
+            expected:
+              - file: "Dapper/SqlMapper.ITypeHandler.cs"
+                line: 11
+                kind: "interface"
+          show:
+            file: "Dapper/SqlMapper.ITypeHandler.cs"
+            line: 11
+    footguns:
+      - name: common_method_name_query
+        symbol: Query
+        op: search
+        why: Query is a very common method name across Dapper's partial classes; exact symbol lookup should beat grep-style noise.
+        grep_noise_min: 100
+        cymbal_max_matches: 25
+        expect_smaller_output: true
+
+  - name: monolog
+    url: https://github.com/Seldaek/monolog
+    ref: "3.8.1"
+    language: php
+    tier: simple
+    complexity: low
+    tags: [php, logging, namespaces, interfaces]
+    symbols:
+      # Refs on Logger would count `new Logger(...)` sites — monolog
+      # docs and tests use Logger pervasively but expected counts aren't
+      # stable across refactors, so we omit refs_min here.
+      - name: Logger
+        file_contains: "src/Monolog/Logger.php"
+        kind: class
+        show_contains: "class Logger implements LoggerInterface"
+        ground_truth:
+          search:
+            exact: true
+            canonical:
+              file: "src/Monolog/Logger.php"
+              line: 35
+              kind: "class"
+            prefer_paths:
+              - "src/Monolog/Logger.php"
+            avoid_paths:
+              - "tests/"
+            expected:
+              - file: "src/Monolog/Logger.php"
+                line: 35
+                kind: "class"
+          show:
+            file: "src/Monolog/Logger.php"
+            line: 35
+      - name: HandlerInterface
+        file_contains: "src/Monolog/Handler/HandlerInterface.php"
+        kind: interface
+        show_contains: "interface HandlerInterface"
+        ground_truth:
+          search:
+            exact: true
+            canonical:
+              file: "src/Monolog/Handler/HandlerInterface.php"
+              line: 21
+              kind: "interface"
+            expected:
+              - file: "src/Monolog/Handler/HandlerInterface.php"
+                line: 21
+                kind: "interface"
+          show:
+            file: "src/Monolog/Handler/HandlerInterface.php"
+            line: 21
+      - name: AbstractProcessingHandler
+        file_contains: "src/Monolog/Handler/AbstractProcessingHandler.php"
+        kind: class
+        show_contains: "abstract class AbstractProcessingHandler"
+        refs_min: 1
+        ground_truth:
+          search:
+            exact: true
+            canonical:
+              file: "src/Monolog/Handler/AbstractProcessingHandler.php"
+              line: 24
+              kind: "class"
+            expected:
+              - file: "src/Monolog/Handler/AbstractProcessingHandler.php"
+                line: 24
+                kind: "class"
+          show:
+            file: "src/Monolog/Handler/AbstractProcessingHandler.php"
+            line: 24
+    footguns:
+      - name: common_method_name_handle
+        symbol: handle
+        op: search
+        why: handle is used across every monolog handler plus framework code; exact symbol lookup should beat grep-style noise.
+        grep_noise_min: 100
+        cymbal_max_matches: 25
+        expect_smaller_output: true
+
+  - name: lazy.nvim
+    url: https://github.com/folke/lazy.nvim
+    ref: "v11.17.1"
+    language: lua
+    tier: simple
+    complexity: low
+    tags: [lua, neovim, plugin-manager, module-table-pattern]
+    symbols:
+      # Unique Lua symbol in lazy.nvim — `function profile_require(...)`
+      # in lua/lazy/init.lua. Chosen over the more common `setup` / `load`
+      # names which collide with stdlib or other modules.
+      - name: profile_require
+        file_contains: "lua/lazy/init.lua"
+        kind: function
+        show_contains: "function profile_require"
+        ground_truth:
+          search:
+            exact: true
+            canonical:
+              file: "lua/lazy/init.lua"
+              line: 7
+              kind: "function"
+            expected:
+              - file: "lua/lazy/init.lua"
+                line: 7
+                kind: "function"
+          show:
+            file: "lua/lazy/init.lua"
+            line: 7
+
+    footguns:
+      - name: common_method_name_load
+        symbol: load
+        op: search
+        why: load collides with Lua's stdlib load() and many internal functions across lazy.nvim; exact symbol lookup should win.
+        grep_noise_min: 30
+        cymbal_max_matches: 20
+        expect_smaller_output: true
+
+  - name: nvm
+    url: https://github.com/nvm-sh/nvm
+    ref: "v0.40.1"
+    language: bash
+    tier: simple
+    complexity: low
+    tags: [bash, shell, large-single-file, common-prefix]
+    symbols:
+      - name: nvm_version
+        file_contains: "nvm.sh"
+        kind: function
+        show_contains: "nvm_version()"
+        refs_min: 1
+        ground_truth:
+          search:
+            exact: true
+            canonical:
+              file: "nvm.sh"
+              line: 713
+              kind: "function"
+            expected:
+              - file: "nvm.sh"
+                line: 713
+                kind: "function"
+          show:
+            file: "nvm.sh"
+            line: 713
+      - name: nvm_ls
+        file_contains: "nvm.sh"
+        kind: function
+        show_contains: "nvm_ls()"
+        refs_min: 1
+        ground_truth:
+          search:
+            exact: true
+            canonical:
+              file: "nvm.sh"
+              line: 1393
+              kind: "function"
+            expected:
+              - file: "nvm.sh"
+                line: 1393
+                kind: "function"
+          show:
+            file: "nvm.sh"
+            line: 1393
+      - name: nvm_alias
+        file_contains: "nvm.sh"
+        kind: function
+        show_contains: "nvm_alias()"
+        refs_min: 1
+        ground_truth:
+          search:
+            exact: true
+            canonical:
+              file: "nvm.sh"
+              line: 1245
+              kind: "function"
+            expected:
+              - file: "nvm.sh"
+                line: 1245
+                kind: "function"
+          show:
+            file: "nvm.sh"
+            line: 1245
+    footguns:
+      - name: common_prefix_nvm_echo
+        symbol: nvm_echo
+        op: search
+        why: nvm_echo is defined in both nvm.sh and install.sh; exact symbol lookup must surface both definitions cleanly where grep-style matches across every call site.
+        grep_noise_min: 100
+        cymbal_max_matches: 10
+        expect_smaller_output: true

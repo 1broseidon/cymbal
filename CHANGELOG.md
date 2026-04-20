@@ -4,6 +4,14 @@ All notable changes to cymbal are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Lua function/method `start_line` now points at the `function` keyword**, not the preceding whitespace. tree-sitter-lua (smacker fork) folds leading whitespace from the previous statement into the next `function_statement` node, so `node.StartPoint().Row` was landing 1–3 lines early. The parser now anchors Lua function/method start lines to the name node, which matches what users `grep` for. Caught by running `./bench check` on the newly-added lazy.nvim corpus entry — `cymbal show headless` pointed at the correct line, but `search`'s reported line diverged from the file.
+
+### Added
+
+- **Four new bench corpus entries** for the languages that gained dedicated coverage in 0.11.4 — `dapper` (C#), `monolog` (PHP), `lazy.nvim` (Lua), and `nvm` (Bash). Pinned to tagged refs for reproducibility. Each repo supplies 1–3 canonical symbols plus a footgun scenario (common method name, stdlib collision, or cross-file name reuse) to exercise ranking and grep-style noise avoidance. Full suite still reports zero accuracy failures and no regressions vs baseline.
+
 ## [0.11.4] - 2026-04-20
 
 ### Fixed

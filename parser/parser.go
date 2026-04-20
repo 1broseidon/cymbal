@@ -567,13 +567,27 @@ func (e *symbolExtractor) nodeToSymbol(node *sitter.Node, parent string, depth i
 
 	sig := e.extractSignature(node, kind)
 
+	startLine := int(node.StartPoint().Row) + 1
+	startCol := int(node.StartPoint().Column)
+
+	// tree-sitter-lua (smacker fork) folds leading whitespace from the
+	// previous statement into the next `function_statement` / `local`
+	// node, so node.StartPoint() is often 1–2 lines earlier than the
+	// actual `function` keyword. Anchor Lua function/method start lines
+	// to the name node (which has the real row) so refs/show/outline
+	// match what users grep for.
+	if e.lang == "lua" && nameNode != nil && (kind == "function" || kind == "method") {
+		startLine = int(nameNode.StartPoint().Row) + 1
+		startCol = int(nameNode.StartPoint().Column)
+	}
+
 	return symbols.Symbol{
 		Name:      name,
 		Kind:      kind,
 		File:      e.filePath,
-		StartLine: int(node.StartPoint().Row) + 1,
+		StartLine: startLine,
 		EndLine:   int(node.EndPoint().Row) + 1,
-		StartCol:  int(node.StartPoint().Column),
+		StartCol:  startCol,
 		EndCol:    int(node.EndPoint().Column),
 		Parent:    parent,
 		Depth:     depth,
