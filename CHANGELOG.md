@@ -6,6 +6,7 @@ All notable changes to cymbal are documented here.
 
 ### Added
 
+- **`cymbal version` and `--version`** (fixes [#26](https://github.com/1broseidon/cymbal/issues/26)) — print the binary version, commit, build date, and Go toolchain. Release builds embed the tag, commit, and timestamp via `-ldflags`; `go install`-style builds fall back to `debug.ReadBuildInfo()` so module version and VCS stamp still surface. JSON mode is available via `--json`.
 - **`cymbal outline --names`** (fixes [#28](https://github.com/1broseidon/cymbal/issues/28)) — emit one deduplicated symbol name per line. This flag was already documented in the `impact`/`trace`/`show` help text and earlier CHANGELOG entries for pipe-driven multi-symbol workflows (`cymbal outline big.go -s --names | cymbal show --stdin`), but the flag itself had never been wired up.
 
 ## [0.11.2] - 2026-04-18
