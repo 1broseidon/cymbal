@@ -14,6 +14,8 @@ All notable changes to cymbal are documented here.
 
   This directly improves `cymbal refs`, `cymbal depends` (PR #18), and `cymbal dead` (PR #17) accuracy on these languages. YAML is intentionally left in the generic path — its semantic model (no functions, no imports, no calls) doesn't fit cymbal's indexed shape. Swift, which was listed in #22, already had dedicated coverage before this change.
 
+- **`cymbal refs --stdin`** — `refs` now accepts newline-separated symbol names on stdin, matching `show` / `impact` / `trace` / `impls`. This finishes the documented pipe idiom (`cymbal outline big.go -s --names | cymbal refs --stdin`) that was previously rejected as `unknown flag: --stdin`.
+
 ## [0.11.3] - 2026-04-20
 
 ### Added

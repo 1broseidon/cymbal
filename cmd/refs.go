@@ -19,9 +19,11 @@ Default: shows call-expression references across indexed files.
 --impact: shorthand for --importers --depth 2 (transitive impact).
 
 Supports batch: cymbal refs Foo Bar Baz
+Also accepts newline-separated names on stdin via --stdin:
+  cymbal outline foo.go -s --names | cymbal refs --stdin
 
 Note: references are best-effort based on AST name matching, not semantic analysis.`,
-	Args: cobra.MinimumNArgs(1),
+	Args: cobra.MinimumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbPath := getDBPath(cmd)
 		ensureFresh(dbPath)
@@ -45,7 +47,12 @@ Note: references are best-effort based on AST name matching, not semantic analys
 			}
 		}
 
-		for i, name := range args {
+		names, err := collectSymbols(cmd, args)
+		if err != nil {
+			return err
+		}
+
+		for i, name := range names {
 			if i > 0 {
 				fmt.Println()
 			}
@@ -72,6 +79,7 @@ func init() {
 	refsCmd.Flags().StringArray("path", nil, "include only results whose path matches this glob (repeatable)")
 	refsCmd.Flags().StringArray("exclude", nil, "exclude results whose path matches this glob (repeatable)")
 	refsCmd.Flags().String("file", "", "restrict refs to files that import or include the given path fragment")
+	addStdinFlag(refsCmd)
 	rootCmd.AddCommand(refsCmd)
 }
 
