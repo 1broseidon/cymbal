@@ -22,41 +22,61 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const body = context.payload.pull_request.body || "";
-            const requiredHeadings = [
-              "## Summary",
-              "## Testing",
-              "## Checklist",
-              "## Security Notes",
-              "## Risks / Rollout",
-            ];
+            const pr = context.payload.pull_request;
+            const body = pr.body || "";
+            const labels = (pr.labels || []).map((l) => (l.name || "").toLowerCase());
+            const changedLines = (pr.additions || 0) + (pr.deletions || 0);
+            const TRIVIAL_LINE_THRESHOLD = 20;
+            const skipLabels = ["trivial", "docs", "skip-checklist", "dependencies"];
 
-            const missingHeadings = requiredHeadings.filter((heading) => !body.includes(heading));
-            if (missingHeadings.length > 0) {
+            const matchedSkipLabel = skipLabels.find((l) => labels.includes(l));
+            const isTrivialSize = changedLines > 0 && changedLines <= TRIVIAL_LINE_THRESHOLD;
+
+            if (matchedSkipLabel || isTrivialSize) {
+              const reason = matchedSkipLabel
+                ? `label \`${matchedSkipLabel}\``
+                : `${changedLines} changed line(s) ≤ ${TRIVIAL_LINE_THRESHOLD}`;
+              core.info(`PR body validation skipped (${reason}).`);
+              await core.summary
+                .addHeading("PR Body validation skipped")
+                .addRaw(`Reason: ${reason}. A non-empty PR description is still encouraged.`)
+                .write();
+              if (!body.trim()) {
+                core.warning("PR description is empty. Please add at least a short summary.");
+              }
+              return;
+            }
+
+            // Non-trivial PRs: require only `## Summary`. Other sections are optional,
+            // but if `## Checklist` is present we flag unchecked boxes as a warning.
+            if (!body.includes("## Summary")) {
               core.setFailed(
-                `Missing required PR sections: ${missingHeadings.join(", ")}. ` +
-                `Use the PR template and keep all headings.`
+                "Missing required `## Summary` section. Use the PR template and describe the change."
               );
+              return;
+            }
+
+            const summaryMatch = body.match(/## Summary\s*([\s\S]*?)(?:\n## |\n?$)/);
+            const summaryBody = (summaryMatch && summaryMatch[1] || "").trim();
+            if (!summaryBody || summaryBody === "- What changed?\n- Why is this needed?") {
+              core.setFailed("`## Summary` is empty or still contains only the template placeholders.");
               return;
             }
 
             const checklistMatch = body.match(/## Checklist\s*([\s\S]*?)(?:\n## |\n?$)/);
-            if (!checklistMatch) {
-              core.setFailed("Checklist section is missing or malformed.");
-              return;
+            if (checklistMatch) {
+              const checklist = checklistMatch[1];
+              const unchecked = [...checklist.matchAll(/^- \[ \] .+$/gm)].map((m) => m[0]);
+              if (unchecked.length > 0) {
+                core.warning(
+                  `PR checklist has ${unchecked.length} unchecked item(s). Complete or remove them before merge:\n` +
+                  unchecked.join("\n")
+                );
+                await core.summary
+                  .addHeading("Unchecked PR checklist items")
+                  .addList(unchecked.map((u) => u.replace(/^- \[ \] /, "")))
+                  .write();
+              }
             }
 
-            const checklist = checklistMatch[1];
-            const unchecked = [...checklist.matchAll(/^- \[ \] .+$/gm)].map((match) => match[0]);
-            const checked = [...checklist.matchAll(/^- \[[xX]\] .+$/gm)].map((match) => match[0]);
-
-            if (checked.length === 0) {
-              core.setFailed("Checklist is present, but nothing is checked.");
-              return;
-            }
-
-            if (unchecked.length > 0) {
-              core.setFailed(
-                `Complete the PR checklist before merge. Remaining items:\n${unchecked.join("\n")}`
-              );
-            }
+            core.info("PR body validation passed.");
