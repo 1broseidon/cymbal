@@ -4,6 +4,16 @@ All notable changes to cymbal are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Dedicated parser coverage for C#, PHP, Lua, and Bash** (part of [#22](https://github.com/1broseidon/cymbal/issues/22)) — these four languages were parseable by tree-sitter but still falling through to generic symbol extraction, which left them with missing kinds and empty import/reference graphs. Each now has proper `classify` / `extractImport` / `extractRef` paths:
+  - **C#** — `namespace`, `class`, `struct`, `interface`, `enum`, `record`, `delegate`, `method`, `constructor`, `destructor`, `property`, `field`; `using` / `using static` imports; `invocation_expression` and `object_creation_expression` refs.
+  - **PHP** — `namespace`, `class`, `interface`, `trait`, `enum`, `function`, `method`, `const_element`, `enum_case`; `namespace_use_declaration` imports; `function_call_expression`, `member_call_expression`, `scoped_call_expression`, `nullsafe_member_call_expression`, and `object_creation_expression` refs.
+  - **Lua** — `function` / `method` symbols from `function_statement` (including `M.foo` and `M:new` forms); `require("x")` / `require "x"` / `require 'x'` imports; call refs for flat `util.debug(...)` / `M:new(...)` shapes.
+  - **Bash** — `function` symbols from `function_definition`; `source x.sh` / `. x.sh` imports; command-invocation refs with a small ignore list for control-flow builtins (`if`/`for`/`set`/`local`/etc.) so real call signal isn't drowned by keywords.
+
+  This directly improves `cymbal refs`, `cymbal depends` (PR #18), and `cymbal dead` (PR #17) accuracy on these languages. YAML is intentionally left in the generic path — its semantic model (no functions, no imports, no calls) doesn't fit cymbal's indexed shape. Swift, which was listed in #22, already had dedicated coverage before this change.
+
 ## [0.11.3] - 2026-04-20
 
 ### Added

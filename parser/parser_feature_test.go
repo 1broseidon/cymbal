@@ -1969,3 +1969,383 @@ func TestFeatureJSNewExpressionMemberRef(t *testing.T) {
 		t.Fatal("expected to find Server ref from new member expression")
 	}
 }
+
+// --- C# Feature Tests ---
+
+func TestFeatureCSharpSymbols(t *testing.T) {
+	src := []byte(`using System;
+using System.Collections.Generic;
+using static System.Math;
+
+namespace MyApp.Core
+{
+    public interface IGreeter
+    {
+        string Greet(string name);
+    }
+
+    public class Greeter : IGreeter
+    {
+        private readonly string _prefix;
+
+        public Greeter(string prefix)
+        {
+            _prefix = prefix;
+        }
+
+        public string Greet(string name)
+        {
+            return _prefix + ", " + name;
+        }
+    }
+
+    public struct Point
+    {
+        public int X { get; }
+    }
+
+    public enum Color { Red, Green, Blue }
+
+    public record User(string Name, int Age);
+}
+`)
+	result, err := ParseSource(src, "test.cs", "csharp", lang.Default.TreeSitter("csharp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name, kind string
+	}{
+		{"MyApp.Core", "namespace"},
+		{"IGreeter", "interface"},
+		{"Greeter", "class"},
+		{"Greet", "method"},
+		{"Point", "struct"},
+		{"Color", "enum"},
+		{"User", "record"},
+	}
+	for _, c := range cases {
+		if findSymbolKind(result.Symbols, c.name, c.kind) == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected %s %q", c.kind, c.name)
+		}
+	}
+
+	// Constructor
+	if findSymbolKind(result.Symbols, "Greeter", "constructor") == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected constructor Greeter")
+	}
+	// Property
+	if findSymbolKind(result.Symbols, "X", "property") == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected property X")
+	}
+}
+
+func TestFeatureCSharpImports(t *testing.T) {
+	src := []byte(`using System;
+using System.Collections.Generic;
+using static System.Math;
+using Alias = System.IO.Path;
+`)
+	result, err := ParseSource(src, "test.cs", "csharp", lang.Default.TreeSitter("csharp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"System", "System.Collections.Generic", "System.Math"} {
+		if findImport(result.Imports, want) == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected using %q", want)
+		}
+	}
+}
+
+func TestFeatureCSharpRefs(t *testing.T) {
+	src := []byte(`using System;
+
+class Program
+{
+    static void Main()
+    {
+        var g = new Greeter("Hi");
+        Console.WriteLine(g.Greet("world"));
+    }
+}
+`)
+	result, err := ParseSource(src, "test.cs", "csharp", lang.Default.TreeSitter("csharp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"Greeter", "WriteLine", "Greet"} {
+		if findRef(result.Refs, want) == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected ref %q", want)
+		}
+	}
+}
+
+// --- PHP Feature Tests ---
+
+func TestFeaturePHPSymbols(t *testing.T) {
+	src := []byte(`<?php
+namespace App\Service;
+
+interface Greeter {
+    public function greet(string $name): string;
+}
+
+trait Loggable {
+    public function log(string $msg): void {}
+}
+
+class DefaultGreeter implements Greeter
+{
+    use Loggable;
+
+    public function __construct(string $prefix) {}
+
+    public function greet(string $name): string {
+        return $prefix . ', ' . $name;
+    }
+}
+
+enum Color {
+    case Red;
+    case Green;
+}
+
+function make_greeter(string $p): Greeter {
+    return new DefaultGreeter($p);
+}
+`)
+	result, err := ParseSource(src, "test.php", "php", lang.Default.TreeSitter("php"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name, kind string
+	}{
+		{"Greeter", "interface"},
+		{"Loggable", "trait"},
+		{"DefaultGreeter", "class"},
+		{"Color", "enum"},
+		{"make_greeter", "function"},
+		{"greet", "method"},
+		{"__construct", "method"},
+	}
+	for _, c := range cases {
+		if findSymbolKind(result.Symbols, c.name, c.kind) == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected %s %q", c.kind, c.name)
+		}
+	}
+}
+
+func TestFeaturePHPImports(t *testing.T) {
+	src := []byte(`<?php
+namespace App\Service;
+
+use App\Model\User;
+use App\Repo\UserRepo as Repo;
+use Psr\Log\LoggerInterface;
+`)
+	result, err := ParseSource(src, "test.php", "php", lang.Default.TreeSitter("php"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"App\\Model\\User", "App\\Repo\\UserRepo", "Psr\\Log\\LoggerInterface"} {
+		if findImport(result.Imports, want) == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected use %q", want)
+		}
+	}
+}
+
+func TestFeaturePHPRefs(t *testing.T) {
+	src := []byte(`<?php
+function run() {
+    $g = make_greeter('Hi');
+    $g->greet('world');
+    Logger::info('ok');
+    $x = new DefaultGreeter('p');
+}
+`)
+	result, err := ParseSource(src, "test.php", "php", lang.Default.TreeSitter("php"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"make_greeter", "greet", "info", "DefaultGreeter"} {
+		if findRef(result.Refs, want) == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected ref %q", want)
+		}
+	}
+}
+
+// --- Lua Feature Tests ---
+
+func TestFeatureLuaSymbols(t *testing.T) {
+	src := []byte(`local M = {}
+
+function M.greet(name)
+    return "Hello, " .. name
+end
+
+local function helper(x)
+    return x * 2
+end
+
+function M:new(opts)
+    return opts
+end
+
+return M
+`)
+	result, err := ParseSource(src, "test.lua", "lua", lang.Default.TreeSitter("lua"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if findSymbolKind(result.Symbols, "greet", "function") == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected function greet")
+	}
+	if findSymbolKind(result.Symbols, "helper", "function") == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected function helper")
+	}
+	if findSymbolKind(result.Symbols, "new", "method") == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected method new (M:new)")
+	}
+}
+
+func TestFeatureLuaImports(t *testing.T) {
+	src := []byte(`local util = require("util")
+local http = require "http"
+local json = require('json')
+`)
+	result, err := ParseSource(src, "test.lua", "lua", lang.Default.TreeSitter("lua"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"util", "http", "json"} {
+		if findImport(result.Imports, want) == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected require %q", want)
+		}
+	}
+}
+
+func TestFeatureLuaRefs(t *testing.T) {
+	src := []byte(`local util = require("util")
+
+util.debug("ok")
+helper(21)
+M:new({})
+`)
+	result, err := ParseSource(src, "test.lua", "lua", lang.Default.TreeSitter("lua"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"debug", "helper", "new"} {
+		if findRef(result.Refs, want) == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected ref %q", want)
+		}
+	}
+	// require should not emit a call ref (it's an import)
+	if findRef(result.Refs, "require") != nil {
+		debugParseResult(t, result)
+		t.Fatal("require should be an import, not a ref")
+	}
+}
+
+// --- Bash Feature Tests ---
+
+func TestFeatureBashSymbols(t *testing.T) {
+	src := []byte(`#!/usr/bin/env bash
+
+function greet() {
+  local name="$1"
+  echo "hello, $name"
+}
+
+run_task() {
+  greet "$1"
+}
+`)
+	result, err := ParseSource(src, "test.sh", "bash", lang.Default.TreeSitter("bash"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"greet", "run_task"} {
+		if findSymbolKind(result.Symbols, want, "function") == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected function %q", want)
+		}
+	}
+}
+
+func TestFeatureBashImports(t *testing.T) {
+	src := []byte(`#!/usr/bin/env bash
+source ./lib/common.sh
+. ./lib/util.sh
+source "./lib/quoted.sh"
+`)
+	result, err := ParseSource(src, "test.sh", "bash", lang.Default.TreeSitter("bash"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"./lib/common.sh", "./lib/util.sh", "./lib/quoted.sh"} {
+		if findImport(result.Imports, want) == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected source %q", want)
+		}
+	}
+}
+
+func TestFeatureBashRefs(t *testing.T) {
+	src := []byte(`#!/usr/bin/env bash
+
+run_task() {
+  greet "$1"
+  deploy "$1" || rollback
+}
+
+run_task "world"
+`)
+	result, err := ParseSource(src, "test.sh", "bash", lang.Default.TreeSitter("bash"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"greet", "deploy", "rollback", "run_task"} {
+		if findRef(result.Refs, want) == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected ref %q", want)
+		}
+	}
+	// shell builtins should not appear as refs
+	for _, skip := range []string{"source", ".", "local", "echo"} {
+		// echo isn't in our ignore list, but source/./local are — verify those.
+		if skip == "echo" {
+			continue
+		}
+		if findRef(result.Refs, skip) != nil {
+			debugParseResult(t, result)
+			t.Fatalf("shell builtin %q should not appear as a ref", skip)
+		}
+	}
+}

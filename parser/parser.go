@@ -149,6 +149,14 @@ func (e *symbolExtractor) extractImport(node *sitter.Node) (symbols.Import, bool
 		return e.extractImportDart(nodeType, node)
 	case "swift":
 		return e.extractImportSwift(nodeType, node)
+	case "csharp":
+		return e.extractImportCSharp(nodeType, node)
+	case "php":
+		return e.extractImportPHP(nodeType, node)
+	case "lua":
+		return e.extractImportLua(nodeType, node)
+	case "bash":
+		return e.extractImportBash(nodeType, node)
 	}
 	return symbols.Import{}, false
 }
@@ -291,6 +299,14 @@ func (e *symbolExtractor) extractRef(node *sitter.Node) (symbols.Ref, bool) {
 		return e.extractRefDart(nodeType, node)
 	case "swift":
 		return e.extractRefSwift(nodeType, node)
+	case "csharp":
+		return e.extractRefCSharp(nodeType, node)
+	case "php":
+		return e.extractRefPHP(nodeType, node)
+	case "lua":
+		return e.extractRefLua(nodeType, node)
+	case "bash":
+		return e.extractRefBash(nodeType, node)
 	}
 	return symbols.Ref{}, false
 }
@@ -594,6 +610,14 @@ func (e *symbolExtractor) classifyNode(nodeType string, node *sitter.Node) (stri
 		return e.classifyDart(nodeType, node)
 	case "swift":
 		return e.classifySwift(nodeType, node)
+	case "csharp":
+		return e.classifyCSharp(nodeType, node)
+	case "php":
+		return e.classifyPHP(nodeType, node)
+	case "lua":
+		return e.classifyLua(nodeType, node)
+	case "bash":
+		return e.classifyBash(nodeType, node)
 	default:
 		return e.classifyGeneric(nodeType, node)
 	}
@@ -1400,6 +1424,468 @@ func swiftSignature(node *sitter.Node, src []byte) string {
 		return ""
 	}
 	return strings.TrimSpace(string(src[start:end]))
+}
+
+// --- C# ---
+//
+// Grammar refs (tree-sitter-c-sharp):
+//   using_directive            → "using Foo.Bar;" / "using static System.Math;"
+//   namespace_declaration      → "namespace X { ... }"
+//   class_declaration / struct_declaration / interface_declaration /
+//   enum_declaration / record_declaration — all expose a `name` child
+//   method_declaration / constructor_declaration / destructor_declaration /
+//   property_declaration / field_declaration / delegate_declaration
+//   invocation_expression      → function is `function` field
+//   object_creation_expression → first identifier/qualified_name after `new`
+//   member_access_expression   → x.Y — reference to Y
+
+func (e *symbolExtractor) classifyCSharp(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	switch nodeType {
+	case "namespace_declaration", "file_scoped_namespace_declaration":
+		return "namespace", node.ChildByFieldName("name")
+	case "class_declaration":
+		return "class", node.ChildByFieldName("name")
+	case "struct_declaration":
+		return "struct", node.ChildByFieldName("name")
+	case "interface_declaration":
+		return "interface", node.ChildByFieldName("name")
+	case "enum_declaration":
+		return "enum", node.ChildByFieldName("name")
+	case "record_declaration", "record_struct_declaration":
+		return "record", node.ChildByFieldName("name")
+	case "delegate_declaration":
+		return "delegate", node.ChildByFieldName("name")
+	case "method_declaration":
+		return "method", node.ChildByFieldName("name")
+	case "constructor_declaration":
+		return "constructor", node.ChildByFieldName("name")
+	case "destructor_declaration":
+		return "destructor", node.ChildByFieldName("name")
+	case "property_declaration", "indexer_declaration":
+		return "property", node.ChildByFieldName("name")
+	case "field_declaration":
+		// field_declaration → variable_declaration → variable_declarator(name)
+		if vd := findChildByType(node, "variable_declaration"); vd != nil {
+			if decl := findChildByType(vd, "variable_declarator"); decl != nil {
+				if name := decl.ChildByFieldName("name"); name != nil {
+					return "field", name
+				}
+			}
+		}
+	case "enum_member_declaration":
+		return "constant", node.ChildByFieldName("name")
+	}
+	return "", nil
+}
+
+func (e *symbolExtractor) extractImportCSharp(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType != "using_directive" {
+		return symbols.Import{}, false
+	}
+	// Strip leading `using ` / `using static ` and trailing `;`, normalize whitespace.
+	raw := strings.TrimSpace(node.Content(e.src))
+	raw = strings.TrimSuffix(raw, ";")
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, "using"))
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, "static"))
+	if raw == "" {
+		return symbols.Import{}, false
+	}
+	return symbols.Import{RawPath: raw, Language: e.lang}, true
+}
+
+func (e *symbolExtractor) extractRefCSharp(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	line := int(node.StartPoint().Row) + 1
+	switch nodeType {
+	case "invocation_expression":
+		fn := node.ChildByFieldName("function")
+		if fn == nil && node.ChildCount() > 0 {
+			fn = node.Child(0)
+		}
+		if fn == nil {
+			return symbols.Ref{}, false
+		}
+		name := extractCallName(fn, e.src, e.lang)
+		if name == "" {
+			return symbols.Ref{}, false
+		}
+		return symbols.Ref{Name: name, Line: line, Language: e.lang, Kind: symbols.RefKindCall}, true
+	case "object_creation_expression":
+		// `new Foo(...)` or `new N.Foo(...)` — emit Foo.
+		typeNode := node.ChildByFieldName("type")
+		if typeNode == nil {
+			// Fall back: first identifier or qualified_name after `new`.
+			for i := 0; i < int(node.ChildCount()); i++ {
+				c := node.Child(i)
+				if c.Type() == "identifier" || c.Type() == "qualified_name" || c.Type() == "generic_name" {
+					typeNode = c
+					break
+				}
+			}
+		}
+		if typeNode == nil {
+			return symbols.Ref{}, false
+		}
+		name := extractCallName(typeNode, e.src, e.lang)
+		if name == "" {
+			return symbols.Ref{}, false
+		}
+		return symbols.Ref{Name: name, Line: line, Language: e.lang, Kind: symbols.RefKindCall}, true
+	}
+	return symbols.Ref{}, false
+}
+
+// --- PHP ---
+//
+// Grammar refs (tree-sitter-php):
+//   namespace_use_declaration  → "use Foo\\Bar;" / "use Foo\\Bar as Baz;"
+//   namespace_definition       → "namespace Foo\\Bar;"
+//   class_declaration / interface_declaration / trait_declaration /
+//   enum_declaration — `name` field
+//   function_definition / method_declaration — `name` field
+//   function_call_expression   → function field
+//   member_call_expression     → name field is method
+//   scoped_call_expression     → name field is method (Foo::bar())
+//   object_creation_expression → first type after `new`
+
+func (e *symbolExtractor) classifyPHP(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	switch nodeType {
+	case "namespace_definition":
+		return "namespace", node.ChildByFieldName("name")
+	case "class_declaration":
+		return "class", node.ChildByFieldName("name")
+	case "interface_declaration":
+		return "interface", node.ChildByFieldName("name")
+	case "trait_declaration":
+		return "trait", node.ChildByFieldName("name")
+	case "enum_declaration":
+		return "enum", node.ChildByFieldName("name")
+	case "function_definition":
+		return "function", node.ChildByFieldName("name")
+	case "method_declaration":
+		return "method", node.ChildByFieldName("name")
+	case "const_element":
+		// const_element has `name` field; parent const_declaration wraps it.
+		return "constant", node.ChildByFieldName("name")
+	case "enum_case":
+		return "constant", node.ChildByFieldName("name")
+	}
+	return "", nil
+}
+
+func (e *symbolExtractor) extractImportPHP(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType != "namespace_use_declaration" {
+		return symbols.Import{}, false
+	}
+	// Emit one import per `namespace_use_clause` child; fallback to raw text.
+	for i := 0; i < int(node.ChildCount()); i++ {
+		c := node.Child(i)
+		if c.Type() == "namespace_use_clause" {
+			// First qualified_name / namespace_name / name child is the path.
+			for j := 0; j < int(c.ChildCount()); j++ {
+				cc := c.Child(j)
+				switch cc.Type() {
+				case "qualified_name", "namespace_name", "name":
+					return symbols.Import{RawPath: cc.Content(e.src), Language: e.lang}, true
+				}
+			}
+			return symbols.Import{RawPath: c.Content(e.src), Language: e.lang}, true
+		}
+	}
+	return symbols.Import{}, false
+}
+
+func (e *symbolExtractor) extractRefPHP(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	line := int(node.StartPoint().Row) + 1
+	switch nodeType {
+	case "function_call_expression":
+		fn := node.ChildByFieldName("function")
+		if fn == nil {
+			return symbols.Ref{}, false
+		}
+		name := extractCallName(fn, e.src, e.lang)
+		if name == "" {
+			return symbols.Ref{}, false
+		}
+		return symbols.Ref{Name: name, Line: line, Language: e.lang, Kind: symbols.RefKindCall}, true
+	case "member_call_expression", "scoped_call_expression", "nullsafe_member_call_expression":
+		nameNode := node.ChildByFieldName("name")
+		if nameNode == nil {
+			return symbols.Ref{}, false
+		}
+		name := strings.TrimSpace(nameNode.Content(e.src))
+		if name == "" {
+			return symbols.Ref{}, false
+		}
+		return symbols.Ref{Name: name, Line: line, Language: e.lang, Kind: symbols.RefKindCall}, true
+	case "object_creation_expression":
+		// Walk children for the first name/qualified_name/named_type.
+		for i := 0; i < int(node.ChildCount()); i++ {
+			c := node.Child(i)
+			switch c.Type() {
+			case "name", "qualified_name", "named_type":
+				name := extractCallName(c, e.src, e.lang)
+				if name == "" {
+					continue
+				}
+				return symbols.Ref{Name: name, Line: line, Language: e.lang, Kind: symbols.RefKindCall}, true
+			}
+		}
+	}
+	return symbols.Ref{}, false
+}
+
+// --- Lua ---
+//
+// Grammar refs (tree-sitter-lua, smacker fork):
+//   function_statement         → "function Foo() end" / "function M.foo() end" /
+//                                "local function helper() end"
+//     children: optional `local`, function_start, function_name (or identifier),
+//               function_body_paren, parameter_list, function_body, function_end
+//   function_name              → M.greet / M:new (table_dot / : separators)
+//   function_call              → identifier | dot_index_expression | method_index_expression
+//                                followed by function_arguments
+//   require("x") / require "x" are function_call forms — handled as imports.
+
+func (e *symbolExtractor) classifyLua(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	if nodeType != "function_statement" {
+		return "", nil
+	}
+	// function_name child for "function X.y()" and "function X()";
+	// identifier child for "local function helper()".
+	if fn := findChildByType(node, "function_name"); fn != nil {
+		// Emit the method name (last identifier in M.greet / M:new).
+		kind := "function"
+		// Treat `M:method` as method.
+		if strings.Contains(fn.Content(e.src), ":") {
+			kind = "method"
+		}
+		if id := lastIdentifier(fn); id != nil {
+			return kind, id
+		}
+		return kind, fn
+	}
+	if id := findChildByType(node, "identifier"); id != nil {
+		return "function", id
+	}
+	return "", nil
+}
+
+// lastIdentifier returns the last direct `identifier` child of n (for
+// Lua function_name nodes like M.greet / M:new).
+func lastIdentifier(n *sitter.Node) *sitter.Node {
+	var last *sitter.Node
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c := n.Child(i)
+		if c.Type() == "identifier" {
+			last = c
+		}
+	}
+	return last
+}
+
+func (e *symbolExtractor) extractImportLua(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType != "function_call" {
+		return symbols.Import{}, false
+	}
+	// First child must be identifier "require".
+	if node.ChildCount() == 0 {
+		return symbols.Import{}, false
+	}
+	callee := node.Child(0)
+	if callee.Type() != "identifier" || strings.TrimSpace(callee.Content(e.src)) != "require" {
+		return symbols.Import{}, false
+	}
+	// Argument shapes in tree-sitter-lua (smacker fork):
+	//   require("x") → function_arguments wrapping string
+	//   require "x"  → string_argument (direct wrapper with string_start/_content/_end)
+	//   require 'x'  → same as above
+	for i := 1; i < int(node.ChildCount()); i++ {
+		c := node.Child(i)
+		switch c.Type() {
+		case "function_arguments", "string_argument":
+			if s := findDescendantString(c, e.src); s != "" {
+				return symbols.Import{RawPath: s, Language: e.lang}, true
+			}
+		case "string":
+			if s := luaStringContent(c, e.src); s != "" {
+				return symbols.Import{RawPath: s, Language: e.lang}, true
+			}
+		}
+	}
+	return symbols.Import{}, false
+}
+
+// findDescendantString walks a subtree looking for the first string node
+// (including string_argument / string_content) and returns its unquoted content.
+func findDescendantString(n *sitter.Node, src []byte) string {
+	if n == nil {
+		return ""
+	}
+	switch n.Type() {
+	case "string_content":
+		return n.Content(src)
+	case "string", "string_argument":
+		return luaStringContent(n, src)
+	}
+	for i := 0; i < int(n.ChildCount()); i++ {
+		if s := findDescendantString(n.Child(i), src); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func luaStringContent(n *sitter.Node, src []byte) string {
+	// tree-sitter-lua: string → string_start "string_content" string_end
+	if c := findChildByType(n, "string_content"); c != nil {
+		return c.Content(src)
+	}
+	// Fallback: strip surrounding quotes.
+	raw := n.Content(src)
+	if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
+		return raw[1 : len(raw)-1]
+	}
+	return raw
+}
+
+func (e *symbolExtractor) extractRefLua(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	if nodeType != "function_call" {
+		return symbols.Ref{}, false
+	}
+	if node.ChildCount() == 0 {
+		return symbols.Ref{}, false
+	}
+	first := node.Child(0)
+	// Don't emit a ref for `require(...)` — it's surfaced as an import.
+	if first.Type() == "identifier" && strings.TrimSpace(first.Content(e.src)) == "require" {
+		return symbols.Ref{}, false
+	}
+	// tree-sitter-lua (smacker fork) flattens `util.debug(…)` and `M:new(…)`
+	// into a child list:
+	//   function_call
+	//     identifier            ← receiver (for method-like forms)
+	//     '.' | self_call_colon
+	//     identifier            ← method/field name
+	//     function_call_paren   ← '('
+	// Walk children up to the opening paren and pick the last `identifier`,
+	// which is the callable name. For simple `foo(…)` this is still just the
+	// first identifier.
+	var name string
+	for i := 0; i < int(node.ChildCount()); i++ {
+		c := node.Child(i)
+		if c.Type() == "function_call_paren" || c.Type() == "function_arguments" ||
+			c.Type() == "string_argument" || c.Type() == "string" {
+			break
+		}
+		if c.Type() == "identifier" {
+			name = strings.TrimSpace(c.Content(e.src))
+		}
+	}
+	if name == "" {
+		// Fall back to the composite-callee shape (dot_index_expression etc.).
+		name = extractCallName(first, e.src, e.lang)
+	}
+	if name == "" {
+		return symbols.Ref{}, false
+	}
+	return symbols.Ref{
+		Name:     name,
+		Line:     int(node.StartPoint().Row) + 1,
+		Language: e.lang,
+		Kind:     symbols.RefKindCall,
+	}, true
+}
+
+// --- Bash ---
+//
+// Grammar refs (tree-sitter-bash):
+//   function_definition        → "foo() { ... }" / "function foo { ... }"
+//                                `name` field holds a `word` identifier.
+//   command                    → command_name + argument words. `source x.sh`
+//                                and `. x.sh` are both commands; treat as
+//                                imports. Other commands emit a call ref.
+//   variable_assignment        → handled generically; we skip it here.
+//   declaration_command        → local/readonly/declare — not classified as
+//                                a top-level symbol.
+
+func (e *symbolExtractor) classifyBash(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	if nodeType != "function_definition" {
+		return "", nil
+	}
+	// `name` field is a word node with the function identifier.
+	if name := node.ChildByFieldName("name"); name != nil {
+		return "function", name
+	}
+	return "", nil
+}
+
+func (e *symbolExtractor) extractImportBash(nodeType string, node *sitter.Node) (symbols.Import, bool) {
+	if nodeType != "command" {
+		return symbols.Import{}, false
+	}
+	cn := findChildByType(node, "command_name")
+	if cn == nil {
+		return symbols.Import{}, false
+	}
+	cmd := strings.TrimSpace(cn.Content(e.src))
+	if cmd != "source" && cmd != "." {
+		return symbols.Import{}, false
+	}
+	// First `word` after the command_name is the path being sourced.
+	seenCmd := false
+	for i := 0; i < int(node.ChildCount()); i++ {
+		c := node.Child(i)
+		if !seenCmd {
+			if c == cn {
+				seenCmd = true
+			}
+			continue
+		}
+		if c.Type() == "word" || c.Type() == "string" || c.Type() == "raw_string" {
+			raw := strings.TrimSpace(c.Content(e.src))
+			// Strip surrounding quotes if present.
+			if len(raw) >= 2 {
+				if (raw[0] == '"' && raw[len(raw)-1] == '"') ||
+					(raw[0] == '\'' && raw[len(raw)-1] == '\'') {
+					raw = raw[1 : len(raw)-1]
+				}
+			}
+			if raw == "" {
+				continue
+			}
+			return symbols.Import{RawPath: raw, Language: e.lang}, true
+		}
+	}
+	return symbols.Import{}, false
+}
+
+func (e *symbolExtractor) extractRefBash(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	if nodeType != "command" {
+		return symbols.Ref{}, false
+	}
+	cn := findChildByType(node, "command_name")
+	if cn == nil {
+		return symbols.Ref{}, false
+	}
+	name := strings.TrimSpace(cn.Content(e.src))
+	if name == "" {
+		return symbols.Ref{}, false
+	}
+	// source/. are imports, not call refs. A minimal ignore list avoids noise
+	// from shell builtins that dominate real scripts.
+	switch name {
+	case "source", ".", "set", "export", "readonly", "local", "declare",
+		"unset", "shift", "return", "break", "continue", "exit",
+		"if", "elif", "else", "fi", "then", "do", "done", "case", "esac",
+		"for", "while", "until", "[", "[[", "true", "false", ":":
+		return symbols.Ref{}, false
+	}
+	return symbols.Ref{
+		Name:     name,
+		Line:     int(node.StartPoint().Row) + 1,
+		Language: e.lang,
+		Kind:     symbols.RefKindCall,
+	}, true
 }
 
 func (e *symbolExtractor) classifyGeneric(nodeType string, node *sitter.Node) (string, *sitter.Node) {
