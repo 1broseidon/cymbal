@@ -28,7 +28,7 @@ reached each callee.
 
 Examples:
   cymbal trace handleRegister                     # 3-deep call chain
-  cymbal trace handleRegister -d 5                # deeper trace
+  cymbal trace handleRegister --depth 5           # deeper trace
   cymbal trace Save Load Delete                   # union of callees
   cymbal trace handleRegister --kinds call,use    # include identifier mentions
   cymbal outline svc.go -s --names | cymbal trace --stdin`,
