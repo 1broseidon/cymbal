@@ -186,6 +186,48 @@ cymbal hook remind > .zed/rules.md
 
 ---
 
+## Opencode
+
+Opencode reads `AGENTS.md` as its primary rules file (project root or
+`~/.config/opencode/AGENTS.md` for global scope) and also composes extra
+files via `opencode.json` → `instructions`. Reminder-only integration:
+
+**Project scope — append to `AGENTS.md`:**
+
+```bash
+{ echo; echo "# cymbal"; cymbal hook remind; } >> AGENTS.md
+```
+
+Opencode also falls back to `CLAUDE.md` when no `AGENTS.md` is present, so
+repos already set up for Claude Code pick up the same reminder without
+duplication.
+
+**Composable alternative — dedicated file via `opencode.json`:**
+
+This avoids collisions when `AGENTS.md` is shared with other agents
+(Codex, Cursor 0.42+, etc.) or already lives under version control:
+
+```bash
+mkdir -p .opencode/instructions
+cymbal hook remind > .opencode/instructions/cymbal.md
+```
+
+Then add to `opencode.json` (or the global
+`~/.config/opencode/opencode.json`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [".opencode/instructions/cymbal.md"]
+}
+```
+
+Opencode supports globs and remote URLs in `instructions`, so teams can
+point at a shared source of truth instead of committing the reminder
+into every repo.
+
+---
+
 ## Codex / OpenAI Agents SDK
 
 The Agents SDK has `before_tool_call` / `after_tool_call` hooks. Wire
