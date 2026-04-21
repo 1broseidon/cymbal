@@ -33,6 +33,13 @@ if (-not (Test-Path $bin)) {
     exit 1
 }
 
+# Record install metadata for update guidance.
+$installMeta = Join-Path $installDir "install.json"
+$meta = @{
+    install_type = "powershell"
+} | ConvertTo-Json
+Set-Content -Path $installMeta -Value $meta -Encoding UTF8
+
 # Add to user PATH if not already present
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$installDir*") {
