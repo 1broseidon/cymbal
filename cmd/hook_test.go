@@ -216,6 +216,121 @@ func TestEmitRemindClaudeCodeShape(t *testing.T) {
 	}
 }
 
+func TestEmitRemindClaudeCodeIncludesCachedUpdateMessage(t *testing.T) {
+	oldVersion, oldCommit, oldDate := version, commit, date
+	version, commit, date = "v0.11.5", "", ""
+	defer func() { version, commit, date = oldVersion, oldCommit, oldDate }()
+
+	cacheBase := t.TempDir()
+	t.Setenv("LOCALAPPDATA", cacheBase)
+	t.Setenv("XDG_CACHE_HOME", cacheBase)
+	updateDir := filepath.Join(cacheBase, "cymbal")
+	if err := os.MkdirAll(updateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cache := `{
+	  "schema_version": 1,
+	  "current_version": "v0.11.5",
+	  "last_checked_at": "2026-04-21T10:15:00Z",
+	  "latest_version": "v0.12.0",
+	  "release_url": "https://github.com/1broseidon/cymbal/releases/latest",
+	  "update_available": true,
+	  "install_type": "powershell",
+	  "update_command": "irm https://raw.githubusercontent.com/1broseidon/cymbal/main/install.ps1 | iex"
+	}`
+	if err := os.WriteFile(filepath.Join(updateDir, "update-check.json"), []byte(cache), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := emitRemind(&buf, "claude-code"); err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("claude-code mode must emit valid JSON: %v\n%s", err, buf.String())
+	}
+	hookOutput, _ := out["hookSpecificOutput"].(map[string]any)
+	ctx, _ := hookOutput["additionalContext"].(string)
+	if !strings.Contains(ctx, "cymbal update:") {
+		t.Fatalf("expected update paragraph in additionalContext, got %q", ctx)
+	}
+}
+
+func TestEmitRemindIncludesCachedUpdateMessage(t *testing.T) {
+	oldVersion, oldCommit, oldDate := version, commit, date
+	version, commit, date = "v0.11.5", "", ""
+	defer func() { version, commit, date = oldVersion, oldCommit, oldDate }()
+
+	cacheBase := t.TempDir()
+	t.Setenv("LOCALAPPDATA", cacheBase)
+	t.Setenv("XDG_CACHE_HOME", cacheBase)
+	updateDir := filepath.Join(cacheBase, "cymbal")
+	if err := os.MkdirAll(updateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cache := `{
+	  "schema_version": 1,
+	  "current_version": "v0.11.5",
+	  "last_checked_at": "2026-04-21T10:15:00Z",
+	  "latest_version": "v0.12.0",
+	  "release_url": "https://github.com/1broseidon/cymbal/releases/latest",
+	  "update_available": true,
+	  "install_type": "powershell",
+	  "update_command": "irm https://raw.githubusercontent.com/1broseidon/cymbal/main/install.ps1 | iex"
+	}`
+	if err := os.WriteFile(filepath.Join(updateDir, "update-check.json"), []byte(cache), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := emitRemind(&buf, "text"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "cymbal update:") {
+		t.Fatalf("expected update paragraph, got %q", out)
+	}
+	if !strings.Contains(out, "irm https://raw.githubusercontent.com/1broseidon/cymbal/main/install.ps1 | iex") {
+		t.Fatalf("expected powershell update command, got %q", out)
+	}
+}
+
+func TestEmitRemindSkipsUpdateWhenNotifierDisabled(t *testing.T) {
+	oldVersion, oldCommit, oldDate := version, commit, date
+	version, commit, date = "v0.11.5", "", ""
+	defer func() { version, commit, date = oldVersion, oldCommit, oldDate }()
+
+	cacheBase := t.TempDir()
+	t.Setenv("LOCALAPPDATA", cacheBase)
+	t.Setenv("XDG_CACHE_HOME", cacheBase)
+	t.Setenv("CYMBAL_NO_UPDATE_NOTIFIER", "1")
+	updateDir := filepath.Join(cacheBase, "cymbal")
+	if err := os.MkdirAll(updateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cache := `{
+	  "schema_version": 1,
+	  "current_version": "v0.11.5",
+	  "last_checked_at": "2026-04-21T10:15:00Z",
+	  "latest_version": "v0.12.0",
+	  "update_available": true,
+	  "install_type": "powershell",
+	  "update_command": "irm https://raw.githubusercontent.com/1broseidon/cymbal/main/install.ps1 | iex"
+	}`
+	if err := os.WriteFile(filepath.Join(updateDir, "update-check.json"), []byte(cache), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := emitRemind(&buf, "text"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "cymbal update:") {
+		t.Fatalf("expected notifier opt-out to suppress update paragraph, got %q", buf.String())
+	}
+}
+
 // ── claude-code install / uninstall round-trip ──
 
 func TestClaudeCodeInstallIsIdempotent(t *testing.T) {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/1broseidon/cymbal/internal/updatecheck"
 	"github.com/spf13/cobra"
 )
 
@@ -479,12 +481,19 @@ Use 'cymbal search --text <pattern>' only for literal text matches cymbal
 can't resolve by symbol.`
 
 func emitRemind(w io.Writer, format string) error {
+	message := reminderText
+	status, _ := updatecheck.GetStatus(context.Background(), updatecheck.Options{
+		CurrentVersion: currentVersion(),
+		AllowNetwork:   false,
+		Timeout:        0,
+	})
+	message = updatecheck.AugmentReminder(message, status)
 	switch format {
 	case "", "text":
-		fmt.Fprintln(w, reminderText)
+		fmt.Fprintln(w, message)
 		return nil
 	case "json":
-		out := map[string]any{"systemMessage": reminderText}
+		out := map[string]any{"systemMessage": message}
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
@@ -495,7 +504,7 @@ func emitRemind(w io.Writer, format string) error {
 		out := map[string]any{
 			"hookSpecificOutput": map[string]any{
 				"hookEventName":     "SessionStart",
-				"additionalContext": reminderText,
+				"additionalContext": message,
 			},
 		}
 		enc := json.NewEncoder(w)
