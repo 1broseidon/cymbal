@@ -58,8 +58,9 @@ JSON payload on stdin. Non-code-search commands are allowed through silently
 (exit 0, no output).
 
 Output formats:
-  --format=claude-code  (default) JSON that Claude Code's PreToolUse hook
-                        understands: {"decision":"allow","systemMessage":"..."}
+  --format=claude-code  (default) JSON Claude Code's PreToolUse hook accepts:
+                        {"hookSpecificOutput":{"hookEventName":"PreToolUse",
+                        "permissionDecision":"allow","additionalContext":"..."}}
   --format=text         Plain text suggestion to stderr; exit 0 always.
   --format=json         Generic {"suggest":"...","why":"..."} shape.
 
@@ -87,8 +88,9 @@ periodic re-reminders.
 Formats:
   --format=text         (default) plain text
   --format=json         {"systemMessage": "..."} for agents that want JSON
-  --format=claude-code  same as json, Claude Code accepts it via
-                        SessionStart hook additionalContext.`,
+  --format=claude-code  SessionStart shape:
+                        {"hookSpecificOutput":{"hookEventName":"SessionStart",
+                        "additionalContext":"..."}}`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		format, _ := cmd.Flags().GetString("format")
 		return emitRemind(cmd.OutOrStdout(), format)
@@ -423,11 +425,16 @@ func emitNudge(stdout, stderr io.Writer, format string, fields []string, s Sugge
 	msg := fmt.Sprintf(nudgeTemplate, s.Replacement, s.Why)
 	switch format {
 	case "", "claude-code":
-		// Claude Code PreToolUse allowed decisions. "allow" with a
-		// systemMessage injects a note without blocking.
+		// Claude Code PreToolUse: decision + context live inside
+		// hookSpecificOutput. Top-level "decision"/"systemMessage" is
+		// the deprecated shape and fails schema validation.
 		out := map[string]any{
-			"decision":      "allow",
-			"systemMessage": msg,
+			"hookSpecificOutput": map[string]any{
+				"hookEventName":            "PreToolUse",
+				"permissionDecision":       "allow",
+				"permissionDecisionReason": "cymbal nudge",
+				"additionalContext":        msg,
+			},
 		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -476,8 +483,21 @@ func emitRemind(w io.Writer, format string) error {
 	case "", "text":
 		fmt.Fprintln(w, reminderText)
 		return nil
-	case "json", "claude-code":
+	case "json":
 		out := map[string]any{"systemMessage": reminderText}
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	case "claude-code":
+		// SessionStart injects persistent context via additionalContext
+		// inside hookSpecificOutput. Top-level "systemMessage" would
+		// render as a user-facing warning, not model context.
+		out := map[string]any{
+			"hookSpecificOutput": map[string]any{
+				"hookEventName":     "SessionStart",
+				"additionalContext": reminderText,
+			},
+		}
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)

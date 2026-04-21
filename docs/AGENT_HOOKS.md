@@ -28,7 +28,7 @@ Both subcommands accept `--format`:
 
 | Format | Shape | Use it when |
 |---|---|---|
-| `claude-code` | JSON: `{"decision":"allow","systemMessage":"..."}` | The agent speaks Claude Code's hook protocol. |
+| `claude-code` | JSON nested under `hookSpecificOutput` — `permissionDecision`+`additionalContext` for nudge (PreToolUse), `additionalContext` for remind (SessionStart). | The agent speaks Claude Code's hook protocol. |
 | `json` | Generic: `{"suggest":"...","why":"...","tool":"..."}` (nudge) / `{"systemMessage":"..."}` (remind) | The agent reads structured JSON but not the Claude protocol. |
 | `text` | Plain text. `nudge` writes to **stderr**; `remind` writes to stdout. | Rules-file injection, logging, simple shell hooks. |
 
@@ -71,8 +71,9 @@ What it writes (merged into your existing `~/.claude/settings.json`):
 ```
 
 - `PreToolUse` on `Bash` injects the nudge whenever the model is about to
-  shell out. The nudge returns `decision: allow` so the command still
-  runs — it just gets an inline system message next to it.
+  shell out. The nudge returns `hookSpecificOutput.permissionDecision: allow`
+  so the command still runs — it just gets the suggestion attached as
+  `additionalContext` for the model to read.
 - `SessionStart` injects the reminder block exactly once at the start of
   each session — the agent sees the cymbal primer up front and keeps the
   context, without paying ~700 B of re-injected tokens on every user turn.

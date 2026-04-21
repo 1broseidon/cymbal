@@ -119,12 +119,25 @@ func TestEmitNudgeClaudeCodeJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
 		t.Fatalf("claude-code output must be valid JSON: %v\n%s", err, stdout.String())
 	}
-	if out["decision"] != "allow" {
-		t.Errorf("expected decision=allow; got %v", out["decision"])
+	if _, hasDecision := out["decision"]; hasDecision {
+		t.Errorf("top-level 'decision' is the deprecated shape and fails Claude Code's schema; got %+v", out)
 	}
-	msg, _ := out["systemMessage"].(string)
-	if !strings.Contains(msg, "cymbal search Foo") {
-		t.Errorf("systemMessage missing suggestion; got %q", msg)
+	if _, hasSysMsg := out["systemMessage"]; hasSysMsg {
+		t.Errorf("top-level 'systemMessage' renders as a user warning, not model context; got %+v", out)
+	}
+	hso, ok := out["hookSpecificOutput"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected hookSpecificOutput object; got %+v", out)
+	}
+	if hso["hookEventName"] != "PreToolUse" {
+		t.Errorf("expected hookEventName=PreToolUse; got %v", hso["hookEventName"])
+	}
+	if hso["permissionDecision"] != "allow" {
+		t.Errorf("expected permissionDecision=allow; got %v", hso["permissionDecision"])
+	}
+	ctx, _ := hso["additionalContext"].(string)
+	if !strings.Contains(ctx, "cymbal search Foo") {
+		t.Errorf("additionalContext missing suggestion; got %q", ctx)
 	}
 }
 
@@ -175,6 +188,31 @@ func TestEmitRemindJSONShape(t *testing.T) {
 	}
 	if out["systemMessage"] == nil {
 		t.Errorf("expected systemMessage key; got %+v", out)
+	}
+}
+
+func TestEmitRemindClaudeCodeShape(t *testing.T) {
+	var buf bytes.Buffer
+	if err := emitRemind(&buf, "claude-code"); err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("claude-code mode must emit valid JSON: %v\n%s", err, buf.String())
+	}
+	if _, hasSysMsg := out["systemMessage"]; hasSysMsg {
+		t.Errorf("top-level 'systemMessage' renders as a user warning, not model context; got %+v", out)
+	}
+	hso, ok := out["hookSpecificOutput"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected hookSpecificOutput object; got %+v", out)
+	}
+	if hso["hookEventName"] != "SessionStart" {
+		t.Errorf("expected hookEventName=SessionStart; got %v", hso["hookEventName"])
+	}
+	ctx, _ := hso["additionalContext"].(string)
+	if !strings.Contains(ctx, "cymbal search") {
+		t.Errorf("additionalContext missing reminder body; got %q", ctx)
 	}
 }
 

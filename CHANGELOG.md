@@ -4,6 +4,12 @@ All notable changes to cymbal are documented here.
 
 ## [Unreleased]
 
+## [0.11.6] - 2026-04-20
+
+### Fixed
+
+- **Claude Code `PreToolUse` nudge hook no longer fails JSON validation.** The `claude-code` output shape emitted the deprecated top-level `decision` + `systemMessage` fields, which Claude Code's current schema rejects with `Hook JSON output validation failed — (root): Invalid input`. Nudge now emits `hookSpecificOutput.{hookEventName,permissionDecision,permissionDecisionReason,additionalContext}` per the current hooks schema, and the suggestion is injected as `additionalContext` (visible to the model) rather than `systemMessage` (user-facing warning only). The `remind` hook's `claude-code` format got the same treatment for `SessionStart`. Generic `json` format (`{"systemMessage":"..."}`) is unchanged for non–Claude Code agents.
+
 ## [0.11.5] - 2026-04-20
 
 ### Fixed
