@@ -1,6 +1,6 @@
 module github.com/1broseidon/cymbal
 
-go 1.25.8
+go 1.25.9
 
 require (
 	github.com/UserNobody14/tree-sitter-dart v0.0.0-20240901045915-8197a3123420
