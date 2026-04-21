@@ -4,6 +4,11 @@ All notable changes to cymbal are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Cached update notifications with install-specific guidance** — cymbal now checks the latest GitHub release on a throttled cache, then shows a small passive notice on interactive non-JSON commands when a newer version is available. The suggested upgrade command is tailored to how cymbal was installed (`brew upgrade 1broseidon/tap/cymbal`, rerun the PowerShell installer, `docker pull`, `go install`, or the releases page), with environment overrides for custom setups via `CYMBAL_INSTALL_METHOD` and `CYMBAL_UPDATE_COMMAND`. Passive notices can be disabled entirely with `CYMBAL_NO_UPDATE_NOTIFIER=1`.
+- **Update status in `cymbal version` and agent reminders** — `cymbal version` now includes cached release status in human and JSON output, and `cymbal hook remind` appends the exact update command when the cache already knows a newer release exists. Reminder output stays cache-only, so agent session startup does not trigger extra network checks; agents that can run shell commands are instructed to run the suggested update command immediately, otherwise to tell the user what to run.
+
 ## [0.11.6] - 2026-04-20
 
 ### Fixed

@@ -79,6 +79,10 @@ What it writes (merged into your existing `~/.claude/settings.json`):
   context, without paying ~700 B of re-injected tokens on every user turn.
   (Earlier versions wired this to `UserPromptSubmit`; re-running
   `cymbal hook install claude-code` migrates old installs automatically.)
+- If cymbal's cached update check already knows that a newer release is
+  available, the reminder also includes the exact update command. Agents that
+  can run shell commands should run that command immediately; otherwise they
+  should tell the user exactly what to run.
 - Both entries carry `marker: cymbal-hook` so `cymbal hook uninstall
   claude-code` finds and removes them without touching anything else
   you've added.
@@ -226,6 +230,10 @@ Then add to `opencode.json` (or the global
 Opencode supports globs and remote URLs in `instructions`, so teams can
 point at a shared source of truth instead of committing the reminder
 into every repo.
+
+If the cached reminder includes a cymbal update command, agents should run it
+when they can execute shell commands in that environment. Otherwise they
+should surface the exact command to the user.
 
 ---
 

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/1broseidon/cymbal/internal/updatecheck"
 	"github.com/spf13/cobra"
 )
 
@@ -426,8 +428,8 @@ func emitNudge(stdout, stderr io.Writer, format string, fields []string, s Sugge
 	switch format {
 	case "", "claude-code":
 		// Claude Code PreToolUse: decision + context live inside
-		// hookSpecificOutput. Top-level "decision"/"systemMessage" is
-		// the deprecated shape and fails schema validation.
+		// hookSpecificOutput. Top-level decision/systemMessage is
+		// deprecated and rejected by current schema validation.
 		out := map[string]any{
 			"hookSpecificOutput": map[string]any{
 				"hookEventName":            "PreToolUse",
@@ -479,23 +481,30 @@ Use 'cymbal search --text <pattern>' only for literal text matches cymbal
 can't resolve by symbol.`
 
 func emitRemind(w io.Writer, format string) error {
+	message := reminderText
+	status, _ := updatecheck.GetStatus(context.Background(), updatecheck.Options{
+		CurrentVersion: currentVersion(),
+		AllowNetwork:   false,
+		Timeout:        0,
+	})
+	message = updatecheck.AugmentReminder(message, status)
 	switch format {
 	case "", "text":
-		fmt.Fprintln(w, reminderText)
+		fmt.Fprintln(w, message)
 		return nil
 	case "json":
-		out := map[string]any{"systemMessage": reminderText}
+		out := map[string]any{"systemMessage": message}
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	case "claude-code":
 		// SessionStart injects persistent context via additionalContext
-		// inside hookSpecificOutput. Top-level "systemMessage" would
+		// inside hookSpecificOutput. Top-level systemMessage would
 		// render as a user-facing warning, not model context.
 		out := map[string]any{
 			"hookSpecificOutput": map[string]any{
 				"hookEventName":     "SessionStart",
-				"additionalContext": reminderText,
+				"additionalContext": message,
 			},
 		}
 		enc := json.NewEncoder(w)

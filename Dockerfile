@@ -22,5 +22,6 @@ WORKDIR /workspace
 # Default DB path — stored as a dotfile inside the mounted repo.
 # Override with -e CYMBAL_DB=... or --db flag.
 ENV CYMBAL_DB=/workspace/.cymbal/index.db
+ENV CYMBAL_DOCKER_IMAGE=1
 
 ENTRYPOINT ["cymbal"]

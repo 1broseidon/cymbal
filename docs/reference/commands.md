@@ -11,6 +11,8 @@ Path/language heuristics recognize some special filenames such as `Dockerfile`, 
 | `-d, --db <path>` | Override path to cymbal database (default: auto-resolved per repo) |
 | `--json` | Output as JSON instead of frontmatter+content |
 
+Passive update notices are suppressed automatically for `--json` output. Set `CYMBAL_NO_UPDATE_NOTIFIER=1` to disable passive update notices entirely.
+
 ---
 
 ## `cymbal index`
@@ -33,6 +35,20 @@ cymbal index .
 # Force re-index with 8 workers
 cymbal index . --force --workers 8
 ```
+
+---
+
+## `cymbal version`
+
+Print build/version information and cached release status.
+
+```sh
+cymbal version [--json]
+```
+
+- Human output includes the current build information and, when available, a suggested update command.
+- `--json` adds a structured `update` object with `checked_at`, `cache_stale`, `available`, `latest_version`, `install_type`, `command`, `release_url`, and `source`.
+- `cymbal --version` stays terse and only prints the installed version.
 
 ---
 

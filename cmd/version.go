@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"runtime"
 	"runtime/debug"
+	"time"
 
+	"github.com/1broseidon/cymbal/internal/updatecheck"
 	"github.com/spf13/cobra"
 )
 
@@ -62,8 +64,13 @@ var versionCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v, c, d := versionInfo()
 		jsonOut := getJSONFlag(cmd)
+		status, _ := updatecheck.GetStatus(cmd.Context(), updatecheck.Options{
+			CurrentVersion: v,
+			AllowNetwork:   true,
+			Timeout:        time.Second,
+		})
 		if jsonOut {
-			payload := map[string]string{
+			payload := map[string]any{
 				"version": v,
 				"commit":  c,
 				"date":    d,
@@ -71,6 +78,7 @@ var versionCmd = &cobra.Command{
 				"os":      runtime.GOOS,
 				"arch":    runtime.GOARCH,
 			}
+			payload["update"] = status
 			return renderJSONOrFrontmatter(true, payload, nil, "")
 		}
 		fmt.Printf("cymbal %s\n", v)
@@ -81,6 +89,14 @@ var versionCmd = &cobra.Command{
 			fmt.Printf("  built:  %s\n", d)
 		}
 		fmt.Printf("  go:     %s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		if status.Available {
+			fmt.Printf("\nUpdate available: %s\n", status.LatestVersion)
+			if status.Command != "" {
+				fmt.Printf("  command: %s\n", status.Command)
+			} else if status.ReleaseURL != "" {
+				fmt.Printf("  command: %s\n", status.ReleaseURL)
+			}
+		}
 		return nil
 	},
 }

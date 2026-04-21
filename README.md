@@ -80,6 +80,24 @@ docker compose run --rm cymbal index .
 
 Add `.cymbal/` to your `.gitignore` to keep the index out of version control.
 
+### Update notifications
+
+`cymbal` caches release checks and can show a small update notice on interactive, non-JSON commands when a newer release is available. It never self-updates by default.
+
+Update commands by install type:
+
+- Homebrew: `brew upgrade 1broseidon/tap/cymbal`
+- Windows PowerShell: `irm https://raw.githubusercontent.com/1broseidon/cymbal/main/install.ps1 | iex`
+- Docker: `docker pull ghcr.io/1broseidon/cymbal:latest` (or the tagged image cymbal suggests)
+- Go: `CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go install github.com/1broseidon/cymbal@latest`
+- Manual binary: download the latest release from GitHub
+
+Environment overrides:
+
+- `CYMBAL_NO_UPDATE_NOTIFIER=1` — disable passive update notices
+- `CYMBAL_INSTALL_METHOD=homebrew|powershell|docker|go|manual` — override install detection
+- `CYMBAL_UPDATE_COMMAND="..."` — override the suggested update command completely
+
 ## Quick start
 
 Define a shell alias once so every command looks like the native binary:
@@ -133,6 +151,7 @@ The index auto-builds on first use — no manual `cymbal index .` required. Subs
 | `diff` | Git diff scoped to a symbol's line range |
 | `context` | Bundled view: source + types + callers + imports |
 | `hook` | Agent-integration hooks — `nudge`, `remind`, `install <agent>` |
+| `version` | Print version/build info and cached release status |
 
 Commands that accept symbols support **batch**: `cymbal investigate Foo Bar Baz` runs all three in one invocation.
 
@@ -202,6 +221,8 @@ cymbal hook uninstall claude-code                 # clean removal
 ```
 
 The installer is idempotent, preserves unrelated settings, and marks its own entries so `uninstall` is surgical.
+
+When `hook remind` already knows about a newer cymbal release from the cached update check, it also includes the exact update command. Agents that can run shell commands should run that command immediately; otherwise they should tell the user exactly what to run.
 
 **Other agents** (Cursor, Windsurf, aider, Cline, Continue, Zed, Codex/OpenAI Agents SDK, or anything that can shell out on a pre-tool event) — see [`docs/AGENT_HOOKS.md`](docs/AGENT_HOOKS.md) for copy-paste snippets. The same two subcommands work everywhere; `nudge` offers `--format=claude-code|json|text` and `remind` offers the same three formats, so every integration is one or two lines.
 

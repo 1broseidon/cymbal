@@ -22,6 +22,18 @@ CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go install github.com/1broseidon/cymbal@latest
 
 Or grab a binary from [releases](https://github.com/1broseidon/cymbal/releases).
 
+## Updating cymbal
+
+`cymbal` can show a cached update notice during normal interactive use, but it does not self-update by default.
+
+- **Homebrew**: `brew upgrade 1broseidon/tap/cymbal`
+- **Windows (PowerShell)**: `irm https://raw.githubusercontent.com/1broseidon/cymbal/main/install.ps1 | iex`
+- **Docker**: `docker pull ghcr.io/1broseidon/cymbal:latest` (or the tagged image suggested by cymbal)
+- **Go**: `CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go install github.com/1broseidon/cymbal@latest`
+- **Manual binary**: download the latest release from GitHub
+
+If you want to disable passive update notices entirely, set `CYMBAL_NO_UPDATE_NOTIFIER=1`.
+
 ## Quick Start
 
 ```sh
