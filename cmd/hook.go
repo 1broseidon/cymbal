@@ -428,8 +428,8 @@ func emitNudge(stdout, stderr io.Writer, format string, fields []string, s Sugge
 	switch format {
 	case "", "claude-code":
 		// Claude Code PreToolUse: decision + context live inside
-		// hookSpecificOutput. Top-level "decision"/"systemMessage" is
-		// the deprecated shape and fails schema validation.
+		// hookSpecificOutput. Top-level decision/systemMessage is
+		// deprecated and rejected by current schema validation.
 		out := map[string]any{
 			"hookSpecificOutput": map[string]any{
 				"hookEventName":            "PreToolUse",
@@ -499,7 +499,7 @@ func emitRemind(w io.Writer, format string) error {
 		return enc.Encode(out)
 	case "claude-code":
 		// SessionStart injects persistent context via additionalContext
-		// inside hookSpecificOutput. Top-level "systemMessage" would
+		// inside hookSpecificOutput. Top-level systemMessage would
 		// render as a user-facing warning, not model context.
 		out := map[string]any{
 			"hookSpecificOutput": map[string]any{
