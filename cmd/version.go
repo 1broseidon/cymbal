@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"runtime"
 	"runtime/debug"
@@ -65,7 +64,7 @@ var versionCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v, c, d := versionInfo()
 		jsonOut := getJSONFlag(cmd)
-		status, _ := updatecheck.GetStatus(context.Background(), updatecheck.Options{
+		status, _ := updatecheck.GetStatus(cmd.Context(), updatecheck.Options{
 			CurrentVersion: v,
 			AllowNetwork:   true,
 			Timeout:        time.Second,

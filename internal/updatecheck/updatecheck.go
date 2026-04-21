@@ -380,10 +380,10 @@ func detectInstallType() InstallType {
 		return InstallPowerShell
 	}
 	path := filepath.ToSlash(strings.ToLower(exe))
-	if strings.HasSuffix(path, "/go/bin/cymbal") || strings.HasSuffix(path, "\\go\\bin\\cymbal.exe") || underGoBin(exe) {
+	if strings.HasSuffix(path, "/go/bin/cymbal") || strings.HasSuffix(path, "/go/bin/cymbal.exe") || underGoBin(exe) {
 		return InstallGo
 	}
-	if strings.HasSuffix(path, "/cymbal") || strings.HasSuffix(path, "\\cymbal.exe") {
+	if strings.HasSuffix(path, "/cymbal") || strings.HasSuffix(path, "/cymbal.exe") {
 		return InstallManual
 	}
 	return InstallUnknown

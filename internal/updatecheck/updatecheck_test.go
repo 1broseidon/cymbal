@@ -57,6 +57,22 @@ func TestDetectInstallTypeDoesNotAssumeHomebrewForGenericBinPath(t *testing.T) {
 	}
 }
 
+func TestDetectInstallTypeRecognizesWindowsExeSuffixes(t *testing.T) {
+	reset := stubUpdateCheckEnv(t)
+	defer reset()
+	execPathFn = func() (string, error) { return `C:\Users\Lucas\go\bin\cymbal.exe`, nil }
+	evalSymlinks = func(path string) (string, error) { return path, nil }
+
+	if got := detectInstallType(); got != InstallGo {
+		t.Fatalf("detectInstallType() = %q, want %q", got, InstallGo)
+	}
+
+	execPathFn = func() (string, error) { return `C:\Tools\cymbal.exe`, nil }
+	if got := detectInstallType(); got != InstallManual {
+		t.Fatalf("detectInstallType() = %q, want %q", got, InstallManual)
+	}
+}
+
 func TestRenderCommandGoUsesWindowsSafeShell(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		cmd := renderCommand(InstallGo, "")
