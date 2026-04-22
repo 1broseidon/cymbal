@@ -59,6 +59,10 @@ func getGraphDirection(cmd *cobra.Command) (index.GraphDirection, error) {
 	}
 }
 
+func init() {
+	rootCmd.AddCommand(graphCmd)
+}
+
 func selectGraphFormat(cmd *cobra.Command) index.GraphFormat {
 	if getJSONFlag(cmd) {
 		return index.GraphFormatJSON
