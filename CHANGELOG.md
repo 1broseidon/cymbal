@@ -6,12 +6,6 @@ All notable changes to cymbal are documented here.
 
 ## [0.11.8] - 2026-04-22
 
-### Fixed
-
-- **Update-notifier cache now has a cross-platform override.** `updatecheck.cymbalDir()` honors a new `CYMBAL_CACHE_DIR` environment variable before falling back to `os.UserCacheDir()` / the home directory. This unblocks reminder tests on macOS (where `os.UserCacheDir()` returns `~/Library/Caches` regardless of `XDG_CACHE_HOME`) and gives users a way to relocate the update-check cache on custom installs.
-
-## [0.11.7] - 2026-04-22
-
 ### Added
 
 - **Cached update notifications with install-specific guidance** — cymbal now checks the latest GitHub release on a throttled cache, then shows a small passive notice on interactive non-JSON commands when a newer version is available. The suggested upgrade command is tailored to how cymbal was installed (`brew upgrade 1broseidon/tap/cymbal`, rerun the PowerShell installer, `docker pull`, `go install`, or the releases page), with environment overrides for custom setups via `CYMBAL_INSTALL_METHOD` and `CYMBAL_UPDATE_COMMAND`. Passive notices can be disabled entirely with `CYMBAL_NO_UPDATE_NOTIFIER=1`.
@@ -20,6 +14,7 @@ All notable changes to cymbal are documented here.
 ### Fixed
 
 - **GitHub releases now publish changelog notes automatically.** The tag workflow now checks out the tagged source, extracts the matching `## [X.Y.Z]` section from `CHANGELOG.md`, and uses it as the GitHub Release body. Releases now fail fast if the changelog entry for the tag is missing, which makes release notes part of the tag workflow instead of a manual post-step.
+- **Update-notifier cache now has a cross-platform override.** `updatecheck.cymbalDir()` honors a new `CYMBAL_CACHE_DIR` environment variable before falling back to `os.UserCacheDir()` / the home directory. This unblocks reminder tests on macOS (where `os.UserCacheDir()` returns `~/Library/Caches` regardless of `XDG_CACHE_HOME`) and gives users a way to relocate the update-check cache on custom installs.
 
 ## [0.11.6] - 2026-04-20
 
