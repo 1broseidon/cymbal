@@ -102,3 +102,40 @@ func TestBuildGraphEmptyGraphIsWellFormed(t *testing.T) {
 		t.Fatalf("expected empty graph, got %+v", graph)
 	}
 }
+
+func TestBuildGraphLimitAddsSentinelAndTruncatedCount(t *testing.T) {
+	graph := &GraphResult{
+		Nodes: []GraphNode{
+			{ID: graphNodeID("Entry"), Kind: GraphNodeKindSymbol, Label: "Entry", Symbol: "Entry"},
+			{ID: graphNodeID("A"), Kind: GraphNodeKindSymbol, Label: "A", Symbol: "A"},
+			{ID: graphNodeID("B"), Kind: GraphNodeKindSymbol, Label: "B", Symbol: "B"},
+			{ID: graphNodeID("C"), Kind: GraphNodeKindSymbol, Label: "C", Symbol: "C"},
+		},
+		Edges: []GraphEdge{
+			{From: graphNodeID("Entry"), To: graphNodeID("A"), Resolved: true},
+			{From: graphNodeID("A"), To: graphNodeID("B"), Resolved: true},
+			{From: graphNodeID("A"), To: graphNodeID("C"), Resolved: true},
+		},
+		Unresolved: []GraphUnresolved{{From: graphNodeID("C"), Key: "fmt.Printf", Reason: GraphUnresolvedExternal}},
+	}
+	truncated := truncateByDegree(graph, 2, graphNodeID("Entry"))
+	if truncated.Truncated != 2 {
+		t.Fatalf("expected 2 truncated nodes, got %d", truncated.Truncated)
+	}
+	if len(truncated.Nodes) != 3 {
+		t.Fatalf("expected 2 kept nodes + sentinel, got %+v", truncated.Nodes)
+	}
+	foundSentinel := false
+	foundEntry := false
+	for _, n := range truncated.Nodes {
+		if n.Kind == GraphNodeKindSentinel {
+			foundSentinel = true
+		}
+		if n.Symbol == "Entry" {
+			foundEntry = true
+		}
+	}
+	if !foundSentinel || !foundEntry {
+		t.Fatalf("expected sentinel and root preserved, got %+v", truncated.Nodes)
+	}
+}

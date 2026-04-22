@@ -38,7 +38,7 @@ Examples:
 		}
 
 		if graphRequested(cmd) {
-			return renderAsGraph(cmd, dbPath, names, index.GraphDirectionUp)
+			return renderAsGraph(cmd, dbPath, names, index.GraphDirectionUp, 1)
 		}
 
 		// Fetch once per symbol, then merge into a single deduplicated view.

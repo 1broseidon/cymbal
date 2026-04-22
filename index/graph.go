@@ -3,6 +3,7 @@ package index
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -33,6 +34,7 @@ const (
 const (
 	GraphNodeKindSymbol   GraphNodeKind = "symbol"
 	GraphNodeKindExternal GraphNodeKind = "external"
+	GraphNodeKindSentinel GraphNodeKind = "sentinel"
 )
 
 const (
@@ -50,6 +52,12 @@ type GraphQuery struct {
 	Scope             []string
 	Exclude           []string
 	IncludeUnresolved bool
+	// Limit caps the graph at the top-N nodes by degree (edges touching
+	// the node). When >0 and the graph exceeds Limit, nodes are sorted
+	// by degree desc (stable tie-break: node ID asc), truncated, and a
+	// single sentinel node is appended to make truncation visible.
+	// The root symbol is always kept. Zero means no cap.
+	Limit int
 }
 
 type GraphNode struct {
@@ -80,6 +88,9 @@ type GraphResult struct {
 	Nodes      []GraphNode       `json:"nodes"`
 	Edges      []GraphEdge       `json:"edges"`
 	Unresolved []GraphUnresolved `json:"unresolved"`
+	// Truncated reports how many nodes were dropped by the Limit cap.
+	// Zero when no truncation happened.
+	Truncated int `json:"truncated,omitempty"`
 }
 
 type graphSymbolMeta struct {
@@ -261,7 +272,80 @@ func (s *Store) BuildGraph(q GraphQuery) (*GraphResult, error) {
 		}
 		return a.Key < b.Key
 	})
+
+	if q.Limit > 0 && len(result.Nodes) > q.Limit {
+		result = truncateByDegree(result, q.Limit, graphNodeID(q.Symbol))
+	}
 	return result, nil
+}
+
+// truncateByDegree keeps the top-N nodes ranked by edge degree (in + out),
+// always preserving the root, and appends a single sentinel node so the
+// truncation is visible in any renderer. Edges and unresolved entries whose
+// endpoints were dropped are also removed.
+func truncateByDegree(g *GraphResult, limit int, rootID string) *GraphResult {
+	total := len(g.Nodes)
+	if total <= limit {
+		return g
+	}
+
+	degree := make(map[string]int, total)
+	for _, e := range g.Edges {
+		degree[e.From]++
+		degree[e.To]++
+	}
+
+	type ranked struct {
+		node   GraphNode
+		deg    int
+		isRoot bool
+	}
+	ranks := make([]ranked, 0, total)
+	for _, n := range g.Nodes {
+		ranks = append(ranks, ranked{node: n, deg: degree[n.ID], isRoot: n.ID == rootID})
+	}
+	sort.SliceStable(ranks, func(i, j int) bool {
+		if ranks[i].isRoot != ranks[j].isRoot {
+			return ranks[i].isRoot
+		}
+		if ranks[i].deg != ranks[j].deg {
+			return ranks[i].deg > ranks[j].deg
+		}
+		return ranks[i].node.ID < ranks[j].node.ID
+	})
+
+	keep := make(map[string]bool, limit)
+	kept := make([]GraphNode, 0, limit+1)
+	for i := 0; i < limit && i < len(ranks); i++ {
+		keep[ranks[i].node.ID] = true
+		kept = append(kept, ranks[i].node)
+	}
+
+	dropped := total - len(kept)
+	kept = append(kept, GraphNode{
+		ID:    "_truncated",
+		Kind:  GraphNodeKindSentinel,
+		Label: fmt.Sprintf("… (%d more, truncated)", dropped),
+	})
+
+	filteredEdges := make([]GraphEdge, 0, len(g.Edges))
+	for _, e := range g.Edges {
+		if keep[e.From] && keep[e.To] {
+			filteredEdges = append(filteredEdges, e)
+		}
+	}
+	filteredUnresolved := make([]GraphUnresolved, 0, len(g.Unresolved))
+	for _, u := range g.Unresolved {
+		if keep[u.From] {
+			filteredUnresolved = append(filteredUnresolved, u)
+		}
+	}
+	return &GraphResult{
+		Nodes:      kept,
+		Edges:      filteredEdges,
+		Unresolved: filteredUnresolved,
+		Truncated:  dropped,
+	}
 }
 
 func (s *Store) symbolMetas() (map[string]graphSymbolMeta, error) {
@@ -289,6 +373,11 @@ func (s *Store) symbolMetas() (map[string]graphSymbolMeta, error) {
 	}
 	return out, rows.Err()
 }
+
+// GraphNodeIDFor returns the stable graph-node ID for a symbol name.
+// Exported so the cmd layer can precompute root IDs when applying
+// merged-graph truncation.
+func GraphNodeIDFor(name string) string { return graphNodeID(name) }
 
 func graphNodeID(name string) string {
 	sum := sha256.Sum256([]byte(name))

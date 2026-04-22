@@ -55,7 +55,7 @@ Examples:
 		}
 
 		if graphRequested(cmd) {
-			return renderAsGraph(cmd, dbPath, names, index.GraphDirectionDown)
+			return renderAsGraph(cmd, dbPath, names, index.GraphDirectionDown, 2)
 		}
 
 		merged, sourceMap, totalRaw, err := mergeTrace(dbPath, names, depth, limit, kinds)
