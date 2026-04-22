@@ -37,6 +37,10 @@ Examples:
 			return err
 		}
 
+		if graphRequested(cmd) {
+			return renderAsGraph(cmd, dbPath, names, index.GraphDirectionUp)
+		}
+
 		// Fetch once per symbol, then merge into a single deduplicated view.
 		merged, sourceMap, totalRaw, err := mergeImpact(dbPath, names, depth, limit)
 		if err != nil {
@@ -137,6 +141,7 @@ func init() {
 	impactCmd.Flags().IntP("limit", "n", 50, "max results per symbol")
 	impactCmd.Flags().IntP("context", "C", 1, "lines of context around each call site (0 for single-line)")
 	addStdinFlag(impactCmd)
+	addGraphFlags(impactCmd)
 	rootCmd.AddCommand(impactCmd)
 }
 

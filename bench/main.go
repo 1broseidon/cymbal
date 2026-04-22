@@ -408,8 +408,11 @@ func defineTools(cymbalBin string) []Tool {
 				OpTrace: func(dir, sym string) *exec.Cmd {
 					return exec.Command(cymbalBin, "trace", sym)
 				},
+				// OpGraph times the --graph render path on the trace verb.
+				// Graph output is no longer a separate subcommand; it's a
+				// render flag on edge-producing verbs.
 				OpGraph: func(dir, sym string) *exec.Cmd {
-					return exec.Command(cymbalBin, "graph", sym, "--direction", "both", "--json")
+					return exec.Command(cymbalBin, "trace", sym, "--graph", "--graph-format", "json")
 				},
 			},
 			Cleanup: func(dir string) {

@@ -1268,7 +1268,13 @@ func lineHasAttribution(text, name string, want []string) bool {
 	return false
 }
 
-// runGroundTruthGraph verifies symbol-mode graph output against pinned ground truth.
+// runGroundTruthGraph verifies graph render output against pinned ground truth.
+// Graph rendering is now a flag on edge-producing verbs, not a standalone
+// subcommand. Direction selects which verb to use:
+//   - down → `trace <sym> --graph --graph-format json`
+//   - up   → `impact <sym> --graph --graph-format json`
+//   - both → not yet supported (phase 2 / file-mode work)
+//
 // expect_nodes: label strings that MUST appear as node labels.
 // expect_edges: "A->B" pairs that MUST be present as resolved edges.
 // forbid_nodes: label strings that MUST NOT appear (noise guard).
@@ -1283,8 +1289,22 @@ func runGroundTruthGraph(cymbalBin, repoName, repoDir string, sym Symbol) Ground
 		depth = 2
 	}
 
-	args := []string{"--json", "graph", sym.Name,
-		"--direction", direction,
+	var verb string
+	switch direction {
+	case "down":
+		verb = "trace"
+	case "up":
+		verb = "impact"
+	default:
+		return GroundTruthCheck{
+			Repo: repoName, Symbol: sym.Name, Op: OpGraph,
+			Passed:  false,
+			Details: fmt.Sprintf("unsupported graph direction %q (symbol-mode supports down via trace, up via impact)", direction),
+		}
+	}
+
+	args := []string{verb, sym.Name,
+		"--graph", "--graph-format", "json",
 		"--depth", fmt.Sprintf("%d", depth),
 	}
 	out, err := runGroundTruthCmd(repoDir, cymbalBin, args...)

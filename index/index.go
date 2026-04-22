@@ -967,6 +967,16 @@ func FindTrace(dbPath, symbolName string, depth, limit int, kinds ...string) ([]
 	return store.FindTrace(symbolName, depth, limit, kinds...)
 }
 
+// BuildGraph renders symbol relationships as a graph from an opened DB.
+// Direction is up | down | both; see GraphQuery for full options.
+func BuildGraph(dbPath string, q GraphQuery) (*GraphResult, error) {
+	store, err := openCached(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return store.BuildGraph(q)
+}
+
 // SearchSymbolsFlex performs a flexible search: case-insensitive + prefix match.
 // Used as a fallback when exact name match returns no results.
 func SearchSymbolsFlex(dbPath, name string, limit int) ([]SymbolResult, error) {

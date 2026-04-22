@@ -54,6 +54,10 @@ Examples:
 			names = append(names, sym)
 		}
 
+		if graphRequested(cmd) {
+			return renderAsGraph(cmd, dbPath, names, index.GraphDirectionDown)
+		}
+
 		merged, sourceMap, totalRaw, err := mergeTrace(dbPath, names, depth, limit, kinds)
 		if err != nil {
 			return err
@@ -173,6 +177,7 @@ func init() {
 	traceCmd.Flags().String("kinds", "call",
 		"comma-separated ref kinds to follow: call, use, implements (default call)")
 	addStdinFlag(traceCmd)
+	addGraphFlags(traceCmd)
 	rootCmd.AddCommand(traceCmd)
 }
 

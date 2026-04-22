@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/1broseidon/cymbal/index"
-	"github.com/spf13/cobra"
 )
 
 func TestRenderGraphEmptyFormats(t *testing.T) {
@@ -33,25 +32,6 @@ func TestRenderGraphFormatsUnresolvedAsDashed(t *testing.T) {
 	}
 	if got := renderGraphDOT(graph); !strings.Contains(got, "style=dashed") {
 		t.Fatalf("expected dashed dot edge, got %q", got)
-	}
-}
-
-func TestSelectGraphFormatHonorsFlagsAndTTYFallback(t *testing.T) {
-	cmd := &cobra.Command{}
-	cmd.Flags().Bool("json", false, "")
-	cmd.Flags().String("format", "", "")
-
-	if got := selectGraphFormat(cmd); got != index.GraphFormatJSON {
-		t.Fatalf("expected non-tty default json in tests, got %q", got)
-	}
-	_ = cmd.Flags().Set("json", "true")
-	if got := selectGraphFormat(cmd); got != index.GraphFormatJSON {
-		t.Fatalf("expected --json to force json, got %q", got)
-	}
-	_ = cmd.Flags().Set("json", "false")
-	_ = cmd.Flags().Set("format", "dot")
-	if got := selectGraphFormat(cmd); got != index.GraphFormatDot {
-		t.Fatalf("expected explicit format override, got %q", got)
 	}
 }
 
