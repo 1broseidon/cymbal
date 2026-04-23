@@ -101,7 +101,51 @@ type graphSymbolMeta struct {
 	language string
 }
 
+type graphBuilder struct {
+	q          GraphQuery
+	metas      map[string]graphSymbolMeta
+	nodes      map[string]GraphNode
+	edges      map[string]GraphEdge
+	unresolved map[string]GraphUnresolved
+}
+
 func (s *Store) BuildGraph(q GraphQuery) (*GraphResult, error) {
+	q = normalizeGraphQuery(q)
+	if strings.TrimSpace(q.Symbol) == "" {
+		return emptyGraphResult(), nil
+	}
+
+	metas, err := s.symbolMetas()
+	if err != nil {
+		return nil, err
+	}
+
+	builder := newGraphBuilder(q, metas)
+	if graphDirectionIncludesDown(q.Direction) {
+		rows, err := s.FindTrace(q.Symbol, q.Depth, 1000)
+		if err != nil {
+			return nil, err
+		}
+		builder.addTraceRows(rows)
+	}
+
+	if graphDirectionIncludesUp(q.Direction) {
+		rows, err := s.FindImpact(q.Symbol, q.Depth, 1000)
+		if err != nil {
+			return nil, err
+		}
+		builder.addImpactRows(rows)
+	}
+	builder.addRoot()
+
+	result := builder.result()
+	if q.Limit > 0 && len(result.Nodes) > q.Limit {
+		result = truncateByDegree(result, q.Limit, graphNodeID(q.Symbol))
+	}
+	return result, nil
+}
+
+func normalizeGraphQuery(q GraphQuery) GraphQuery {
 	if q.Depth <= 0 {
 		q.Depth = 2
 	}
@@ -111,175 +155,168 @@ func (s *Store) BuildGraph(q GraphQuery) (*GraphResult, error) {
 	if q.Direction == "" {
 		q.Direction = GraphDirectionDown
 	}
+	return q
+}
 
-	result := &GraphResult{Unresolved: []GraphUnresolved{}}
-	if strings.TrimSpace(q.Symbol) == "" {
-		result.Nodes = []GraphNode{}
-		result.Edges = []GraphEdge{}
-		return result, nil
+func emptyGraphResult() *GraphResult {
+	return &GraphResult{
+		Nodes:      []GraphNode{},
+		Edges:      []GraphEdge{},
+		Unresolved: []GraphUnresolved{},
 	}
+}
 
-	metas, err := s.symbolMetas()
-	if err != nil {
-		return nil, err
+func newGraphBuilder(q GraphQuery, metas map[string]graphSymbolMeta) *graphBuilder {
+	return &graphBuilder{
+		q:          q,
+		metas:      metas,
+		nodes:      map[string]GraphNode{},
+		edges:      map[string]GraphEdge{},
+		unresolved: map[string]GraphUnresolved{},
 	}
+}
 
-	nodes := map[string]GraphNode{}
-	edges := map[string]GraphEdge{}
-	unresolved := map[string]GraphUnresolved{}
+func (b *graphBuilder) result() *GraphResult {
+	return &GraphResult{
+		Nodes: mapValuesSorted(b.nodes, func(a, b GraphNode) bool { return a.ID < b.ID }),
+		Edges: mapValuesSorted(b.edges, func(a, b GraphEdge) bool {
+			if a.From != b.From {
+				return a.From < b.From
+			}
+			if a.To != b.To {
+				return a.To < b.To
+			}
+			return a.Resolved && !b.Resolved
+		}),
+		Unresolved: mapValuesSorted(b.unresolved, func(a, b GraphUnresolved) bool {
+			if a.From != b.From {
+				return a.From < b.From
+			}
+			if a.ResolvedAs != b.ResolvedAs {
+				return a.ResolvedAs < b.ResolvedAs
+			}
+			return a.Key < b.Key
+		}),
+	}
+}
 
-	addNode := func(symbol string, meta graphSymbolMeta, kind GraphNodeKind) string {
-		id := graphNodeID(symbol)
-		if _, ok := nodes[id]; ok {
-			return id
-		}
-		nodes[id] = GraphNode{
-			ID:       id,
-			Kind:     kind,
-			Label:    symbol,
-			Symbol:   symbol,
-			Path:     meta.path,
-			Language: meta.language,
-		}
+func (b *graphBuilder) addTraceRows(rows []TraceResult) {
+	for _, row := range rows {
+		b.addTraceRow(row)
+	}
+}
+
+func (b *graphBuilder) addTraceRow(row TraceResult) {
+	fromMeta := b.metas[row.Caller]
+	if !b.includeSymbol(row.Caller, fromMeta) {
+		return
+	}
+	fromID := b.addNode(row.Caller, fromMeta, GraphNodeKindSymbol)
+	toMeta, ok := b.metas[row.Callee]
+	if !ok {
+		b.addUnresolvedEdge(fromID, row.Callee, "ext:"+row.Callee)
+		return
+	}
+	if b.includeSymbol(row.Callee, toMeta) {
+		toID := b.addNode(row.Callee, toMeta, GraphNodeKindSymbol)
+		b.addResolvedEdge(fromID, toID)
+	}
+}
+
+func (b *graphBuilder) addImpactRows(rows []ImpactResult) {
+	for _, row := range rows {
+		b.addImpactRow(row)
+	}
+}
+
+func (b *graphBuilder) addImpactRow(row ImpactResult) {
+	fromMeta, ok := b.metas[row.Caller]
+	toMeta := b.metas[row.Symbol]
+	if !ok || !b.includeSymbol(row.Caller, fromMeta) || !b.includeSymbol(row.Symbol, toMeta) {
+		return
+	}
+	fromID := b.addNode(row.Caller, fromMeta, GraphNodeKindSymbol)
+	toID := b.addNode(row.Symbol, toMeta, GraphNodeKindSymbol)
+	b.addResolvedEdge(fromID, toID)
+}
+
+func (b *graphBuilder) addRoot() {
+	rootMeta, ok := b.metas[b.q.Symbol]
+	if ok && b.includeSymbol(b.q.Symbol, rootMeta) {
+		b.addNode(b.q.Symbol, rootMeta, GraphNodeKindSymbol)
+	}
+}
+
+func (b *graphBuilder) includeSymbol(symbol string, meta graphSymbolMeta) bool {
+	if meta.path == "" {
+		return true
+	}
+	if matchesAnyGlob(meta.path, b.q.Exclude) {
+		return false
+	}
+	if len(b.q.Scope) == 0 {
+		return true
+	}
+	return matchesAnyGlob(meta.path, b.q.Scope)
+}
+
+func (b *graphBuilder) addNode(symbol string, meta graphSymbolMeta, kind GraphNodeKind) string {
+	id := graphNodeID(symbol)
+	if _, ok := b.nodes[id]; ok {
 		return id
 	}
-	addExternal := func(symbol string) string {
-		id := graphNodeID(symbol)
-		if _, ok := nodes[id]; ok {
-			return id
-		}
-		nodes[id] = GraphNode{
-			ID:     id,
-			Kind:   GraphNodeKindExternal,
-			Label:  symbol,
-			Symbol: symbol,
-		}
+	b.nodes[id] = GraphNode{
+		ID:       id,
+		Kind:     kind,
+		Label:    symbol,
+		Symbol:   symbol,
+		Path:     meta.path,
+		Language: meta.language,
+	}
+	return id
+}
+
+func (b *graphBuilder) addExternal(symbol string) string {
+	id := graphNodeID(symbol)
+	if _, ok := b.nodes[id]; ok {
 		return id
 	}
-	includeSymbol := func(symbol string, meta graphSymbolMeta) bool {
-		if meta.path == "" {
-			return true
-		}
-		if matchesAnyGlob(meta.path, q.Exclude) {
-			return false
-		}
-		if len(q.Scope) == 0 {
-			return true
-		}
-		return matchesAnyGlob(meta.path, q.Scope)
+	b.nodes[id] = GraphNode{
+		ID:     id,
+		Kind:   GraphNodeKindExternal,
+		Label:  symbol,
+		Symbol: symbol,
 	}
-	allowExpansion := func(symbol string, meta graphSymbolMeta) bool {
-		if meta.path == "" {
-			return true
-		}
-		if matchesAnyGlob(meta.path, q.Exclude) {
-			return false
-		}
-		if len(q.Scope) == 0 {
-			return true
-		}
-		if matchesAnyGlob(meta.path, q.Scope) {
-			return true
-		}
-		return symbol == q.Symbol
-	}
-	addResolvedEdge := func(from, to string) {
-		key := from + "|" + to
-		if _, ok := edges[key]; ok {
-			return
-		}
-		edges[key] = GraphEdge{From: from, To: to, Kind: GraphEdgeKindCall, Resolved: true}
-	}
-	addUnresolvedEdge := func(fromID, key, resolvedAs string) {
-		ukey := fromID + "|" + resolvedAs
-		if _, ok := unresolved[ukey]; ok {
-			return
-		}
-		u := GraphUnresolved{From: fromID, Key: key, Reason: GraphUnresolvedExternal, ResolvedAs: resolvedAs}
-		if q.IncludeUnresolved {
-			u.To = addExternal(resolvedAs)
-			edges[ukey] = GraphEdge{From: fromID, To: u.To, Kind: GraphEdgeKindCall, Resolved: false}
-		}
-		unresolved[ukey] = u
-	}
+	return id
+}
 
-	if q.Direction == GraphDirectionDown || q.Direction == GraphDirectionBoth {
-		rows, err := s.FindTrace(q.Symbol, q.Depth, 1000)
-		if err != nil {
-			return nil, err
-		}
-		for _, row := range rows {
-			fromMeta := metas[row.Caller]
-			toMeta, ok := metas[row.Callee]
-			if !includeSymbol(row.Caller, fromMeta) {
-				continue
-			}
-			fromID := addNode(row.Caller, fromMeta, GraphNodeKindSymbol)
-			if ok {
-				if includeSymbol(row.Callee, toMeta) {
-					toID := addNode(row.Callee, toMeta, GraphNodeKindSymbol)
-					addResolvedEdge(fromID, toID)
-				}
-				continue
-			}
-			addUnresolvedEdge(fromID, row.Callee, "ext:"+row.Callee)
-		}
+func (b *graphBuilder) addResolvedEdge(from, to string) {
+	key := from + "|" + to
+	if _, ok := b.edges[key]; ok {
+		return
 	}
+	b.edges[key] = GraphEdge{From: from, To: to, Kind: GraphEdgeKindCall, Resolved: true}
+}
 
-	if q.Direction == GraphDirectionUp || q.Direction == GraphDirectionBoth {
-		rows, err := s.FindImpact(q.Symbol, q.Depth, 1000)
-		if err != nil {
-			return nil, err
-		}
-		for _, row := range rows {
-			fromMeta, ok := metas[row.Caller]
-			toMeta := metas[row.Symbol]
-			if !ok || !includeSymbol(row.Caller, fromMeta) || !includeSymbol(row.Symbol, toMeta) {
-				continue
-			}
-			fromID := addNode(row.Caller, fromMeta, GraphNodeKindSymbol)
-			toID := addNode(row.Symbol, toMeta, GraphNodeKindSymbol)
-			addResolvedEdge(fromID, toID)
-		}
+func (b *graphBuilder) addUnresolvedEdge(fromID, key, resolvedAs string) {
+	ukey := fromID + "|" + resolvedAs
+	if _, ok := b.unresolved[ukey]; ok {
+		return
 	}
-
-	if rootMeta, ok := metas[q.Symbol]; ok && includeSymbol(q.Symbol, rootMeta) {
-		addNode(q.Symbol, rootMeta, GraphNodeKindSymbol)
+	u := GraphUnresolved{From: fromID, Key: key, Reason: GraphUnresolvedExternal, ResolvedAs: resolvedAs}
+	if b.q.IncludeUnresolved {
+		u.To = b.addExternal(resolvedAs)
+		b.edges[ukey] = GraphEdge{From: fromID, To: u.To, Kind: GraphEdgeKindCall, Resolved: false}
 	}
+	b.unresolved[ukey] = u
+}
 
-	for sym, meta := range metas {
-		if !allowExpansion(sym, meta) {
-			continue
-		}
-		if _, ok := nodes[graphNodeID(sym)]; ok {
-			continue
-		}
-	}
+func graphDirectionIncludesDown(direction GraphDirection) bool {
+	return direction == GraphDirectionDown || direction == GraphDirectionBoth
+}
 
-	result.Nodes = mapValuesSorted(nodes, func(a, b GraphNode) bool { return a.ID < b.ID })
-	result.Edges = mapValuesSorted(edges, func(a, b GraphEdge) bool {
-		if a.From != b.From {
-			return a.From < b.From
-		}
-		if a.To != b.To {
-			return a.To < b.To
-		}
-		return a.Resolved && !b.Resolved
-	})
-	result.Unresolved = mapValuesSorted(unresolved, func(a, b GraphUnresolved) bool {
-		if a.From != b.From {
-			return a.From < b.From
-		}
-		if a.ResolvedAs != b.ResolvedAs {
-			return a.ResolvedAs < b.ResolvedAs
-		}
-		return a.Key < b.Key
-	})
-
-	if q.Limit > 0 && len(result.Nodes) > q.Limit {
-		result = truncateByDegree(result, q.Limit, graphNodeID(q.Symbol))
-	}
-	return result, nil
+func graphDirectionIncludesUp(direction GraphDirection) bool {
+	return direction == GraphDirectionUp || direction == GraphDirectionBoth
 }
 
 // truncateByDegree keeps the top-N nodes ranked by edge degree (in + out),
