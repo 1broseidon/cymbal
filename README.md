@@ -52,6 +52,15 @@ Use it when you need:
 brew install 1broseidon/tap/cymbal
 ```
 
+**Arch Linux** (AUR, community-maintained):
+
+```sh
+yay -S cymbal
+```
+
+Without an AUR helper, build the package from
+[aur.archlinux.org/packages/cymbal](https://aur.archlinux.org/packages/cymbal).
+
 **Windows** (PowerShell):
 
 ```powershell
@@ -111,6 +120,7 @@ container flow regularly.
 never self-updates by default.
 
 - Homebrew: `brew upgrade 1broseidon/tap/cymbal`
+- Arch Linux (AUR): update with your AUR helper, for example `yay -Syu cymbal`
 - Windows PowerShell: `irm https://raw.githubusercontent.com/1broseidon/cymbal/main/install.ps1 | iex`
 - Docker: `docker pull ghcr.io/1broseidon/cymbal:latest` (or the tagged image cymbal suggests)
 - Go: `CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go install github.com/1broseidon/cymbal@latest`
