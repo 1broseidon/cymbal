@@ -4,26 +4,29 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/1broseidon/cymbal/index"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 const rgSearchTimeout = 10 * time.Second
 
 var searchCmd = &cobra.Command{
-	Use:   "search <query>",
+	Use:   "search <query> [path ...]",
 	Short: "Search symbols or text across indexed repos",
 	Long: `Search symbols by default, or use --text for full-text grep across file contents.
-Results are ranked: exact match > prefix > fuzzy.`,
+Results are ranked: exact match > prefix > fuzzy.
+
+Trailing path operands are accepted as --path filters, so grep-shaped calls like
+"cymbal search --text TODO cmd internal/foo.go" work as expected.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		query := strings.Join(args, " ")
 		dbPath := getDBPath(cmd)
 		ensureFresh(dbPath)
 		jsonOut := getJSONFlag(cmd)
@@ -35,6 +38,8 @@ Results are ranked: exact match > prefix > fuzzy.`,
 		textMode, _ := cmd.Flags().GetBool("text")
 		includes, _ := cmd.Flags().GetStringArray("path")
 		excludes, _ := cmd.Flags().GetStringArray("exclude")
+		query, pathOperands := splitSearchArgs(args)
+		includes = append(includes, pathOperands...)
 		hasFilters := len(includes) > 0 || len(excludes) > 0
 
 		effectiveExact, err := normalizeSearchMode(exact, ignoreCase, textMode)
@@ -88,6 +93,12 @@ Results are ranked: exact match > prefix > fuzzy.`,
 }
 
 func init() {
+	searchCmd.Flags().SetNormalizeFunc(func(_ *pflag.FlagSet, name string) pflag.NormalizedName {
+		if name == "file" {
+			return pflag.NormalizedName("path")
+		}
+		return pflag.NormalizedName(name)
+	})
 	searchCmd.Flags().StringP("kind", "k", "", "filter by symbol kind (function, class, method, etc.)")
 	searchCmd.Flags().IntP("limit", "n", 20, "max results")
 	searchCmd.Flags().StringP("lang", "l", "", "filter by language (go, python, typescript, etc.)")
@@ -97,6 +108,51 @@ func init() {
 	searchCmd.Flags().StringArray("path", nil, "include only results whose path matches this glob (repeatable)")
 	searchCmd.Flags().StringArray("exclude", nil, "exclude results whose path matches this glob (repeatable)")
 	rootCmd.AddCommand(searchCmd)
+}
+
+func splitSearchArgs(args []string) (string, []string) {
+	if len(args) <= 1 {
+		return strings.Join(args, " "), nil
+	}
+	firstPath := len(args)
+	for firstPath > 1 && looksLikeSearchPathOperand(args[firstPath-1]) {
+		firstPath--
+	}
+	if firstPath == len(args) {
+		return strings.Join(args, " "), nil
+	}
+	paths := make([]string, 0, len(args)-firstPath)
+	for _, arg := range args[firstPath:] {
+		paths = append(paths, normalizeSearchPathOperand(arg))
+	}
+	return strings.Join(args[:firstPath], " "), paths
+}
+
+func looksLikeSearchPathOperand(arg string) bool {
+	arg = strings.TrimSpace(arg)
+	if arg == "" || strings.HasPrefix(arg, "-") {
+		return false
+	}
+	if isFilePath(arg) {
+		return true
+	}
+	if _, err := os.Stat(arg); err == nil {
+		return true
+	}
+	return false
+}
+
+func normalizeSearchPathOperand(arg string) string {
+	arg = strings.TrimSpace(arg)
+	rel := normalizeRelPath(arg)
+	info, err := os.Stat(arg)
+	if err == nil && info.IsDir() {
+		if rel == "" || rel == "." {
+			return "**"
+		}
+		return strings.TrimSuffix(rel, "/") + "/**"
+	}
+	return rel
 }
 
 func normalizeSearchMode(exact, ignoreCase, textMode bool) (bool, error) {
@@ -134,7 +190,7 @@ func searchTextRg(rgPath, dbPath, query, lang string, limit int, jsonOut bool, i
 			args = append(args, "--type="+rgLang)
 		}
 	}
-	fetchLimit := widenPathFilterLimit(limit, len(includes) > 0 || len(excludes) > 0)
+	fetchLimit := limit
 	args = append(args, "--", query, ".")
 
 	ctx, cancel := context.WithTimeout(context.Background(), rgSearchTimeout)
@@ -168,7 +224,10 @@ func searchTextRg(rgPath, dbPath, query, lang string, limit int, jsonOut bool, i
 		if err != nil {
 			continue
 		}
-		relPath := filepath.ToSlash(parts[0])
+		relPath := normalizeRelPath(parts[0])
+		if !allowPath(relPath, includes, excludes) {
+			continue
+		}
 		results = append(results, index.TextResult{
 			RelPath: relPath,
 			Line:    lineNum,
@@ -205,10 +264,6 @@ func searchTextRg(rgPath, dbPath, query, lang string, limit int, jsonOut bool, i
 		} else {
 			return searchTextGo(dbPath, query, lang, limit, jsonOut, includes, excludes)
 		}
-	}
-	results = filterByPath(results, func(r index.TextResult) string { return r.RelPath }, includes, excludes)
-	if limit > 0 && len(results) > limit {
-		results = results[:limit]
 	}
 	if len(results) == 0 {
 		return fmt.Errorf("no results found for '%s'", query)

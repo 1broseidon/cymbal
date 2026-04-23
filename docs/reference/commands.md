@@ -122,8 +122,11 @@ cymbal outline internal/auth/handler.go --signatures
 Search symbols by name, or use `--text` for full-text grep. Results are ranked: exact match > prefix > fuzzy.
 
 ```sh
-cymbal search <query> [flags]
+cymbal search <query> [path ...] [flags]
 ```
+
+Trailing path operands are accepted as `--path` filters, which matches common
+`rg` usage: `cymbal search --text <pattern> cmd internal/foo.go`.
 
 | Flag | Description |
 |------|-------------|
@@ -131,7 +134,9 @@ cymbal search <query> [flags]
 | `-e, --exact` | Exact name match only |
 | `-k, --kind <type>` | Filter by symbol kind (function, class, method, etc.) |
 | `-l, --lang <name>` | Filter by language (go, python, typescript, etc.) |
-| `-n, --limit <n>` | Max results (default: 50) |
+| `-n, --limit <n>` | Max results (default: 20) |
+| `--path <glob>` | Include only results whose path matches this glob or path fragment (repeatable) |
+| `--exclude <glob>` | Exclude results whose path matches this glob or path fragment (repeatable) |
 
 ```sh
 # Symbol search
@@ -139,6 +144,9 @@ cymbal search handleAuth
 
 # Full-text grep
 cymbal search "TODO" --text
+
+# Full-text grep scoped to files/directories, rg-style
+cymbal search --text 'os\.WriteFile\(' tools/file.go tools/patch.go
 
 # Only Go functions
 cymbal search parse --kind function --lang go

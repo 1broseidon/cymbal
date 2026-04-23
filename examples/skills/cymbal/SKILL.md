@@ -60,6 +60,7 @@ repo; **do not run `cymbal index` manually** — hooks refresh it.
 cymbal search OpenStore
 cymbal search parse --kind function --lang go
 cymbal search "TODO" --text                              # full-text grep (uses rg)
+cymbal search --text 'os\.WriteFile\(' tools/file.go     # rg-style path operand
 cymbal search Handler --path 'internal/**' --exclude '**/*_test.go'
 ```
 Ranked exact > prefix > fuzzy. **Trust the first result** — bench shows 100%

@@ -7,7 +7,8 @@ import (
 )
 
 func normalizeRelPath(rel string) string {
-	return filepath.ToSlash(rel)
+	rel = filepath.ToSlash(rel)
+	return strings.TrimPrefix(rel, "./")
 }
 
 func matchAnyPath(rel string, globs []string) bool {
@@ -88,17 +89,24 @@ func widenPathFilterLimit(limit int, hasFilters bool) int {
 	return w
 }
 
+func allowPath(rel string, includes, excludes []string) bool {
+	rel = normalizeRelPath(rel)
+	if len(includes) > 0 && !matchAnyPath(rel, includes) {
+		return false
+	}
+	if len(excludes) > 0 && matchAnyPath(rel, excludes) {
+		return false
+	}
+	return true
+}
+
 func filterByPath[T any](items []T, relPath func(T) string, includes, excludes []string) []T {
 	if len(includes) == 0 && len(excludes) == 0 {
 		return items
 	}
 	out := make([]T, 0, len(items))
 	for _, item := range items {
-		rel := normalizeRelPath(relPath(item))
-		if len(includes) > 0 && !matchAnyPath(rel, includes) {
-			continue
-		}
-		if len(excludes) > 0 && matchAnyPath(rel, excludes) {
+		if !allowPath(relPath(item), includes, excludes) {
 			continue
 		}
 		out = append(out, item)

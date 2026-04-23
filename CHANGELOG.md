@@ -4,6 +4,10 @@ All notable changes to cymbal are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **`cymbal search` accepts rg-style path operands** — `cymbal search <query> [path ...]` now treats trailing files, directories, and globs as `--path` filters, so scoped text searches like `cymbal search --text 'os\.WriteFile\(' tools/file.go tools/patch.go` work without translating the command shape. `--file` is accepted as an alias for `--path`, and agent hook guidance now distinguishes symbol navigation from literal/regex text search.
+
 ### Fixed
 
 - **Python private functions are indexed again** — underscore-prefixed Python functions such as `_parse_token` and `__helper` are no longer silently dropped from the symbol index. This restores `search`, `outline`, `show`, `refs`, `trace`, `impact`, and `investigate` coverage for Python codebases that keep most implementation logic behind module-private helper functions. Fixes [#41](https://github.com/1broseidon/cymbal/issues/41).

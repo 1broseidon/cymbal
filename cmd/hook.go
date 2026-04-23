@@ -194,7 +194,7 @@ func detectSearchCommand(fields []string, toolName string) Suggestion {
 		return Suggestion{
 			Tool:        tool,
 			Replacement: fmt.Sprintf("cymbal search %s", shQuoteIfNeeded(q)),
-			Why:         "Ranked symbol results with file+line, file-scoped with --file, JSON with --json. Faster than scanning every match.",
+			Why:         "Keep grep-style tools for literal text or regex.",
 		}
 	case "find":
 		name := extractFindNameArg(fields[1:])
@@ -204,7 +204,7 @@ func detectSearchCommand(fields []string, toolName string) Suggestion {
 		return Suggestion{
 			Tool:        "find",
 			Replacement: fmt.Sprintf("cymbal search %s", shQuoteIfNeeded(name)),
-			Why:         "cymbal search also matches by name and returns symbol locations, not just paths.",
+			Why:         "Keep find for raw filesystem traversal.",
 		}
 	case "fd", "fdfind":
 		q := extractSearchQuery(fields[1:])
@@ -214,7 +214,7 @@ func detectSearchCommand(fields []string, toolName string) Suggestion {
 		return Suggestion{
 			Tool:        tool,
 			Replacement: fmt.Sprintf("cymbal search %s", shQuoteIfNeeded(q)),
-			Why:         "cymbal indexes symbols by name; for file discovery use `cymbal ls --stats`.",
+			Why:         "Keep fd-style tools for raw filesystem discovery.",
 		}
 	}
 	return Suggestion{}
@@ -415,7 +415,7 @@ func readNudgeInput(args []string) (fields []string, toolName string, err error)
 
 // ── nudge: output ─────────────────────────────────────────────────
 
-const nudgeTemplate = "cymbal can answer this faster: `%s`. %s"
+const nudgeTemplate = "This project is indexed by cymbal. This looks like code navigation, so start with `%s`, then use `cymbal show` or `cymbal investigate` on the result. Batch related symbols in one cymbal call when possible. %s"
 
 func emitNudge(stdout, stderr io.Writer, format string, fields []string, s Suggestion) error {
 	cmdLine := strings.Join(fields, " ")
@@ -463,22 +463,16 @@ func emitNudge(stdout, stderr io.Writer, format string, fields []string, s Sugge
 
 // reminderText is the short, tone-calibrated system block we ask agents
 // to treat as persistent context. Short by design.
-const reminderText = `This project is indexed by cymbal. Prefer these commands before falling
-back to grep/find:
+const reminderText = `This project is indexed by cymbal. Treat cymbal as the default code-navigation interface.
 
-  cymbal search <name>        ranked symbol search (add --file, --kind, --lang)
-  cymbal show <sym>           source for a symbol (or file:L1-L2)
-  cymbal investigate <sym>    kind-adaptive summary
-  cymbal impact <sym>         who depends on this?
-  cymbal trace <sym>          what does this depend on?
-  cymbal impls <sym>          who implements this interface/protocol?
+Default workflow:
+  1. ` + "`cymbal search <name>`" + ` to locate a symbol or file by name.
+  2. ` + "`cymbal show <sym>`" + ` to read source, or ` + "`cymbal investigate <sym>`" + ` for a quick summary.
+  3. ` + "`cymbal impact <sym>`" + `, ` + "`cymbal trace <sym>`" + `, and ` + "`cymbal impls <sym>`" + ` to follow callers, dependencies, and implementations.
 
-Multi-symbol: all of the above accept several names in one call, or pipe
-newline-separated names via --stdin. JSON output is available on every
-command with --json.
+Batch related lookups in one call when possible: ` + "`cymbal search Foo Bar`" + `, ` + "`cymbal show Foo Bar`" + `, ` + "`cymbal investigate Foo Bar`" + `, or pipe newline-separated symbols via ` + "`--stdin`" + `.
 
-Use 'cymbal search --text <pattern>' only for literal text matches cymbal
-can't resolve by symbol.`
+Use ` + "`cymbal search --text <pattern>`" + ` only for literal text or regex. Prefer cymbal before rg/grep/find/fd unless the user explicitly wants raw text search or raw filesystem traversal.`
 
 func emitRemind(w io.Writer, format string) error {
 	message := reminderText

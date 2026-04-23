@@ -39,6 +39,12 @@ func TestMatchAnyPath(t *testing.T) {
 			globs: []string{"cmd/search"},
 			want:  true,
 		},
+		{
+			name:  "leading dot slash is normalized for globs",
+			rel:   "./tools/file_batch_test.go",
+			globs: []string{"tools/*_test.go"},
+			want:  true,
+		},
 	}
 
 	for _, tc := range tests {
