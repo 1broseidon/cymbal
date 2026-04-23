@@ -365,7 +365,10 @@ class Dog(Animal):
 	}
 }
 
-func TestFeaturePythonPrivateSkipped(t *testing.T) {
+// TestFeaturePythonPrivateIndexed guards issue #41: underscore-prefixed
+// Python functions are module-internal, not unimportant, and must be
+// indexed so trace/impact/refs/investigate still work through them.
+func TestFeaturePythonPrivateIndexed(t *testing.T) {
 	src := []byte(`def public_func():
     pass
 
@@ -380,19 +383,10 @@ def __very_private():
 		t.Fatal(err)
 	}
 
-	pub := findSymbol(result.Symbols, "public_func")
-	if pub == nil {
-		t.Fatal("expected to find public_func")
-	}
-
-	priv := findSymbol(result.Symbols, "_private_func")
-	if priv != nil {
-		t.Error("expected _private_func to be skipped")
-	}
-
-	vpriv := findSymbol(result.Symbols, "__very_private")
-	if vpriv != nil {
-		t.Error("expected __very_private to be skipped")
+	for _, name := range []string{"public_func", "_private_func", "__very_private"} {
+		if findSymbol(result.Symbols, name) == nil {
+			t.Errorf("expected to find %s in parsed symbols", name)
+		}
 	}
 }
 

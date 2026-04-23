@@ -681,14 +681,12 @@ func (e *symbolExtractor) classifyPython(nodeType string, node *sitter.Node) (st
 		if node.Parent() != nil && node.Parent().Type() == "decorated_definition" {
 			return "", nil
 		}
-		nameNode := node.ChildByFieldName("name")
-		if nameNode != nil {
-			name := nameNode.Content(e.src)
-			if len(name) > 0 && name[0] == '_' && name != "__init__" {
-				return "", nil
-			}
-		}
-		return "function", nameNode
+		// Underscore-prefixed Python functions are *module-internal*, not
+		// unimportant: many codebases put the bulk of their logic behind
+		// leading-underscore helpers. Dropping them from the index broke
+		// trace/impact/refs/investigate for any call chain through a
+		// private function (issue 41). Index them like any other function.
+		return "function", node.ChildByFieldName("name")
 	case "class_definition":
 		// Skip if parent is decorated_definition — the parent already emits this symbol.
 		if node.Parent() != nil && node.Parent().Type() == "decorated_definition" {
@@ -712,14 +710,10 @@ func (e *symbolExtractor) classifyPython(nodeType string, node *sitter.Node) (st
 func (e *symbolExtractor) classifyPythonInner(nodeType string, node *sitter.Node) (string, *sitter.Node) {
 	switch nodeType {
 	case "function_definition":
-		nameNode := node.ChildByFieldName("name")
-		if nameNode != nil {
-			name := nameNode.Content(e.src)
-			if len(name) > 0 && name[0] == '_' && name != "__init__" {
-				return "", nil
-			}
-		}
-		return "function", nameNode
+		// Mirror classifyPython: underscore-prefixed Python functions
+		// are module-internal, not unimportant; index them like any
+		// other function so decorated helpers remain discoverable.
+		return "function", node.ChildByFieldName("name")
 	case "class_definition":
 		return "class", node.ChildByFieldName("name")
 	}
