@@ -22,6 +22,27 @@ func newTestStore(t *testing.T) (*Store, string) {
 	return store, dbPath
 }
 
+func TestStoreCloseCheckpointsWAL(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	if _, err := store.UpsertFile("/repo/main.go", "main.go", "go", "hash", now, 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if info, err := os.Stat(dbPath + "-wal"); err == nil && info.Size() != 0 {
+		t.Fatalf("expected WAL to be checkpointed and truncated, size=%d", info.Size())
+	}
+}
+
 func insertTestSymbols(t *testing.T, store *Store) {
 	t.Helper()
 	now := time.Now()

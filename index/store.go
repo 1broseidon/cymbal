@@ -136,9 +136,17 @@ func tightenStorePermissions(dbPath string) {
 	_ = os.Chmod(dbPath+"-shm", 0o600)
 }
 
-// Close closes the database.
+// Close checkpoints WAL pages into the main DB file, then closes the database.
 func (s *Store) Close() error {
-	return s.db.Close()
+	if s == nil || s.db == nil {
+		return nil
+	}
+	_, checkpointErr := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	closeErr := s.db.Close()
+	if closeErr != nil {
+		return closeErr
+	}
+	return checkpointErr
 }
 
 // GetMeta returns a metadata value, or empty string if not set.

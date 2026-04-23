@@ -11,6 +11,7 @@ All notable changes to cymbal are documented here.
 ### Fixed
 
 - **Agent reminders can refresh stale update status** — `cymbal hook remind --update=if-stale` keeps the default cache-only behavior unless explicitly requested, then performs a bounded live update check only when the cache is stale or missing. Claude Code installs now use the stale-aware reminder command, and Opencode docs now describe the bootstrap as best effort with Windows path guidance. Fixes [#40](https://github.com/1broseidon/cymbal/issues/40).
+- **SQLite WAL files are checkpointed on close** — `Store.Close` now runs `PRAGMA wal_checkpoint(TRUNCATE)` before releasing the database handle, so committed index rows are folded back into the main `index.db` artifact at process exit. This makes DBs created on Windows less likely to appear empty when later read from WSL through `/mnt/c/...`. Fixes [#16](https://github.com/1broseidon/cymbal/issues/16).
 - **Python private functions are indexed again** — underscore-prefixed Python functions such as `_parse_token` and `__helper` are no longer silently dropped from the symbol index. This restores `search`, `outline`, `show`, `refs`, `trace`, `impact`, and `investigate` coverage for Python codebases that keep most implementation logic behind module-private helper functions. Fixes [#41](https://github.com/1broseidon/cymbal/issues/41).
 
 ## [0.12.0] - 2026-04-22
