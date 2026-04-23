@@ -24,8 +24,11 @@ var searchCmd = &cobra.Command{
 Results are ranked: exact match > prefix > fuzzy.
 
 Trailing path operands are accepted as --path filters, so grep-shaped calls like
-"cymbal search --text TODO cmd internal/foo.go" work as expected.`,
-	Args: cobra.MinimumNArgs(1),
+"cymbal search --text TODO cmd internal/foo.go" work as expected.
+
+In symbol mode, pass multiple queries to search them independently. In text mode,
+multiple query words are joined into one literal/regex pattern.`,
+	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbPath := getDBPath(cmd)
 		ensureFresh(dbPath)
@@ -38,7 +41,7 @@ Trailing path operands are accepted as --path filters, so grep-shaped calls like
 		textMode, _ := cmd.Flags().GetBool("text")
 		includes, _ := cmd.Flags().GetStringArray("path")
 		excludes, _ := cmd.Flags().GetStringArray("exclude")
-		query, pathOperands := splitSearchArgs(args)
+		queries, pathOperands := splitSearchArgs(args)
 		includes = append(includes, pathOperands...)
 		hasFilters := len(includes) > 0 || len(excludes) > 0
 
@@ -48,25 +51,28 @@ Trailing path operands are accepted as --path filters, so grep-shaped calls like
 		}
 
 		if textMode {
+			if stdin, _ := cmd.Flags().GetBool("stdin"); stdin {
+				return fmt.Errorf("--stdin is only supported for symbol search")
+			}
+			query := strings.Join(queries, " ")
+			if strings.TrimSpace(query) == "" {
+				return fmt.Errorf("no search query provided")
+			}
 			return searchText(dbPath, query, lang, limit, jsonOut, includes, excludes)
 		}
 
-		results, err := index.SearchSymbols(dbPath, index.SearchQuery{
-			Text:       query,
-			Kind:       kind,
-			Language:   lang,
-			Exact:      effectiveExact,
-			IgnoreCase: ignoreCase,
-			Limit:      widenPathFilterLimit(limit, hasFilters),
-		})
+		queries, err = collectSymbols(cmd, queries)
 		if err != nil {
 			return err
 		}
-
-		results = filterByPath(results, func(r index.SymbolResult) string { return r.RelPath }, includes, excludes)
-		if limit > 0 && len(results) > limit {
-			results = results[:limit]
+		results, missing, err := searchSymbolQueries(dbPath, queries, kind, lang, effectiveExact, ignoreCase, limit, hasFilters, includes, excludes)
+		if err != nil {
+			return err
 		}
+		for _, query := range missing {
+			fmt.Fprintf(cmd.ErrOrStderr(), "%s: no results found\n", query)
+		}
+		query := strings.Join(queries, " ")
 		if len(results) == 0 {
 			return fmt.Errorf("no results found for '%s'", query)
 		}
@@ -80,15 +86,13 @@ Trailing path operands are accepted as --path filters, so grep-shaped calls like
 			fmt.Fprintf(&content, "%s %s %s:%d\n", r.Kind, r.Name, r.RelPath, r.StartLine)
 		}
 
-		return renderJSONOrFrontmatter(
-			jsonOut,
-			results,
-			[]kv{
-				{"query", query},
-				{"result_count", fmt.Sprintf("%d", len(results))},
-			},
-			content.String(),
-		)
+		meta := []kv{{"query", query}}
+		if len(queries) > 1 {
+			meta = append(meta, kv{"query_count", fmt.Sprintf("%d", len(queries))})
+		}
+		meta = append(meta, kv{"result_count", fmt.Sprintf("%d", len(results))})
+
+		return renderJSONOrFrontmatter(jsonOut, results, meta, content.String())
 	},
 }
 
@@ -107,25 +111,40 @@ func init() {
 	searchCmd.Flags().BoolP("text", "t", false, "full-text grep across file contents")
 	searchCmd.Flags().StringArray("path", nil, "include only results whose path matches this glob (repeatable)")
 	searchCmd.Flags().StringArray("exclude", nil, "exclude results whose path matches this glob (repeatable)")
+	addStdinFlag(searchCmd)
 	rootCmd.AddCommand(searchCmd)
 }
 
-func splitSearchArgs(args []string) (string, []string) {
-	if len(args) <= 1 {
-		return strings.Join(args, " "), nil
+func splitSearchArgs(args []string) ([]string, []string) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+	if len(args) == 1 {
+		return cleanSearchQueries(args), nil
 	}
 	firstPath := len(args)
 	for firstPath > 1 && looksLikeSearchPathOperand(args[firstPath-1]) {
 		firstPath--
 	}
 	if firstPath == len(args) {
-		return strings.Join(args, " "), nil
+		return cleanSearchQueries(args), nil
 	}
 	paths := make([]string, 0, len(args)-firstPath)
 	for _, arg := range args[firstPath:] {
 		paths = append(paths, normalizeSearchPathOperand(arg))
 	}
-	return strings.Join(args[:firstPath], " "), paths
+	return cleanSearchQueries(args[:firstPath]), paths
+}
+
+func cleanSearchQueries(args []string) []string {
+	out := make([]string, 0, len(args))
+	for _, arg := range args {
+		arg = strings.TrimSpace(arg)
+		if arg != "" {
+			out = append(out, arg)
+		}
+	}
+	return out
 }
 
 func looksLikeSearchPathOperand(arg string) bool {
@@ -153,6 +172,43 @@ func normalizeSearchPathOperand(arg string) string {
 		return strings.TrimSuffix(rel, "/") + "/**"
 	}
 	return rel
+}
+
+func searchSymbolQueries(dbPath string, queries []string, kind, lang string, exact, ignoreCase bool, limit int, hasFilters bool, includes, excludes []string) ([]index.SymbolResult, []string, error) {
+	perQueryLimit := widenPathFilterLimit(limit, hasFilters)
+	seen := make(map[string]struct{})
+	results := make([]index.SymbolResult, 0, len(queries))
+	var missing []string
+	for _, query := range queries {
+		queryResults, err := index.SearchSymbols(dbPath, index.SearchQuery{
+			Text:       query,
+			Kind:       kind,
+			Language:   lang,
+			Exact:      exact,
+			IgnoreCase: ignoreCase,
+			Limit:      perQueryLimit,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		queryResults = filterByPath(queryResults, func(r index.SymbolResult) string { return r.RelPath }, includes, excludes)
+		if limit > 0 && len(queryResults) > limit {
+			queryResults = queryResults[:limit]
+		}
+		if len(queryResults) == 0 {
+			missing = append(missing, query)
+			continue
+		}
+		for _, result := range queryResults {
+			id := result.SymbolID()
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			results = append(results, result)
+		}
+	}
+	return results, missing, nil
 }
 
 func normalizeSearchMode(exact, ignoreCase, textMode bool) (bool, error) {

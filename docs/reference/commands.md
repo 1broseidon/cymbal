@@ -127,6 +127,8 @@ cymbal search <query> [path ...] [flags]
 
 Trailing path operands are accepted as `--path` filters, which matches common
 `rg` usage: `cymbal search --text <pattern> cmd internal/foo.go`.
+In symbol mode, multiple query arguments are searched independently:
+`cymbal search Foo Bar Baz`.
 
 | Flag | Description |
 |------|-------------|
@@ -137,10 +139,14 @@ Trailing path operands are accepted as `--path` filters, which matches common
 | `-n, --limit <n>` | Max results (default: 20) |
 | `--path <glob>` | Include only results whose path matches this glob or path fragment (repeatable) |
 | `--exclude <glob>` | Exclude results whose path matches this glob or path fragment (repeatable) |
+| `--stdin` | Read additional symbol queries from stdin |
 
 ```sh
 # Symbol search
 cymbal search handleAuth
+
+# Batch symbol search
+cymbal search PatchMulti MultiEdit EditTool PatchTool
 
 # Full-text grep
 cymbal search "TODO" --text

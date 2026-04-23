@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/1broseidon/cymbal/index"
 )
 
 func TestNormalizeSearchMode(t *testing.T) {
@@ -78,51 +80,51 @@ func TestNormalizeSearchMode(t *testing.T) {
 
 func TestSplitSearchArgs(t *testing.T) {
 	tests := []struct {
-		name      string
-		args      []string
-		wantQuery string
-		wantPaths []string
+		name        string
+		args        []string
+		wantQueries []string
+		wantPaths   []string
 	}{
 		{
-			name:      "rg shaped text search treats trailing files as path filters",
-			args:      []string{`os\.WriteFile\(`, "tools/file.go", "tools/patch.go"},
-			wantQuery: `os\.WriteFile\(`,
-			wantPaths: []string{"tools/file.go", "tools/patch.go"},
+			name:        "rg shaped text search treats trailing files as path filters",
+			args:        []string{`os\.WriteFile\(`, "tools/file.go", "tools/patch.go"},
+			wantQueries: []string{`os\.WriteFile\(`},
+			wantPaths:   []string{"tools/file.go", "tools/patch.go"},
 		},
 		{
-			name:      "multiword query stays intact without path operands",
-			args:      []string{"error", "handling"},
-			wantQuery: "error handling",
+			name:        "multiple symbol queries stay separate without path operands",
+			args:        []string{"error", "handling"},
+			wantQueries: []string{"error", "handling"},
 		},
 		{
-			name:      "glob path filter",
-			args:      []string{"Handler", "internal/**/*.go"},
-			wantQuery: "Handler",
-			wantPaths: []string{"internal/**/*.go"},
+			name:        "glob path filter",
+			args:        []string{"Handler", "internal/**/*.go"},
+			wantQueries: []string{"Handler"},
+			wantPaths:   []string{"internal/**/*.go"},
 		},
 		{
-			name:      "dot directory path becomes all paths glob",
-			args:      []string{"Handler", "."},
-			wantQuery: "Handler",
-			wantPaths: []string{"**"},
+			name:        "dot directory path becomes all paths glob",
+			args:        []string{"Handler", "."},
+			wantQueries: []string{"Handler"},
+			wantPaths:   []string{"**"},
 		},
 		{
-			name:      "single path-shaped arg is still the query",
-			args:      []string{"cmd/search.go"},
-			wantQuery: "cmd/search.go",
+			name:        "single path-shaped arg is still the query",
+			args:        []string{"cmd/search.go"},
+			wantQueries: []string{"cmd/search.go"},
 		},
 		{
-			name:      "dotted symbol names are not file paths",
-			args:      []string{"config.Load", "parser.Parse"},
-			wantQuery: "config.Load parser.Parse",
+			name:        "dotted symbol names are not file paths",
+			args:        []string{"config.Load", "parser.Parse"},
+			wantQueries: []string{"config.Load", "parser.Parse"},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotQuery, gotPaths := splitSearchArgs(tc.args)
-			if gotQuery != tc.wantQuery {
-				t.Fatalf("query = %q, want %q", gotQuery, tc.wantQuery)
+			gotQueries, gotPaths := splitSearchArgs(tc.args)
+			if strings.Join(gotQueries, "\x00") != strings.Join(tc.wantQueries, "\x00") {
+				t.Fatalf("queries = %#v, want %#v", gotQueries, tc.wantQueries)
 			}
 			if strings.Join(gotPaths, "\x00") != strings.Join(tc.wantPaths, "\x00") {
 				t.Fatalf("paths = %#v, want %#v", gotPaths, tc.wantPaths)
@@ -151,5 +153,49 @@ func TestNormalizeSearchPathOperandRelativeDirectory(t *testing.T) {
 
 	if got := normalizeSearchPathOperand("subdir"); got != "subdir/**" {
 		t.Fatalf("normalizeSearchPathOperand(subdir) = %q, want %q", got, "subdir/**")
+	}
+}
+
+func TestSearchSymbolQueriesBatchesIndependentNames(t *testing.T) {
+	defer index.CloseAll()
+
+	repoDir := t.TempDir()
+	src := []byte(`package main
+
+func PatchMulti() {}
+func MultiEdit() {}
+func EditTool() {}
+func PatchTool() {}
+func Other() {}
+`)
+	if err := os.WriteFile(filepath.Join(repoDir, "main.go"), src, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	if _, err := index.Index(repoDir, dbPath, index.Options{Workers: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	results, missing, err := searchSymbolQueries(
+		dbPath,
+		[]string{"PatchMulti", "MultiEdit", "EditTool", "PatchTool", "MissingTool"},
+		"", "", false, false, 20, false, nil, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(missing, ",") != "MissingTool" {
+		t.Fatalf("missing = %#v, want MissingTool", missing)
+	}
+
+	got := map[string]bool{}
+	for _, result := range results {
+		got[result.Name] = true
+	}
+	for _, name := range []string{"PatchMulti", "MultiEdit", "EditTool", "PatchTool"} {
+		if !got[name] {
+			t.Fatalf("expected result for %s, got %+v", name, results)
+		}
 	}
 }

@@ -148,6 +148,7 @@ cymbal impact handleAuth
 
 # Drop to specific commands when you need more control
 cymbal search handleAuth
+cymbal search PatchMulti MultiEdit EditTool PatchTool
 cymbal search "TODO" --text
 cymbal search --text 'os\.WriteFile\(' tools/file.go tools/patch.go
 cymbal show handleAuth
@@ -288,6 +289,7 @@ If you are writing agent instructions, the short policy is:
 - Use `cymbal impact <symbol>` for change risk
 - Use `cymbal show <file:L1-L2>` or `cymbal outline <file>` before broad file reads
 - Use `cymbal search <query>` before raw grep
+- Batch symbol searches as `cymbal search Foo Bar Baz`
 - Use `cymbal search --text <pattern> [path ...]` for scoped literal or regex searches
 - Add `--graph` when the agent needs topology, not call-site text
 

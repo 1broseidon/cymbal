@@ -58,6 +58,7 @@ repo; **do not run `cymbal index` manually** — hooks refresh it.
 ### `search` — starting point
 ```
 cymbal search OpenStore
+cymbal search PatchMulti MultiEdit EditTool PatchTool
 cymbal search parse --kind function --lang go
 cymbal search "TODO" --text                              # full-text grep (uses rg)
 cymbal search --text 'os\.WriteFile\(' tools/file.go     # rg-style path operand
