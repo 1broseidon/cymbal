@@ -7,7 +7,7 @@ All notable changes to cymbal are documented here.
 ### Added
 
 - **Regression coverage now reaches the 80% product target** — coverage excludes the internal `bench/` evaluation harness from the product denominator and now covers parser/walker behavior, command-facing workflows, public index facade APIs, diff output, and update-notifier state transitions. `CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" make test-coverage` reports 80%+ total product coverage.
-- **Codecov now uses the same product coverage denominator as CI** — `codecov.yml` ignores the internal bench harness plus non-executable test, entrypoint, type, and registry files, and enforces an 80% project target while command entrypoint regression tests keep Codecov's line-oriented calculation above the threshold.
+- **Codecov now uses the same product coverage denominator as CI** — `codecov.yml` ignores the internal bench harness plus non-executable test, entrypoint, type, and registry files, and the GitHub Action uploads with that YAML explicitly while command entrypoint regression tests keep Codecov's line-oriented calculation above the threshold.
 
 ### Fixed
 
