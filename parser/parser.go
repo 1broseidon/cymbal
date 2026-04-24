@@ -287,8 +287,10 @@ func (e *symbolExtractor) extractRef(node *sitter.Node) (symbols.Ref, bool) {
 		return e.extractRefCallExpr(nodeType, node)
 	case "python":
 		return e.extractRefPythonCall(nodeType, node)
-	case "apex", "java", "scala":
+	case "apex", "java":
 		return e.extractRefJVM(nodeType, node)
+	case "scala":
+		return e.extractRefScala(nodeType, node)
 	case "kotlin":
 		return e.extractRefKotlin(nodeType, node)
 	case "ruby":
@@ -467,6 +469,35 @@ func (e *symbolExtractor) extractRefKotlin(nodeType string, node *sitter.Node) (
 	return symbols.Ref{}, false
 }
 
+func (e *symbolExtractor) extractRefScala(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
+	if nodeType != "call_expression" {
+		return symbols.Ref{}, false
+	}
+	if node.ChildCount() == 0 {
+		return symbols.Ref{}, false
+	}
+	name := scalaCalleeName(node.Child(0), e.src)
+	if name == "" {
+		return symbols.Ref{}, false
+	}
+	return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
+}
+
+func scalaCalleeName(node *sitter.Node, src []byte) string {
+	switch node.Type() {
+	case "identifier", "type_identifier":
+		return node.Content(src)
+	case "field_expression":
+		for i := int(node.ChildCount()) - 1; i >= 0; i-- {
+			child := node.Child(i)
+			if child.Type() == "identifier" || child.Type() == "type_identifier" {
+				return child.Content(src)
+			}
+		}
+	}
+	return ""
+}
+
 func (e *symbolExtractor) extractRefElixir(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
 	if nodeType != "call" {
 		return symbols.Ref{}, false
@@ -606,8 +637,10 @@ func (e *symbolExtractor) classifyNode(nodeType string, node *sitter.Node) (stri
 		return e.classifyJS(nodeType, node)
 	case "rust":
 		return e.classifyRust(nodeType, node)
-	case "apex", "java", "scala":
+	case "apex", "java":
 		return e.classifyJavaLike(nodeType, node)
+	case "scala":
+		return e.classifyScala(nodeType, node)
 	case "kotlin":
 		return e.classifyKotlin(nodeType, node)
 	case "ruby":
@@ -975,22 +1008,22 @@ func (e *symbolExtractor) classifyElixir(nodeType string, node *sitter.Node) (st
 		}
 	case "def":
 		if arg != nil {
-			if arg.Type() == "call" {
-				return "function", arg.Child(0) // function name identifier
+			if name := elixirDefinitionName(arg); name != nil {
+				return "function", name
 			}
 			return "function", arg
 		}
 	case "defp":
 		if arg != nil {
-			if arg.Type() == "call" {
-				return "function", arg.Child(0)
+			if name := elixirDefinitionName(arg); name != nil {
+				return "function", name
 			}
 			return "function", arg
 		}
 	case "defmacro", "defmacrop":
 		if arg != nil {
-			if arg.Type() == "call" {
-				return "macro", arg.Child(0)
+			if name := elixirDefinitionName(arg); name != nil {
+				return "macro", name
 			}
 			return "macro", arg
 		}
@@ -1000,6 +1033,22 @@ func (e *symbolExtractor) classifyElixir(nodeType string, node *sitter.Node) (st
 		}
 	}
 	return "", nil
+}
+
+func elixirDefinitionName(args *sitter.Node) *sitter.Node {
+	if args == nil {
+		return nil
+	}
+	if args.Type() == "call" {
+		return args.Child(0)
+	}
+	for i := 0; i < int(args.ChildCount()); i++ {
+		child := args.Child(i)
+		if child.Type() == "call" {
+			return child.Child(0)
+		}
+	}
+	return nil
 }
 
 func (e *symbolExtractor) classifyHCL(nodeType string, node *sitter.Node) (string, *sitter.Node) {
@@ -1072,6 +1121,42 @@ func (e *symbolExtractor) hclBlockName(node *sitter.Node) string {
 		return ""
 	}
 	return strings.Join(labels, ".")
+}
+
+func (e *symbolExtractor) classifyScala(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	switch nodeType {
+	case "class_definition":
+		return "class", findChildByType(node, "identifier")
+	case "trait_definition":
+		return "interface", findChildByType(node, "identifier")
+	case "object_definition":
+		return "object", findChildByType(node, "identifier")
+	case "function_definition":
+		kind := "function"
+		if scalaInsideTemplateBody(node) {
+			kind = "method"
+		}
+		return kind, findChildByType(node, "identifier")
+	case "val_definition", "var_definition":
+		kind := "variable"
+		if scalaInsideTemplateBody(node) {
+			kind = "field"
+		}
+		return kind, findChildByType(node, "identifier")
+	}
+	return "", nil
+}
+
+func scalaInsideTemplateBody(node *sitter.Node) bool {
+	for p := node.Parent(); p != nil; p = p.Parent() {
+		switch p.Type() {
+		case "template_body":
+			return true
+		case "compilation_unit":
+			return false
+		}
+	}
+	return false
 }
 
 func (e *symbolExtractor) classifyProtobuf(nodeType string, node *sitter.Node) (string, *sitter.Node) {

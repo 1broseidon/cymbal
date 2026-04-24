@@ -4,6 +4,14 @@ All notable changes to cymbal are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Regression coverage now reaches the 80% product target** — coverage excludes the internal `bench/` evaluation harness from the product denominator and now covers parser/walker behavior, command-facing workflows, public index facade APIs, diff output, and update-notifier state transitions. `CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" make test-coverage` reports 80%+ total product coverage.
+
+### Fixed
+
+- **Elixir and Scala parser coverage exposed real extraction gaps** — Elixir function/macro symbols now use the callable name instead of including arguments, and Scala now has dedicated symbol/ref extraction for classes, traits, objects, methods, fields, and call expressions.
+
 ## [0.12.1] - 2026-04-23
 
 ### Added

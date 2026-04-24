@@ -1,8 +1,10 @@
 package walker
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/1broseidon/cymbal/lang"
@@ -423,4 +425,109 @@ func TestFeatureWalkerSkipsSymlinkFiles(t *testing.T) {
 	if len(files) != 0 {
 		t.Fatalf("expected symlinked file to be skipped, got %+v", files)
 	}
+}
+
+func TestFeatureBuildTreeSkipsIgnoredDirsSymlinksAndHonorsMaxDepth(t *testing.T) {
+	dir := t.TempDir()
+	paths := map[string]string{
+		"app/main.go":               "package app",
+		"app/internal/service.go":   "package internal",
+		"vendor/dep/dep.go":         "package dep",
+		".hidden/secret.go":         "package secret",
+		"node_modules/pkg/index.js": "module.exports = {}",
+	}
+	for rel, content := range paths {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(dir, "app"), filepath.Join(dir, "linked-app")); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+
+	tree, err := BuildTree(dir, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree.Name != filepath.Base(dir) || !tree.IsDir {
+		t.Fatalf("unexpected root node: %+v", tree)
+	}
+
+	got := flattenTreeNames(tree)
+	for _, want := range []string{"app", "main.go", "internal"} {
+		if !got[want] {
+			t.Fatalf("expected tree to include %q; names=%v", want, got)
+		}
+	}
+	for _, skip := range []string{"service.go", "vendor", ".hidden", "node_modules", "linked-app"} {
+		if got[skip] {
+			t.Fatalf("tree should skip or depth-prune %q; names=%v", skip, got)
+		}
+	}
+}
+
+func TestFeatureBuildTreeChildrenAreDirectoryOrderAndPrintTree(t *testing.T) {
+	dir := t.TempDir()
+	for _, rel := range []string{
+		"zeta.go",
+		filepath.Join("alpha", "one.go"),
+		filepath.Join("beta", "two.go"),
+	} {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("package main"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tree, err := BuildTree(dir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tree.Children) != 3 {
+		t.Fatalf("expected 3 root children, got %+v", tree.Children)
+	}
+	for i, want := range []string{"alpha", "beta", "zeta.go"} {
+		if tree.Children[i].Name != want {
+			t.Fatalf("child %d = %q, want %q", i, tree.Children[i].Name, want)
+		}
+	}
+
+	var out bytes.Buffer
+	PrintTree(&out, tree, "")
+	text := out.String()
+	for _, want := range []string{
+		filepath.Base(dir),
+		"├── alpha",
+		"│   └── one.go",
+		"├── beta",
+		"│   └── two.go",
+		"└── zeta.go",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("printed tree missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func flattenTreeNames(root *TreeNode) map[string]bool {
+	out := map[string]bool{}
+	var walk func(*TreeNode)
+	walk = func(node *TreeNode) {
+		if node == nil {
+			return
+		}
+		out[node.Name] = true
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	walk(root)
+	return out
 }
