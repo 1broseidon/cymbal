@@ -19,6 +19,7 @@ Thumbs.db
 
 # Go
 /vendor/
+/coverage.txt
 
 # Docs
 docs/node_modules/
