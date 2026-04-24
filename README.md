@@ -3,6 +3,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/1broseidon/cymbal?style=social)](https://github.com/1broseidon/cymbal/stargazers)
 [![Go Reference](https://pkg.go.dev/badge/github.com/1broseidon/cymbal.svg)](https://pkg.go.dev/github.com/1broseidon/cymbal)
 [![Go Report Card](https://goreportcard.com/badge/github.com/1broseidon/cymbal)](https://goreportcard.com/report/github.com/1broseidon/cymbal)
+[![codecov](https://codecov.io/gh/1broseidon/cymbal/branch/main/graph/badge.svg)](https://codecov.io/gh/1broseidon/cymbal)
 [![Latest Release](https://img.shields.io/github/v/release/1broseidon/cymbal)](https://github.com/1broseidon/cymbal/releases/latest)
 
 cymbal is a fast, language-agnostic code navigator. It parses your codebase
