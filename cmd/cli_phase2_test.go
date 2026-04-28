@@ -664,7 +664,7 @@ func TestPhase3CommandOutputFiltersUpdateAndVersion(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(updateDir, "update-check.json"), []byte(`{
   "schema_version": 1,
-  "last_checked_at": "2026-04-24T10:00:00Z",
+  "last_checked_at": "2099-04-24T10:00:00Z",
   "latest_version": "v9.9.9",
   "release_url": "https://example.test/release",
   "update_available": true,

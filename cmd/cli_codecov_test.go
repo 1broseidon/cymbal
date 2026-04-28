@@ -127,6 +127,7 @@ func newLsTestCommand(dbPath string) *cobra.Command {
 
 func TestCodecovCLIIndexRunERegressions(t *testing.T) {
 	repo := t.TempDir()
+	t.Cleanup(index.CloseAll)
 	t.Setenv("CYMBAL_CACHE_DIR", t.TempDir())
 	writeFile(t, repo, "go.mod", "module example.com/indexrun\n\ngo 1.25\n")
 	writeFile(t, repo, "main.go", `package main
@@ -571,6 +572,7 @@ func TestCodecovCLIOutlineLsInvestigateRunEModes(t *testing.T) {
 }
 
 func TestCodecovCLIRootDiffVersionUpdateRegressions(t *testing.T) {
+	t.Cleanup(index.CloseAll)
 	repo, dbPath := newPhase2Repo(t)
 
 	flagCmd := commandWithDB(dbPath)
