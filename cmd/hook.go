@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -108,11 +109,12 @@ Update checks:
 
 var hookInstallCmd = &cobra.Command{
 	Use:   "install <agent>",
-	Short: "Install cymbal hooks into the given agent (claude-code)",
+	Short: "Install cymbal hooks into the given agent (claude-code, opencode)",
 	Long: `Wire the nudge and remind hooks into the named agent's config.
 
 Supported agents:
-  claude-code   ~/.claude/settings.json (or --scope project for .claude/settings.json)
+	  claude-code   ~/.claude/settings.json (or --scope project for .claude/settings.json)
+	  opencode      <user-config-dir>/opencode/plugins/cymbal-opencode.js (or --scope project for .opencode/plugins/cymbal-opencode.js)
 
 For other agents (Cursor, Windsurf, aider, Cline, Continue, Zed, ...), see
 docs/AGENT_HOOKS.md for copy-paste snippets that wire 'cymbal hook nudge'
@@ -590,8 +592,10 @@ func lookupHookAdapter(name string) (hookAdapter, error) {
 	switch strings.ToLower(name) {
 	case "claude-code", "claudecode", "claude":
 		return hookAdapter{install: installClaudeCode, uninstall: uninstallClaudeCode}, nil
+	case "opencode":
+		return hookAdapter{install: installOpenCode, uninstall: uninstallOpenCode}, nil
 	}
-	return hookAdapter{}, fmt.Errorf("unknown agent %q (supported: claude-code). "+
+	return hookAdapter{}, fmt.Errorf("unknown agent %q (supported: claude-code, opencode). "+
 		"For other agents see docs/AGENT_HOOKS.md — 'cymbal hook nudge' and "+
 		"'cymbal hook remind' can be wired by hand into any agent's hook point.", name)
 }
@@ -822,4 +826,189 @@ func uninstallClaudeCode(scope string, dryRun bool) (string, string, error) {
 		return path, "", err
 	}
 	return path, string(data), nil
+}
+
+// ── OpenCode adapter ──
+
+const (
+	opencodeManagedPluginFile = "cymbal-opencode.js"
+	opencodeHookMarker        = "cymbal-hook"
+)
+
+const opencodeManagedHeaderPrefix = "// " + opencodeHookMarker + " managed by cymbal\n// cymbal-version: "
+
+func opencodePluginPath(scope string) (string, error) {
+	if scope == "project" {
+		return filepath.Join(".opencode", "plugins", opencodeManagedPluginFile), nil
+	}
+	configRoot, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(configRoot, "opencode", "plugins", opencodeManagedPluginFile), nil
+}
+
+func opencodePluginContents() string {
+	return renderOpenCodePlugin(opencodeHookMarker, currentVersion())
+}
+
+func writeManagedFile(path, content string) error {
+	if managed, err := openCodeManagedFileState(path); err != nil {
+		return err
+	} else if !managed {
+		return fmt.Errorf("refusing to overwrite non-cymbal OpenCode plugin at %s", path)
+	}
+	if err := ensureSafeManagedTarget(path); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	return atomicWriteFile(path, []byte(content), mode)
+}
+
+func installOpenCode(scope string, dryRun bool) (string, string, error) {
+	path, err := opencodePluginPath(scope)
+	if err != nil {
+		return "", "", err
+	}
+	otherScope := "user"
+	if scope == "user" {
+		otherScope = "project"
+	}
+	otherPath, err := opencodePluginPath(otherScope)
+	if err != nil {
+		return path, "", err
+	}
+	otherManaged, err := opencodeManagedFileExists(otherPath)
+	if err != nil {
+		return path, "", err
+	}
+	if otherManaged {
+		return path, "", fmt.Errorf("cymbal-managed OpenCode plugin already exists in %s scope at %s; uninstall it before installing %s scope", otherScope, otherPath, scope)
+	}
+	managed, err := openCodeManagedFileState(path)
+	if err != nil {
+		return path, "", err
+	}
+	content := opencodePluginContents()
+	if dryRun {
+		if !managed {
+			return path, "", fmt.Errorf("would refuse to overwrite non-cymbal OpenCode plugin at %s", path)
+		}
+		return path, content, nil
+	}
+	if err := writeManagedFile(path, content); err != nil {
+		return path, "", err
+	}
+	return path, content, nil
+}
+
+func uninstallOpenCode(scope string, dryRun bool) (string, string, error) {
+	path, err := opencodePluginPath(scope)
+	if err != nil {
+		return "", "", err
+	}
+	managed, err := openCodeManagedFileState(path)
+	if err != nil {
+		return path, "", err
+	}
+	if dryRun {
+		if !managed {
+			return path, "leave non-cymbal OpenCode plugin untouched", nil
+		}
+		return path, "remove managed OpenCode plugin", nil
+	}
+	if !managed {
+		return path, "leave non-cymbal OpenCode plugin untouched", nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return path, "", err
+	}
+	return path, "remove managed OpenCode plugin", nil
+}
+
+func openCodeManagedFileState(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return true, nil
+		}
+		return false, err
+	}
+	return strings.HasPrefix(string(data), opencodeManagedHeaderPrefix), nil
+}
+
+func opencodeManagedFileExists(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return strings.HasPrefix(string(data), opencodeManagedHeaderPrefix), nil
+}
+
+func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := tmpFile.Name()
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Chmod(tmp, mode); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Chmod(path, mode)
+}
+
+func ensureSafeManagedTarget(path string) error {
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write through symlinked OpenCode plugin path %s", path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	for dir := filepath.Dir(path); dir != ""; dir = filepath.Dir(dir) {
+		info, err := os.Lstat(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			next := filepath.Dir(dir)
+			if next == dir {
+				break
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write inside symlinked OpenCode plugin directory %s", dir)
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			break
+		}
+	}
+	return nil
 }

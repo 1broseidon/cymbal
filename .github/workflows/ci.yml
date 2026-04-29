@@ -51,6 +51,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate OpenCode plugin asset syntax
+        run: node --check cmd/hook_assets/opencode/cymbal-opencode.js
+
       - name: Test
         run: make test-coverage
 

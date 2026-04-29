@@ -265,3 +265,97 @@ cymbal refs handleAuth --importers
 # Transitive impact
 cymbal refs handleAuth --impact
 ```
+
+---
+
+## `cymbal hook`
+
+Agent-integration helpers for session reminders, shell nudges, and supported
+agent installers.
+
+```sh
+cymbal hook <subcommand> [flags]
+```
+
+### `cymbal hook remind`
+
+Print the short persistent guidance block agents should treat as system
+context.
+
+```sh
+cymbal hook remind [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--format <fmt>` | `text` (default), `json`, or `claude-code` |
+| `--update <mode>` | `cache` (default) or `if-stale` |
+
+- `--update=cache` uses cached update status only.
+- `--update=if-stale` performs a bounded live update check only when cache is stale or missing.
+- Reminder output can surface update guidance, but cymbal still never self-updates by default.
+
+### `cymbal hook nudge`
+
+Inspect a would-be shell command and, if it looks like code navigation through
+`rg`, `grep`, `find`, or `fd`, emit a cymbal suggestion.
+
+```sh
+cymbal hook nudge [--format <fmt>] [-- <command> [args...]]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--format <fmt>` | `claude-code` (default), `text`, or `json` |
+
+- Exit code is always `0`.
+- `text` writes the suggestion to stderr.
+- `json` emits a generic `suggest` / `why` payload for non-Claude integrations.
+
+### `cymbal hook install`
+
+Install cymbal-managed integration for a supported agent.
+
+```sh
+cymbal hook install <agent> [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--scope <scope>` | `user` (default) or `project` |
+| `--dry-run` | Print the target path and intended managed content without writing |
+
+Supported agents:
+
+- `opencode`
+- `claude-code`
+
+Examples:
+
+```sh
+cymbal hook install opencode
+cymbal hook install opencode --scope project
+cymbal hook install opencode --scope project --dry-run
+cymbal hook install claude-code
+```
+
+For `opencode`, re-running install upgrades the existing cymbal-managed plugin
+file in place. If a non-cymbal file already exists at cymbal's target path,
+install refuses to overwrite it.
+
+Only one cymbal-managed OpenCode scope is supported at a time. If a managed
+plugin already exists in the other scope, install refuses until that scope is
+uninstalled.
+
+### `cymbal hook uninstall`
+
+Remove cymbal-managed integration for a supported agent.
+
+```sh
+cymbal hook uninstall <agent> [flags]
+```
+
+The same `--scope` and `--dry-run` flags apply.
+
+For `opencode`, uninstall removes only the cymbal-managed plugin file and
+leaves unrelated user-owned files untouched.

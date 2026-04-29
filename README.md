@@ -288,8 +288,8 @@ Cymbal is designed to be an agent's code navigation layer, but the README only
 summarizes the integration story. The full install snippets and hook wiring
 live in the dedicated docs:
 
-- [docs/AGENT_HOOKS.md](docs/AGENT_HOOKS.md) — Claude Code install, `nudge`,
-  `remind`, and snippets for other agent runtimes
+- [docs/AGENT_HOOKS.md](docs/AGENT_HOOKS.md) — OpenCode and Claude Code install,
+  `nudge`, `remind`, and snippets for other agent runtimes
 - [docs/guide/agent-native.md](docs/guide/agent-native.md) — frontmatter output
   format and why it is cheaper than JSON by default
 
@@ -304,7 +304,20 @@ If you are writing agent instructions, the short policy is:
 - Use `cymbal search --text <pattern> [path ...]` for scoped literal or regex searches
 - Add `--graph` when the agent needs topology, not call-site text
 
-Claude Code has a one-line installer:
+OpenCode has a one-line installer:
+
+```sh
+cymbal hook install opencode
+```
+
+This installs a cymbal-managed OpenCode plugin under the documented plugin
+directory for the chosen scope. The plugin refreshes session guidance via
+`cymbal hook remind --update=if-stale` and soft-nudges bash grep/find/fd usage
+back toward cymbal-first navigation on non-Windows shells. Reminder/update guidance stays fresh
+without editing `AGENTS.md`. Cymbal still never self-updates by default; it
+only tells the agent or user which explicit update command to run.
+
+Claude Code also has a one-line installer:
 
 ```sh
 cymbal hook install claude-code

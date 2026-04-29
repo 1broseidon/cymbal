@@ -10,15 +10,19 @@ can wire into its native hook point:
 | `cymbal hook nudge` | Inspect a would-be shell command; if it looks like a code search, emit a short suggestion for the cymbal equivalent. Never blocks. |
 | `cymbal hook remind` | Print a short reminder block to inject at session start or on demand. Add `--update=if-stale` when the hook should refresh stale update status with a bounded live check. |
 
-Claude Code has a first-class installer:
+OpenCode and Claude Code have first-class installers:
 
 ```bash
+cymbal hook install opencode                 # <user-config-dir>/opencode/plugins/cymbal-opencode.js
+cymbal hook install opencode --scope project
+cymbal hook uninstall opencode
+
 cymbal hook install claude-code              # ~/.claude/settings.json
 cymbal hook install claude-code --scope project
 cymbal hook uninstall claude-code
 ```
 
-Everyone else can wire the two subcommands in by hand. Snippets below.
+Other runtimes can wire the two subcommands in by hand. Snippets below.
 
 ---
 
@@ -194,16 +198,53 @@ cymbal hook remind > .zed/rules.md
 
 ## Opencode
 
-Opencode reads `AGENTS.md` as its primary rules file (project root or
-`~/.config/opencode/AGENTS.md` for global scope) and also composes extra
-files via `opencode.json` → `instructions`.
+The main supported OpenCode path is now a first-class installer:
 
-Opencode does not currently provide the same first-class session-start shell
-hook surface as Claude Code. Treat this integration as a best-effort bootstrap:
-it tells the agent to run the fresh-aware reminder command when a shell is
-available, rather than storing a stale reminder snapshot forever.
+```sh
+cymbal hook install opencode
+```
 
-**Project scope — append to `AGENTS.md`:**
+What it does:
+
+- **User scope** installs a cymbal-managed plugin at
+  `<user-config-dir>/opencode/plugins/cymbal-opencode.js`
+- **Project scope** installs a cymbal-managed plugin at
+  `.opencode/plugins/cymbal-opencode.js`
+- The plugin refreshes startup guidance by calling
+  `cymbal hook remind --format=text --update=if-stale`
+- The plugin soft-nudges bash `rg` / `grep` / `find` / `fd`-style commands
+  back toward cymbal-first navigation before the shell runs them on
+  non-Windows shells
+- Update guidance stays fresh automatically, but **cymbal still never
+  self-updates by default** — it only surfaces the explicit update command to
+  run
+
+Examples:
+
+```bash
+cymbal hook install opencode
+cymbal hook install opencode --scope project
+cymbal hook uninstall opencode
+```
+
+Upgrade / ownership behaviour:
+
+- Re-running `cymbal hook install opencode` upgrades an existing
+  **cymbal-managed** OpenCode plugin in place.
+- `cymbal hook uninstall opencode` removes only the cymbal-managed plugin file.
+- If a different user-owned file already exists at cymbal's target path,
+  cymbal refuses to overwrite or remove it.
+- Cymbal manages **one OpenCode scope at a time**. If a cymbal-managed plugin
+  already exists in the other scope, install refuses and asks you to uninstall
+  the other scope first.
+
+This is the preferred setup because it keeps OpenCode's cymbal guidance managed
+by cymbal itself instead of baking stale text into `AGENTS.md`.
+
+**Legacy / fallback bootstrap via `AGENTS.md`:**
+
+Use this only when plugins are unavailable or you explicitly want a manual
+instructions-only setup.
 
 ```bash
 cat >> AGENTS.md <<'EOF'
@@ -216,11 +257,7 @@ update guidance is needed.
 EOF
 ```
 
-Opencode also falls back to `CLAUDE.md` when no `AGENTS.md` is present, so
-repos already set up for Claude Code pick up the same reminder without
-duplication.
-
-**Composable alternative — dedicated file via `opencode.json`:**
+**Legacy / fallback bootstrap via `opencode.json` instructions:**
 
 This avoids collisions when `AGENTS.md` is shared with other agents
 (Codex, Cursor 0.42+, etc.) or already lives under version control:
@@ -246,10 +283,6 @@ Then add to `opencode.json` (or the global
 }
 ```
 
-Opencode supports globs and remote URLs in `instructions`, so teams can
-point at a shared source of truth instead of committing the reminder
-into every repo.
-
 **Windows global instructions path (PowerShell):**
 
 ```powershell
@@ -261,12 +294,6 @@ output as persistent navigation guidance. If shell access is unavailable,
 prefer cymbal for symbol navigation and ask the user to run the command when
 update guidance is needed.
 '@ | Set-Content -Encoding UTF8 "$HOME\.config\opencode\instructions\cymbal.md"
-```
-
-The resulting file lives at:
-
-```text
-C:\Users\<user>\.config\opencode\instructions\cymbal.md
 ```
 
 ---

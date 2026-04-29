@@ -60,6 +60,22 @@ The index auto-builds on first use, so a manual `cymbal index .` step is optiona
 
 ## Agent Integration
 
+If you use OpenCode, the main supported setup is a one-line installer:
+
+```sh
+cymbal hook install opencode
+```
+
+This installs a cymbal-managed plugin into OpenCode's plugin directory for the
+chosen scope. The plugin refreshes startup guidance with
+`cymbal hook remind --update=if-stale` and soft-nudges bash grep/find/fd-style
+commands back toward cymbal-first navigation on non-Windows shells. Update guidance stays fresh
+without editing `AGENTS.md`. Cymbal still does not self-update by default; it
+only surfaces the explicit update command to run.
+
+cymbal can also be used through plain agent instructions when a runtime does
+not support native plugins or hooks.
+
 cymbal is designed to be an AI agent's code comprehension layer. Add this to your `CLAUDE.md` (or equivalent agent instructions):
 
 ```markdown

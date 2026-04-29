@@ -564,3 +564,367 @@ func TestLookupHookAdapterUnknownAgentMentionsDocs(t *testing.T) {
 		t.Errorf("unknown-agent error should point users at the docs; got %q", err)
 	}
 }
+
+func TestLookupHookAdapterOpenCode(t *testing.T) {
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatalf("expected opencode adapter, got error: %v", err)
+	}
+	if adapter.install == nil || adapter.uninstall == nil {
+		t.Fatalf("expected non-nil install/uninstall funcs, got %+v", adapter)
+	}
+}
+
+func TestOpenCodeInstallProjectScopeWritesManagedPlugin(t *testing.T) {
+	dir := t.TempDir()
+	withTestWorkingDir(t, dir)
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target, _, err := adapter.install("project", false)
+	if err != nil {
+		t.Fatalf("install failed: %v", err)
+	}
+	wantTarget := filepath.Join(".opencode", "plugins", "cymbal-opencode.js")
+	if target != wantTarget {
+		t.Fatalf("unexpected project target: got %q want %q", target, wantTarget)
+	}
+	absTarget := filepath.Join(dir, wantTarget)
+	data, err := os.ReadFile(absTarget)
+	if err != nil {
+		t.Fatalf("expected managed plugin file at %s: %v", absTarget, err)
+	}
+	if !strings.Contains(string(data), "cymbal hook remind") || !strings.Contains(string(data), "--update=if-stale") {
+		t.Fatalf("expected managed plugin to delegate to remind with stale-aware updates, got %q", string(data))
+	}
+	if !strings.Contains(string(data), `"tool.execute.before"`) || !strings.Contains(string(data), `cymbal hook nudge --format=json`) {
+		t.Fatalf("expected managed plugin to install OpenCode bash nudge hook, got %q", string(data))
+	}
+	if !strings.Contains(string(data), `tool_input: { command: output.args.command }`) || !strings.Contains(string(data), `process.platform === "win32"`) {
+		t.Fatalf("expected managed plugin to delegate structured nudge input and guard Windows shell rewriting, got %q", string(data))
+	}
+	if !strings.Contains(string(data), opencodeHookMarker) || !strings.Contains(string(data), currentVersion()) {
+		t.Fatalf("expected managed plugin metadata marker/version, got %q", string(data))
+	}
+}
+
+func TestOpenCodeInstallUserScopeWritesManagedPlugin(t *testing.T) {
+	home := t.TempDir()
+	configRoot := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("APPDATA", configRoot)
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target, _, err := adapter.install("user", false)
+	if err != nil {
+		t.Fatalf("install failed: %v", err)
+	}
+	resolvedConfigRoot, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTarget := filepath.Join(resolvedConfigRoot, "opencode", "plugins", "cymbal-opencode.js")
+	if target != wantTarget {
+		t.Fatalf("unexpected user target: got %q want %q", target, wantTarget)
+	}
+	if _, err := os.Stat(wantTarget); err != nil {
+		t.Fatalf("expected managed plugin file at %s: %v", wantTarget, err)
+	}
+}
+
+func TestOpenCodeInstallDryRunDoesNotWrite(t *testing.T) {
+	dir := t.TempDir()
+	withTestWorkingDir(t, dir)
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target, summary, err := adapter.install("project", true)
+	if err != nil {
+		t.Fatalf("dry-run install failed: %v", err)
+	}
+	wantTarget := filepath.Join(".opencode", "plugins", "cymbal-opencode.js")
+	if target != wantTarget {
+		t.Fatalf("unexpected project target: got %q want %q", target, wantTarget)
+	}
+	if _, err := os.Stat(filepath.Join(dir, wantTarget)); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not write managed plugin file; stat err=%v", err)
+	}
+	if !strings.Contains(summary, "cymbal hook remind") || !strings.Contains(summary, "--update=if-stale") {
+		t.Fatalf("dry-run summary should show stale-aware remind integration, got %q", summary)
+	}
+	if !strings.Contains(summary, `"tool.execute.before"`) || !strings.Contains(summary, `cymbal hook nudge --format=json`) {
+		t.Fatalf("dry-run summary should include bash nudge integration, got %q", summary)
+	}
+	if !strings.Contains(summary, opencodeHookMarker) || !strings.Contains(summary, currentVersion()) {
+		t.Fatalf("dry-run summary should include managed plugin metadata, got %q", summary)
+	}
+}
+
+func TestOpenCodeInstallIsIdempotentAndUninstallPreservesUnrelatedPlugins(t *testing.T) {
+	dir := t.TempDir()
+	withTestWorkingDir(t, dir)
+
+	pluginsDir := filepath.Join(dir, ".opencode", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userPlugin := filepath.Join(pluginsDir, "user-owned.js")
+	if err := os.WriteFile(userPlugin, []byte("export default async () => ({})\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if _, _, err := adapter.install("project", false); err != nil {
+			t.Fatalf("install %d failed: %v", i+1, err)
+		}
+	}
+
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected exactly 2 plugin files after idempotent reinstall, got %d", len(entries))
+	}
+	if _, err := os.Stat(filepath.Join(pluginsDir, "cymbal-opencode.js")); err != nil {
+		t.Fatalf("expected managed plugin file to exist after reinstall: %v", err)
+	}
+
+	if _, _, err := adapter.uninstall("project", false); err != nil {
+		t.Fatalf("uninstall failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(pluginsDir, "cymbal-opencode.js")); !os.IsNotExist(err) {
+		t.Fatalf("expected managed plugin file to be removed; stat err=%v", err)
+	}
+	if data, err := os.ReadFile(userPlugin); err != nil {
+		t.Fatalf("expected unrelated user plugin to survive: %v", err)
+	} else if !strings.Contains(string(data), "export default") {
+		t.Fatalf("expected unrelated user plugin contents to survive, got %q", string(data))
+	}
+}
+
+func TestOpenCodeInstallUpgradesExistingManagedPluginInPlace(t *testing.T) {
+	dir := t.TempDir()
+	withTestWorkingDir(t, dir)
+
+	pluginsDir := filepath.Join(dir, ".opencode", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managedPlugin := filepath.Join(pluginsDir, "cymbal-opencode.js")
+	oldContent := "// " + opencodeHookMarker + " managed by cymbal\n// cymbal-version: v0.0.1\nexport default async () => ({})\n"
+	if err := os.WriteFile(managedPlugin, []byte(oldContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := adapter.install("project", false); err != nil {
+		t.Fatalf("install failed: %v", err)
+	}
+
+	data, err := os.ReadFile(managedPlugin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "cymbal-version: v0.0.1") {
+		t.Fatalf("expected install to replace stale managed plugin content, got %q", got)
+	}
+	if !strings.Contains(got, "cymbal-version: "+currentVersion()) {
+		t.Fatalf("expected upgraded managed plugin to carry current version, got %q", got)
+	}
+	if !strings.Contains(got, `"tool.execute.before"`) {
+		t.Fatalf("expected upgraded managed plugin to carry current hook logic, got %q", got)
+	}
+}
+
+func TestOpenCodeInstallRefusesToOverwriteForeignPluginAtManagedPath(t *testing.T) {
+	dir := t.TempDir()
+	withTestWorkingDir(t, dir)
+
+	pluginsDir := filepath.Join(dir, ".opencode", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managedPlugin := filepath.Join(pluginsDir, "cymbal-opencode.js")
+	foreign := "// user-owned file\nexport default async () => ({ custom: true })\n"
+	if err := os.WriteFile(managedPlugin, []byte(foreign), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := adapter.install("project", false); err == nil {
+		t.Fatal("expected install to refuse overwriting foreign plugin file")
+	}
+
+	data, err := os.ReadFile(managedPlugin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != foreign {
+		t.Fatalf("expected foreign plugin file to remain untouched, got %q", string(data))
+	}
+}
+
+func TestOpenCodeInstallDryRunRefusesForeignPluginAtManagedPath(t *testing.T) {
+	dir := t.TempDir()
+	withTestWorkingDir(t, dir)
+
+	pluginsDir := filepath.Join(dir, ".opencode", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managedPlugin := filepath.Join(pluginsDir, "cymbal-opencode.js")
+	foreign := "// user-owned file\nexport default async () => ({ custom: true })\n"
+	if err := os.WriteFile(managedPlugin, []byte(foreign), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := adapter.install("project", true); err == nil {
+		t.Fatal("expected dry-run install to report overwrite refusal for foreign plugin file")
+	}
+
+	data, err := os.ReadFile(managedPlugin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != foreign {
+		t.Fatalf("expected foreign plugin file to remain untouched after dry-run, got %q", string(data))
+	}
+}
+
+func TestOpenCodeUninstallPreservesForeignPluginAtManagedPath(t *testing.T) {
+	dir := t.TempDir()
+	withTestWorkingDir(t, dir)
+
+	pluginsDir := filepath.Join(dir, ".opencode", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managedPlugin := filepath.Join(pluginsDir, "cymbal-opencode.js")
+	foreign := "// user-owned file\nexport default async () => ({ custom: true })\n"
+	if err := os.WriteFile(managedPlugin, []byte(foreign), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := adapter.uninstall("project", false); err != nil {
+		t.Fatalf("unexpected uninstall error for foreign plugin file: %v", err)
+	}
+
+	data, err := os.ReadFile(managedPlugin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != foreign {
+		t.Fatalf("expected foreign plugin file to survive uninstall, got %q", string(data))
+	}
+}
+
+func TestOpenCodeUninstallDryRunPreservesForeignPluginAtManagedPath(t *testing.T) {
+	dir := t.TempDir()
+	withTestWorkingDir(t, dir)
+
+	pluginsDir := filepath.Join(dir, ".opencode", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managedPlugin := filepath.Join(pluginsDir, "cymbal-opencode.js")
+	foreign := "// user-owned file\nexport default async () => ({ custom: true })\n"
+	if err := os.WriteFile(managedPlugin, []byte(foreign), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, summary, err := adapter.uninstall("project", true)
+	if err != nil {
+		t.Fatalf("unexpected dry-run uninstall error for foreign plugin file: %v", err)
+	}
+	if target != filepath.Join(".opencode", "plugins", "cymbal-opencode.js") {
+		t.Fatalf("unexpected dry-run uninstall target: %q", target)
+	}
+	if !strings.Contains(summary, "leave non-cymbal OpenCode plugin untouched") {
+		t.Fatalf("expected dry-run uninstall to reflect preservation of foreign plugin file, got %q", summary)
+	}
+
+	data, err := os.ReadFile(managedPlugin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != foreign {
+		t.Fatalf("expected foreign plugin file to survive dry-run uninstall, got %q", string(data))
+	}
+}
+
+func TestOpenCodeInstallRefusesWhenOtherScopeAlreadyHasManagedPlugin(t *testing.T) {
+	dir := t.TempDir()
+	withTestWorkingDir(t, dir)
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := adapter.install("project", false); err != nil {
+		t.Fatalf("project-scope install failed: %v", err)
+	}
+	if _, _, err := adapter.install("user", false); err == nil {
+		t.Fatal("expected user-scope install to refuse when project-scope managed plugin already exists")
+	}
+}
+
+func withTestWorkingDir(t *testing.T, dir string) {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(wd); err != nil {
+			t.Fatal(err)
+		}
+	})
+}

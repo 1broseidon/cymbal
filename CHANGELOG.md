@@ -8,6 +8,7 @@ All notable changes to cymbal are documented here.
 
 - **Regression coverage now reaches the 80% product target** — coverage excludes the internal `bench/` evaluation harness from the product denominator and now covers parser/walker behavior, command-facing workflows, public index facade APIs, diff output, and update-notifier state transitions. `CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" make test-coverage` reports 80%+ total product coverage.
 - **Codecov now uses the same product coverage denominator as CI** — CI converts Go's block coverprofile into LCOV line hits before upload, `codecov.yml` ignores the internal bench harness plus non-executable test, entrypoint, type, and registry files, and command entrypoint regression tests keep Codecov's line-oriented calculation above the threshold.
+- **OpenCode now has a first-class installer path** — `cymbal hook install opencode` installs a cymbal-managed OpenCode plugin in the documented plugin directory for user or project scope, making OpenCode the main supported cymbal integration path instead of relying on `AGENTS.md` bootstrap text. The managed plugin refreshes guidance through `cymbal hook remind --update=if-stale`, so update guidance stays fresh automatically while cymbal still never self-updates by default.
 
 ### Fixed
 
