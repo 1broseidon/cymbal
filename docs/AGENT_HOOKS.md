@@ -353,10 +353,10 @@ echo '{"tool_name":"Bash","tool_input":{"command":"rg -n FindUser ."}}' \
   file globs (`*.log`), and aren't mostly regex metacharacters. False
   positives are worse than false negatives — a nagging hook is exactly
   the thing #23 complains about.
-- **Per-agent installers.** Only `claude-code` is auto-installable.
-  For every other agent, a rules-file or config-file snippet is two
-  lines — no reason for cymbal to maintain a config adapter for every
-  agent in the ecosystem.
+- **Per-agent installers.** `opencode` and `claude-code` are auto-installable.
+  For other agents, a rules-file or config-file snippet is often just a few
+  lines; cymbal adds first-class installers when an agent has a stable native
+  hook or plugin surface worth managing.
 
 If your agent needs a first-class installer, open an issue with the
 config shape and we'll add it.
