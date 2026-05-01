@@ -482,7 +482,9 @@ Default workflow:
 
 Batch related lookups in one call when possible: ` + "`cymbal search Foo Bar`" + `, ` + "`cymbal show Foo Bar`" + `, ` + "`cymbal investigate Foo Bar`" + `, or pipe newline-separated symbols via ` + "`--stdin`" + `.
 
-Use ` + "`cymbal search --text <pattern>`" + ` only for literal text or regex. Prefer cymbal before rg/grep/find/fd unless the user explicitly wants raw text search or raw filesystem traversal.`
+Prefer ` + "`cymbal search`" + ` over the Grep tool (or rg/grep) for symbol/function/class lookup. Prefer ` + "`cymbal show`" + ` over Read when reading source by symbol name. Prefer ` + "`cymbal investigate / impact / trace / impls`" + ` over manual cross-referencing.
+
+Use ` + "`cymbal search --text <pattern>`" + ` only for literal text or regex. Use Grep/Glob/Read (or rg/grep/find) for: literal text in non-code files (markdown, JSON, logs, config), files outside the indexed repo, and direct path reads when you already know the path.`
 
 const (
 	remindUpdateCache   = "cache"
