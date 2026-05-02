@@ -101,10 +101,10 @@ This tells the agent to prefer cymbal over grep/find/cat, reducing tool calls an
 
 cymbal currently parses and indexes:
 
-Go, Python, JavaScript, TypeScript, Rust, C, C++, C#, Java, Apex, Ruby, Swift, Kotlin, Scala, PHP, Lua, Bash, YAML, Elixir, HCL/Terraform, Protobuf, and Dart.
+Go, Python, JavaScript, TypeScript, Rust, C, C++, C#, Java, Ruby, Swift, Kotlin, Scala, PHP, Lua, Bash, YAML, Elixir, HCL/Terraform, Protobuf, and Dart.
 
 Notable extension coverage includes `.pyw`, `.mjs`, `.cjs`, `.mts`, `.cts`, `.kts`, `.rake`, `.gemspec`, `.sc`, `.tfvars`, `.cxx`, `.hxx`, and `.hh`.
 
-cymbal also recognizes additional file types for classification and CLI path heuristics, even when they are not parseable/indexable: `Dockerfile`, `Makefile`, `Jenkinsfile`, `CMakeLists.txt`, JSON, TOML, Markdown, SQL, Vue, Svelte, Zig, Erlang, Haskell, OCaml, R, and Perl.
+cymbal also recognizes additional file types for classification and CLI path heuristics, even when they are not parseable/indexable: `Dockerfile`, `Makefile`, `Jenkinsfile`, `CMakeLists.txt`, Apex, JSON, TOML, Markdown, SQL, Vue, Svelte, Zig, Erlang, Haskell, OCaml, R, and Perl.
 
 Adding a language requires a tree-sitter grammar and a symbol extraction query.

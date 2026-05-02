@@ -1,12 +1,11 @@
 package parser
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
+	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"github.com/1broseidon/cymbal/lang"
 	"github.com/1broseidon/cymbal/symbols"
@@ -46,11 +45,15 @@ func ParseBytes(src []byte, filePath, l string) (*symbols.ParseResult, error) {
 // ParseSource parses source bytes and extracts symbols, imports, and refs.
 func ParseSource(src []byte, filePath, lang string, tsLang *sitter.Language) (*symbols.ParseResult, error) {
 	p := sitter.NewParser()
-	p.SetLanguage(tsLang)
+	defer p.Close()
 
-	tree, err := p.ParseCtx(context.Background(), nil, src)
-	if err != nil {
-		return nil, fmt.Errorf("parsing: %w", err)
+	if err := p.SetLanguage(tsLang); err != nil {
+		return nil, fmt.Errorf("setting parser language: %w", err)
+	}
+
+	tree := p.Parse(src, nil)
+	if tree == nil {
+		return nil, fmt.Errorf("parsing failed")
 	}
 	defer tree.Close()
 
@@ -111,7 +114,7 @@ func (e *symbolExtractor) walk(node *sitter.Node, parent string, depth int) {
 
 	childCount := int(node.ChildCount())
 	for i := range childCount {
-		child := node.Child(i)
+		child := node.Child(uint(i))
 		nextDepth := depth
 		if isSymbol {
 			nextDepth = depth + 1
@@ -122,7 +125,7 @@ func (e *symbolExtractor) walk(node *sitter.Node, parent string, depth int) {
 
 // extractImport checks if the node is an import statement and returns the raw path.
 func (e *symbolExtractor) extractImport(node *sitter.Node) (symbols.Import, bool) {
-	nodeType := node.Type()
+	nodeType := node.Kind()
 
 	switch e.lang {
 	case "go":
@@ -165,7 +168,7 @@ func (e *symbolExtractor) extractImportGo(nodeType string, node *sitter.Node) (s
 	if nodeType == "import_spec" {
 		pathNode := node.ChildByFieldName("path")
 		if pathNode != nil {
-			raw := strings.Trim(pathNode.Content(e.src), "\"")
+			raw := strings.Trim(pathNode.Utf8Text(e.src), "\"")
 			return symbols.Import{RawPath: raw, Language: e.lang}, true
 		}
 	}
@@ -174,7 +177,7 @@ func (e *symbolExtractor) extractImportGo(nodeType string, node *sitter.Node) (s
 
 func (e *symbolExtractor) extractImportPython(nodeType string, node *sitter.Node) (symbols.Import, bool) {
 	if nodeType == "import_statement" || nodeType == "import_from_statement" {
-		return symbols.Import{RawPath: node.Content(e.src), Language: e.lang}, true
+		return symbols.Import{RawPath: node.Utf8Text(e.src), Language: e.lang}, true
 	}
 	return symbols.Import{}, false
 }
@@ -183,7 +186,7 @@ func (e *symbolExtractor) extractImportJS(nodeType string, node *sitter.Node) (s
 	if nodeType == "import_statement" {
 		sourceNode := node.ChildByFieldName("source")
 		if sourceNode != nil {
-			raw := strings.Trim(sourceNode.Content(e.src), "\"'`")
+			raw := strings.Trim(sourceNode.Utf8Text(e.src), "\"'`")
 			return symbols.Import{RawPath: raw, Language: e.lang}, true
 		}
 	}
@@ -192,14 +195,14 @@ func (e *symbolExtractor) extractImportJS(nodeType string, node *sitter.Node) (s
 
 func (e *symbolExtractor) extractImportRust(nodeType string, node *sitter.Node) (symbols.Import, bool) {
 	if nodeType == "use_declaration" {
-		return symbols.Import{RawPath: node.Content(e.src), Language: e.lang}, true
+		return symbols.Import{RawPath: node.Utf8Text(e.src), Language: e.lang}, true
 	}
 	return symbols.Import{}, false
 }
 
 func (e *symbolExtractor) extractImportJVM(nodeType string, node *sitter.Node) (symbols.Import, bool) {
 	if nodeType == "import_declaration" {
-		return symbols.Import{RawPath: node.Content(e.src), Language: e.lang}, true
+		return symbols.Import{RawPath: node.Utf8Text(e.src), Language: e.lang}, true
 	}
 	return symbols.Import{}, false
 }
@@ -208,11 +211,11 @@ func (e *symbolExtractor) extractImportRuby(nodeType string, node *sitter.Node) 
 	if nodeType == "call" {
 		funcNode := node.ChildByFieldName("method")
 		if funcNode != nil {
-			name := funcNode.Content(e.src)
+			name := funcNode.Utf8Text(e.src)
 			if name == "require" || name == "require_relative" {
 				argsNode := node.ChildByFieldName("arguments")
 				if argsNode != nil {
-					raw := strings.Trim(argsNode.Content(e.src), "()'\"")
+					raw := strings.Trim(argsNode.Utf8Text(e.src), "()'\"")
 					return symbols.Import{RawPath: raw, Language: e.lang}, true
 				}
 			}
@@ -225,7 +228,7 @@ func (e *symbolExtractor) extractImportC(nodeType string, node *sitter.Node) (sy
 	if nodeType == "preproc_include" {
 		pathNode := node.ChildByFieldName("path")
 		if pathNode != nil {
-			raw := strings.Trim(pathNode.Content(e.src), "<>\"")
+			raw := strings.Trim(pathNode.Utf8Text(e.src), "<>\"")
 			return symbols.Import{RawPath: raw, Language: e.lang}, true
 		}
 	}
@@ -233,21 +236,23 @@ func (e *symbolExtractor) extractImportC(nodeType string, node *sitter.Node) (sy
 }
 
 func (e *symbolExtractor) extractImportKotlin(nodeType string, node *sitter.Node) (symbols.Import, bool) {
-	if nodeType == "import_header" {
-		return symbols.Import{RawPath: node.Content(e.src), Language: e.lang}, true
+	if nodeType == "import_header" || nodeType == "import" {
+		raw := strings.TrimSpace(node.Utf8Text(e.src))
+		raw = strings.TrimSpace(strings.TrimPrefix(raw, "import"))
+		return symbols.Import{RawPath: raw, Language: e.lang}, true
 	}
 	return symbols.Import{}, false
 }
 
 func (e *symbolExtractor) extractImportElixir(nodeType string, node *sitter.Node) (symbols.Import, bool) {
 	if nodeType == "call" {
-		first := node.Child(0)
-		if first != nil && first.Type() == "identifier" {
-			name := first.Content(e.src)
+		first := node.Child(uint(0))
+		if first != nil && first.Kind() == "identifier" {
+			name := first.Utf8Text(e.src)
 			if name == "alias" || name == "import" || name == "use" || name == "require" {
-				arg := node.Child(1)
+				arg := node.Child(uint(1))
 				if arg != nil {
-					return symbols.Import{RawPath: arg.Content(e.src), Language: e.lang}, true
+					return symbols.Import{RawPath: arg.Utf8Text(e.src), Language: e.lang}, true
 				}
 			}
 		}
@@ -258,9 +263,9 @@ func (e *symbolExtractor) extractImportElixir(nodeType string, node *sitter.Node
 func (e *symbolExtractor) extractImportProtobuf(nodeType string, node *sitter.Node) (symbols.Import, bool) {
 	if nodeType == "import" {
 		for i := range int(node.ChildCount()) {
-			child := node.Child(i)
-			if child.Type() == "string" {
-				raw := strings.Trim(child.Content(e.src), "\"")
+			child := node.Child(uint(i))
+			if child.Kind() == "string" {
+				raw := strings.Trim(child.Utf8Text(e.src), "\"")
 				return symbols.Import{RawPath: raw, Language: e.lang}, true
 			}
 		}
@@ -270,7 +275,7 @@ func (e *symbolExtractor) extractImportProtobuf(nodeType string, node *sitter.No
 
 // extractRef checks if the node is a call expression and returns the callee name.
 func (e *symbolExtractor) extractRef(node *sitter.Node) (symbols.Ref, bool) {
-	nodeType := node.Type()
+	nodeType := node.Kind()
 
 	switch e.lang {
 	case "go":
@@ -321,7 +326,7 @@ func (e *symbolExtractor) extractRefCallExpr(nodeType string, node *sitter.Node)
 	if funcNode != nil {
 		name := extractCallName(funcNode, e.src, e.lang)
 		if name != "" {
-			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
+			return symbols.Ref{Name: name, Line: int(node.StartPosition().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 		}
 	}
 	return symbols.Ref{}, false
@@ -335,11 +340,11 @@ func (e *symbolExtractor) extractRefGoCompositeLiteral(nodeType string, node *si
 	if typeNode == nil {
 		return symbols.Ref{}, false
 	}
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 
-	switch typeNode.Type() {
+	switch typeNode.Kind() {
 	case "type_identifier":
-		name := typeNode.Content(e.src)
+		name := typeNode.Utf8Text(e.src)
 		if name != "" {
 			return symbols.Ref{Name: name, Line: line, Language: e.lang}, true
 		}
@@ -347,7 +352,7 @@ func (e *symbolExtractor) extractRefGoCompositeLiteral(nodeType string, node *si
 		// e.g. pkg.StructName — extract StructName
 		nameNode := typeNode.ChildByFieldName("name")
 		if nameNode != nil {
-			name := nameNode.Content(e.src)
+			name := nameNode.Utf8Text(e.src)
 			if name != "" {
 				return symbols.Ref{Name: name, Line: line, Language: e.lang}, true
 			}
@@ -357,22 +362,22 @@ func (e *symbolExtractor) extractRefGoCompositeLiteral(nodeType string, node *si
 		keyNode := typeNode.ChildByFieldName("key")
 		valNode := typeNode.ChildByFieldName("value")
 		if keyNode != nil {
-			switch keyNode.Type() {
+			switch keyNode.Kind() {
 			case "type_identifier":
-				e.refs = append(e.refs, symbols.Ref{Name: keyNode.Content(e.src), Line: line, Language: e.lang})
+				e.refs = append(e.refs, symbols.Ref{Name: keyNode.Utf8Text(e.src), Line: line, Language: e.lang})
 			case "qualified_type":
 				if nameNode := keyNode.ChildByFieldName("name"); nameNode != nil {
-					e.refs = append(e.refs, symbols.Ref{Name: nameNode.Content(e.src), Line: line, Language: e.lang})
+					e.refs = append(e.refs, symbols.Ref{Name: nameNode.Utf8Text(e.src), Line: line, Language: e.lang})
 				}
 			}
 		}
 		if valNode != nil {
-			switch valNode.Type() {
+			switch valNode.Kind() {
 			case "type_identifier":
-				return symbols.Ref{Name: valNode.Content(e.src), Line: line, Language: e.lang}, true
+				return symbols.Ref{Name: valNode.Utf8Text(e.src), Line: line, Language: e.lang}, true
 			case "qualified_type":
 				if nameNode := valNode.ChildByFieldName("name"); nameNode != nil {
-					return symbols.Ref{Name: nameNode.Content(e.src), Line: line, Language: e.lang}, true
+					return symbols.Ref{Name: nameNode.Utf8Text(e.src), Line: line, Language: e.lang}, true
 				}
 			}
 		}
@@ -380,24 +385,24 @@ func (e *symbolExtractor) extractRefGoCompositeLiteral(nodeType string, node *si
 		// []TypeName{} — extract TypeName
 		elemNode := typeNode.ChildByFieldName("element")
 		if elemNode != nil {
-			switch elemNode.Type() {
+			switch elemNode.Kind() {
 			case "type_identifier":
-				return symbols.Ref{Name: elemNode.Content(e.src), Line: line, Language: e.lang}, true
+				return symbols.Ref{Name: elemNode.Utf8Text(e.src), Line: line, Language: e.lang}, true
 			case "qualified_type":
 				if nameNode := elemNode.ChildByFieldName("name"); nameNode != nil {
-					return symbols.Ref{Name: nameNode.Content(e.src), Line: line, Language: e.lang}, true
+					return symbols.Ref{Name: nameNode.Utf8Text(e.src), Line: line, Language: e.lang}, true
 				}
 			}
 		}
 	case "array_type":
 		elemNode := typeNode.ChildByFieldName("element")
 		if elemNode != nil {
-			switch elemNode.Type() {
+			switch elemNode.Kind() {
 			case "type_identifier":
-				return symbols.Ref{Name: elemNode.Content(e.src), Line: line, Language: e.lang}, true
+				return symbols.Ref{Name: elemNode.Utf8Text(e.src), Line: line, Language: e.lang}, true
 			case "qualified_type":
 				if nameNode := elemNode.ChildByFieldName("name"); nameNode != nil {
-					return symbols.Ref{Name: nameNode.Content(e.src), Line: line, Language: e.lang}, true
+					return symbols.Ref{Name: nameNode.Utf8Text(e.src), Line: line, Language: e.lang}, true
 				}
 			}
 		}
@@ -413,7 +418,7 @@ func (e *symbolExtractor) extractRefNewExpr(nodeType string, node *sitter.Node) 
 	if ctorNode != nil {
 		name := extractCallName(ctorNode, e.src, e.lang)
 		if name != "" {
-			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
+			return symbols.Ref{Name: name, Line: int(node.StartPosition().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 		}
 	}
 	return symbols.Ref{}, false
@@ -427,7 +432,7 @@ func (e *symbolExtractor) extractRefPythonCall(nodeType string, node *sitter.Nod
 	if funcNode != nil {
 		name := extractCallName(funcNode, e.src, e.lang)
 		if name != "" {
-			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
+			return symbols.Ref{Name: name, Line: int(node.StartPosition().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 		}
 	}
 	return symbols.Ref{}, false
@@ -439,7 +444,7 @@ func (e *symbolExtractor) extractRefJVM(nodeType string, node *sitter.Node) (sym
 	}
 	nameNode := node.ChildByFieldName("name")
 	if nameNode != nil {
-		return symbols.Ref{Name: nameNode.Content(e.src), Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
+		return symbols.Ref{Name: nameNode.Utf8Text(e.src), Line: int(node.StartPosition().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 	}
 	return symbols.Ref{}, false
 }
@@ -450,7 +455,7 @@ func (e *symbolExtractor) extractRefRuby(nodeType string, node *sitter.Node) (sy
 	}
 	nameNode := node.ChildByFieldName("method")
 	if nameNode != nil {
-		return symbols.Ref{Name: nameNode.Content(e.src), Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
+		return symbols.Ref{Name: nameNode.Utf8Text(e.src), Line: int(node.StartPosition().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 	}
 	return symbols.Ref{}, false
 }
@@ -460,10 +465,10 @@ func (e *symbolExtractor) extractRefKotlin(nodeType string, node *sitter.Node) (
 		return symbols.Ref{}, false
 	}
 	if node.ChildCount() > 0 {
-		callee := node.Child(0)
+		callee := node.Child(uint(0))
 		name := extractCallName(callee, e.src, e.lang)
 		if name != "" {
-			return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
+			return symbols.Ref{Name: name, Line: int(node.StartPosition().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 		}
 	}
 	return symbols.Ref{}, false
@@ -476,22 +481,22 @@ func (e *symbolExtractor) extractRefScala(nodeType string, node *sitter.Node) (s
 	if node.ChildCount() == 0 {
 		return symbols.Ref{}, false
 	}
-	name := scalaCalleeName(node.Child(0), e.src)
+	name := scalaCalleeName(node.Child(uint(0)), e.src)
 	if name == "" {
 		return symbols.Ref{}, false
 	}
-	return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
+	return symbols.Ref{Name: name, Line: int(node.StartPosition().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 }
 
 func scalaCalleeName(node *sitter.Node, src []byte) string {
-	switch node.Type() {
+	switch node.Kind() {
 	case "identifier", "type_identifier":
-		return node.Content(src)
+		return node.Utf8Text(src)
 	case "field_expression":
 		for i := int(node.ChildCount()) - 1; i >= 0; i-- {
-			child := node.Child(i)
-			if child.Type() == "identifier" || child.Type() == "type_identifier" {
-				return child.Content(src)
+			child := node.Child(uint(i))
+			if child.Kind() == "identifier" || child.Kind() == "type_identifier" {
+				return child.Utf8Text(src)
 			}
 		}
 	}
@@ -502,26 +507,26 @@ func (e *symbolExtractor) extractRefElixir(nodeType string, node *sitter.Node) (
 	if nodeType != "call" {
 		return symbols.Ref{}, false
 	}
-	first := node.Child(0)
+	first := node.Child(uint(0))
 	if first == nil {
 		return symbols.Ref{}, false
 	}
-	if first.Type() == "dot" {
+	if first.Kind() == "dot" {
 		for i := range int(first.ChildCount()) {
-			child := first.Child(i)
-			if child.Type() == "identifier" {
-				return symbols.Ref{Name: child.Content(e.src), Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
+			child := first.Child(uint(i))
+			if child.Kind() == "identifier" {
+				return symbols.Ref{Name: child.Utf8Text(e.src), Line: int(node.StartPosition().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 			}
 		}
-	} else if first.Type() == "identifier" {
-		name := first.Content(e.src)
+	} else if first.Kind() == "identifier" {
+		name := first.Utf8Text(e.src)
 		switch name {
 		case "def", "defp", "defmodule", "defmacro", "defmacrop",
 			"defstruct", "defprotocol", "defimpl", "defguard",
 			"alias", "import", "use", "require":
 			return symbols.Ref{}, false
 		}
-		return symbols.Ref{Name: name, Line: int(node.StartPoint().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
+		return symbols.Ref{Name: name, Line: int(node.StartPosition().Row) + 1, Language: e.lang, Kind: symbols.RefKindCall}, true
 	}
 	return symbols.Ref{}, false
 }
@@ -532,7 +537,7 @@ func (e *symbolExtractor) extractRefElixir(nodeType string, node *sitter.Node) (
 //   - "Calculator::multiply()" -> "multiply"
 //   - "ptr->method()" -> "method"
 func extractCallName(node *sitter.Node, src []byte, lang string) string {
-	content := strings.TrimSpace(node.Content(src))
+	content := strings.TrimSpace(node.Utf8Text(src))
 
 	if lang == "c" || lang == "cpp" {
 		// Normalize chained C/C++ qualifiers to the final callable name.
@@ -561,6 +566,11 @@ func extractCallName(node *sitter.Node, src []byte, lang string) string {
 			}
 		}
 	} else {
+		if lang == "lua" {
+			if colon := strings.LastIndex(content, ":"); colon >= 0 {
+				content = content[colon+1:]
+			}
+		}
 		if dot := strings.LastIndex(content, "."); dot >= 0 {
 			content = content[dot+1:]
 		}
@@ -574,7 +584,7 @@ func extractCallName(node *sitter.Node, src []byte, lang string) string {
 }
 
 func (e *symbolExtractor) nodeToSymbol(node *sitter.Node, parent string, depth int) (symbols.Symbol, bool) {
-	nodeType := node.Type()
+	nodeType := node.Kind()
 
 	kind, nameNode := e.classifyNode(nodeType, node)
 	if kind == "" {
@@ -583,7 +593,7 @@ func (e *symbolExtractor) nodeToSymbol(node *sitter.Node, parent string, depth i
 
 	var name string
 	if nameNode != nil {
-		name = nameNode.Content(e.src)
+		name = nameNode.Utf8Text(e.src)
 	}
 	// For HCL, the name is synthesized from labels, not a single AST node.
 	if e.lang == "hcl" && kind != "" {
@@ -598,18 +608,18 @@ func (e *symbolExtractor) nodeToSymbol(node *sitter.Node, parent string, depth i
 
 	sig := e.extractSignature(node, kind)
 
-	startLine := int(node.StartPoint().Row) + 1
-	startCol := int(node.StartPoint().Column)
+	startLine := int(node.StartPosition().Row) + 1
+	startCol := int(node.StartPosition().Column)
 
-	// tree-sitter-lua (smacker fork) folds leading whitespace from the
+	// tree-sitter-lua folds leading whitespace from the
 	// previous statement into the next `function_statement` / `local`
-	// node, so node.StartPoint() is often 1–2 lines earlier than the
+	// node, so node.StartPosition() is often 1–2 lines earlier than the
 	// actual `function` keyword. Anchor Lua function/method start lines
 	// to the name node (which has the real row) so refs/show/outline
 	// match what users grep for.
 	if e.lang == "lua" && nameNode != nil && (kind == "function" || kind == "method") {
-		startLine = int(nameNode.StartPoint().Row) + 1
-		startCol = int(nameNode.StartPoint().Column)
+		startLine = int(nameNode.StartPosition().Row) + 1
+		startCol = int(nameNode.StartPosition().Column)
 	}
 
 	return symbols.Symbol{
@@ -617,9 +627,9 @@ func (e *symbolExtractor) nodeToSymbol(node *sitter.Node, parent string, depth i
 		Kind:      kind,
 		File:      e.filePath,
 		StartLine: startLine,
-		EndLine:   int(node.EndPoint().Row) + 1,
+		EndLine:   int(node.EndPosition().Row) + 1,
 		StartCol:  startCol,
-		EndCol:    int(node.EndPoint().Column),
+		EndCol:    int(node.EndPosition().Column),
 		Parent:    parent,
 		Depth:     depth,
 		Signature: sig,
@@ -678,12 +688,12 @@ func (e *symbolExtractor) classifyGo(nodeType string, node *sitter.Node) (string
 		return "method", node.ChildByFieldName("name")
 	case "type_declaration":
 		for i := range int(node.ChildCount()) {
-			child := node.Child(i)
-			if child.Type() == "type_spec" {
+			child := node.Child(uint(i))
+			if child.Kind() == "type_spec" {
 				nameNode := child.ChildByFieldName("name")
 				typeNode := child.ChildByFieldName("type")
 				if typeNode != nil {
-					switch typeNode.Type() {
+					switch typeNode.Kind() {
 					case "struct_type":
 						return "struct", nameNode
 					case "interface_type":
@@ -711,21 +721,21 @@ func (e *symbolExtractor) classifyPython(nodeType string, node *sitter.Node) (st
 	switch nodeType {
 	case "function_definition":
 		// Skip if parent is decorated_definition — the parent already emits this symbol.
-		if node.Parent() != nil && node.Parent().Type() == "decorated_definition" {
+		if node.Parent() != nil && node.Parent().Kind() == "decorated_definition" {
 			return "", nil
 		}
 		nameNode := node.ChildByFieldName("name")
 		return "function", nameNode
 	case "class_definition":
 		// Skip if parent is decorated_definition — the parent already emits this symbol.
-		if node.Parent() != nil && node.Parent().Type() == "decorated_definition" {
+		if node.Parent() != nil && node.Parent().Kind() == "decorated_definition" {
 			return "", nil
 		}
 		return "class", node.ChildByFieldName("name")
 	case "decorated_definition":
 		for i := range int(node.ChildCount()) {
-			child := node.Child(i)
-			kind, nameNode := e.classifyPythonInner(child.Type(), child)
+			child := node.Child(uint(i))
+			kind, nameNode := e.classifyPythonInner(child.Kind(), child)
 			if kind != "" {
 				return kind, nameNode
 			}
@@ -752,7 +762,7 @@ func (e *symbolExtractor) classifyJS(nodeType string, node *sitter.Node) (string
 	case "function_declaration", "class_declaration", "interface_declaration",
 		"type_alias_declaration", "enum_declaration", "lexical_declaration":
 		// Skip if parent is export_statement — the parent already emits this symbol.
-		if node.Parent() != nil && node.Parent().Type() == "export_statement" {
+		if node.Parent() != nil && node.Parent().Kind() == "export_statement" {
 			return "", nil
 		}
 		return e.classifyJSInner(nodeType, node)
@@ -760,8 +770,8 @@ func (e *symbolExtractor) classifyJS(nodeType string, node *sitter.Node) (string
 		return "method", node.ChildByFieldName("name")
 	case "export_statement":
 		for i := range int(node.ChildCount()) {
-			child := node.Child(i)
-			kind, nameNode := e.classifyJSInner(child.Type(), child)
+			child := node.Child(uint(i))
+			kind, nameNode := e.classifyJSInner(child.Kind(), child)
 			if kind != "" {
 				return kind, nameNode
 			}
@@ -785,11 +795,11 @@ func (e *symbolExtractor) classifyJSInner(nodeType string, node *sitter.Node) (s
 		return "enum", node.ChildByFieldName("name")
 	case "lexical_declaration":
 		for i := range int(node.ChildCount()) {
-			child := node.Child(i)
-			if child.Type() == "variable_declarator" {
+			child := node.Child(uint(i))
+			if child.Kind() == "variable_declarator" {
 				nameNode := child.ChildByFieldName("name")
 				valueNode := child.ChildByFieldName("value")
-				if valueNode != nil && (valueNode.Type() == "arrow_function" || valueNode.Type() == "function") {
+				if valueNode != nil && (valueNode.Kind() == "arrow_function" || valueNode.Kind() == "function") {
 					return "function", nameNode
 				}
 			}
@@ -814,7 +824,7 @@ func (e *symbolExtractor) classifyRust(nodeType string, node *sitter.Node) (stri
 		// identifier. Descend so the symbol name is `Foo`, not `Foo<T, U>`,
 		// so `impls --of Foo` matches both `struct Foo` and all impl blocks.
 		typeNode := node.ChildByFieldName("type")
-		if typeNode != nil && typeNode.Type() == "generic_type" {
+		if typeNode != nil && typeNode.Kind() == "generic_type" {
 			if inner := typeNode.ChildByFieldName("type"); inner != nil {
 				typeNode = inner
 			}
@@ -846,8 +856,8 @@ func (e *symbolExtractor) classifyJavaLike(nodeType string, node *sitter.Node) (
 		return "constructor", node.ChildByFieldName("name")
 	case "field_declaration":
 		for i := range int(node.ChildCount()) {
-			child := node.Child(i)
-			if child.Type() == "variable_declarator" {
+			child := node.Child(uint(i))
+			if child.Kind() == "variable_declarator" {
 				return "field", child.ChildByFieldName("name")
 			}
 		}
@@ -858,28 +868,32 @@ func (e *symbolExtractor) classifyJavaLike(nodeType string, node *sitter.Node) (
 // findChildByType returns the first direct child with the given type.
 func findChildByType(node *sitter.Node, typeName string) *sitter.Node {
 	for i := range int(node.ChildCount()) {
-		c := node.Child(i)
-		if c.Type() == typeName {
+		c := node.Child(uint(i))
+		if c.Kind() == typeName {
 			return c
 		}
 	}
 	return nil
 }
 
+func sameNode(a, b *sitter.Node) bool {
+	return a != nil && b != nil && a.Equals(*b)
+}
+
 // findDescendantByType returns the first descendant (BFS) with the given type.
 func findDescendantByType(node *sitter.Node, typeName string) *sitter.Node {
 	queue := make([]*sitter.Node, 0, int(node.ChildCount()))
 	for i := range int(node.ChildCount()) {
-		queue = append(queue, node.Child(i))
+		queue = append(queue, node.Child(uint(i)))
 	}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-		if current.Type() == typeName {
+		if current.Kind() == typeName {
 			return current
 		}
 		for i := range int(current.ChildCount()) {
-			queue = append(queue, current.Child(i))
+			queue = append(queue, current.Child(uint(i)))
 		}
 	}
 	return nil
@@ -897,7 +911,7 @@ func kotlinInsideClassBody(node *sitter.Node) bool {
 	if p == nil {
 		return false
 	}
-	t := p.Type()
+	t := p.Kind()
 	return t == "class_body" || t == "enum_class_body"
 }
 
@@ -906,19 +920,20 @@ func (e *symbolExtractor) classifyKotlin(nodeType string, node *sitter.Node) (st
 	case "class_declaration":
 		// Distinguish class / interface / enum by leading keyword child.
 		kind := "class"
-		if hasChildOfType(node, "interface") {
+		text := strings.TrimSpace(node.Utf8Text(e.src))
+		if strings.HasPrefix(text, "interface ") {
 			kind = "interface"
-		} else if hasChildOfType(node, "enum") {
+		} else if strings.Contains(text, "enum class") {
 			kind = "enum"
 		}
-		return kind, findChildByType(node, "type_identifier")
+		return kind, node.ChildByFieldName("name")
 	case "object_declaration":
-		return "object", findChildByType(node, "type_identifier")
+		return "object", node.ChildByFieldName("name")
 	case "companion_object":
 		// Named companion (`companion object Foo`) has a type_identifier; emit it.
 		// Anonymous `companion object` is skipped — members still belong to the
 		// enclosing class via the walker's parent tracking.
-		if nameNode := findChildByType(node, "type_identifier"); nameNode != nil {
+		if nameNode := node.ChildByFieldName("name"); nameNode != nil {
 			return "object", nameNode
 		}
 		return "", nil
@@ -927,13 +942,13 @@ func (e *symbolExtractor) classifyKotlin(nodeType string, node *sitter.Node) (st
 		if kotlinInsideClassBody(node) {
 			kind = "method"
 		}
-		return kind, findChildByType(node, "simple_identifier")
+		return kind, node.ChildByFieldName("name")
 	case "property_declaration":
 		varDecl := findChildByType(node, "variable_declaration")
 		if varDecl == nil {
 			return "", nil
 		}
-		nameNode := findChildByType(varDecl, "simple_identifier")
+		nameNode := findChildByType(varDecl, "identifier")
 		// Determine kind: const val → constant; inside class_body → field; else variable.
 		kind := "variable"
 		if kotlinInsideClassBody(node) {
@@ -942,8 +957,8 @@ func (e *symbolExtractor) classifyKotlin(nodeType string, node *sitter.Node) (st
 		// Detect `const` modifier.
 		if mods := findChildByType(node, "modifiers"); mods != nil {
 			for i := range int(mods.ChildCount()) {
-				c := mods.Child(i)
-				if c.Type() == "property_modifier" && c.Content(e.src) == "const" {
+				c := mods.Child(uint(i))
+				if c.Kind() == "property_modifier" && c.Utf8Text(e.src) == "const" {
 					kind = "constant"
 					break
 				}
@@ -951,9 +966,9 @@ func (e *symbolExtractor) classifyKotlin(nodeType string, node *sitter.Node) (st
 		}
 		return kind, nameNode
 	case "type_alias":
-		return "type", findChildByType(node, "type_identifier")
+		return "type", node.ChildByFieldName("type")
 	case "enum_entry":
-		return "enum_member", findChildByType(node, "simple_identifier")
+		return "enum_member", findChildByType(node, "identifier")
 	}
 	return "", nil
 }
@@ -993,14 +1008,14 @@ func (e *symbolExtractor) classifyElixir(nodeType string, node *sitter.Node) (st
 	if nodeType != "call" {
 		return "", nil
 	}
-	first := node.Child(0)
-	if first == nil || first.Type() != "identifier" {
+	first := node.Child(uint(0))
+	if first == nil || first.Kind() != "identifier" {
 		return "", nil
 	}
-	keyword := first.Content(e.src)
+	keyword := first.Utf8Text(e.src)
 	// In Elixir's tree-sitter grammar, arguments are positional children (index 1+),
 	// not accessed via ChildByFieldName("arguments").
-	arg := node.Child(1) // first argument after the keyword
+	arg := node.Child(uint(1)) // first argument after the keyword
 	switch keyword {
 	case "defmodule":
 		if arg != nil {
@@ -1039,13 +1054,13 @@ func elixirDefinitionName(args *sitter.Node) *sitter.Node {
 	if args == nil {
 		return nil
 	}
-	if args.Type() == "call" {
-		return args.Child(0)
+	if args.Kind() == "call" {
+		return args.Child(uint(0))
 	}
 	for i := 0; i < int(args.ChildCount()); i++ {
-		child := args.Child(i)
-		if child.Type() == "call" {
-			return child.Child(0)
+		child := args.Child(uint(i))
+		if child.Kind() == "call" {
+			return child.Child(uint(0))
 		}
 	}
 	return nil
@@ -1057,16 +1072,16 @@ func (e *symbolExtractor) classifyHCL(nodeType string, node *sitter.Node) (strin
 	}
 	// HCL blocks: identifier [string_lit...] { body }
 	// e.g. resource "aws_instance" "web" { ... }
-	blockType := node.Child(0)
-	if blockType == nil || blockType.Type() != "identifier" {
+	blockType := node.Child(uint(0))
+	if blockType == nil || blockType.Kind() != "identifier" {
 		return "", nil
 	}
-	typeName := blockType.Content(e.src)
+	typeName := blockType.Utf8Text(e.src)
 	// Check if block has any string labels after the type identifier.
 	hasLabels := false
 	for i := 1; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child.Type() == "string_lit" {
+		child := node.Child(uint(i))
+		if child.Kind() == "string_lit" {
 			hasLabels = true
 			break
 		} else {
@@ -1100,12 +1115,12 @@ func (e *symbolExtractor) hclKind(typeName string) string {
 func (e *symbolExtractor) hclBlockName(node *sitter.Node) string {
 	var labels []string
 	for i := 1; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child.Type() == "string_lit" {
+		child := node.Child(uint(i))
+		if child.Kind() == "string_lit" {
 			for j := range int(child.ChildCount()) {
-				gc := child.Child(j)
-				if gc.Type() == "template_literal" {
-					labels = append(labels, gc.Content(e.src))
+				gc := child.Child(uint(j))
+				if gc.Kind() == "template_literal" {
+					labels = append(labels, gc.Utf8Text(e.src))
 				}
 			}
 		} else {
@@ -1114,9 +1129,9 @@ func (e *symbolExtractor) hclBlockName(node *sitter.Node) string {
 	}
 	if len(labels) == 0 {
 		// For locals/terraform blocks with no labels.
-		first := node.Child(0)
+		first := node.Child(uint(0))
 		if first != nil {
-			return first.Content(e.src)
+			return first.Utf8Text(e.src)
 		}
 		return ""
 	}
@@ -1149,7 +1164,7 @@ func (e *symbolExtractor) classifyScala(nodeType string, node *sitter.Node) (str
 
 func scalaInsideTemplateBody(node *sitter.Node) bool {
 	for p := node.Parent(); p != nil; p = p.Parent() {
-		switch p.Type() {
+		switch p.Kind() {
 		case "template_body":
 			return true
 		case "compilation_unit":
@@ -1175,11 +1190,11 @@ func (e *symbolExtractor) classifyProtobuf(nodeType string, node *sitter.Node) (
 
 func protoNameNode(node *sitter.Node, childType string) *sitter.Node {
 	for i := range int(node.ChildCount()) {
-		child := node.Child(i)
-		if child.Type() == childType {
+		child := node.Child(uint(i))
+		if child.Kind() == childType {
 			// The name node wraps an identifier — return the identifier for clean content.
 			if child.ChildCount() > 0 {
-				return child.Child(0)
+				return child.Child(uint(0))
 			}
 			return child
 		}
@@ -1194,7 +1209,7 @@ func protoNameNode(node *sitter.Node, childType string) *sitter.Node {
 func dartInsideClassBody(node *sitter.Node) bool {
 	p := node.Parent()
 	for p != nil {
-		t := p.Type()
+		t := p.Kind()
 		if t == "class_body" || t == "enum_body" || t == "extension_body" {
 			return true
 		}
@@ -1247,11 +1262,11 @@ func (e *symbolExtractor) extractImportDart(nodeType string, node *sitter.Node) 
 	// AST: import_or_export → library_import → import_specification → configurable_uri → uri → string_literal
 	// Walk descendants to find the configurable_uri node.
 	if uri := findDescendantByType(node, "configurable_uri"); uri != nil {
-		raw := strings.Trim(uri.Content(e.src), "'\"")
+		raw := strings.Trim(uri.Utf8Text(e.src), "'\"")
 		return symbols.Import{RawPath: raw, Language: e.lang}, true
 	}
 	// Fallback: use the full statement text.
-	return symbols.Import{RawPath: node.Content(e.src), Language: e.lang}, true
+	return symbols.Import{RawPath: node.Utf8Text(e.src), Language: e.lang}, true
 }
 
 func (e *symbolExtractor) extractRefDart(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
@@ -1276,7 +1291,7 @@ func (e *symbolExtractor) extractRefDart(nodeType string, node *sitter.Node) (sy
 	// Find this node's index among its siblings.
 	idx := -1
 	for i := range int(parent.ChildCount()) {
-		if parent.Child(i) == node {
+		if sameNode(parent.Child(uint(i)), node) {
 			idx = i
 			break
 		}
@@ -1285,18 +1300,18 @@ func (e *symbolExtractor) extractRefDart(nodeType string, node *sitter.Node) (sy
 		return symbols.Ref{}, false
 	}
 
-	prev := parent.Child(idx - 1)
+	prev := parent.Child(uint(idx - 1))
 
 	// Case 1: Previous sibling is a selector with unconditional_assignable_selector
 	// → method call like c.area() — the ".area" selector precedes the "()" selector.
-	if prev.Type() == "selector" {
+	if prev.Kind() == "selector" {
 		uas := findChildByType(prev, "unconditional_assignable_selector")
 		if uas != nil {
 			id := findChildByType(uas, "identifier")
 			if id != nil {
 				return symbols.Ref{
-					Name:     id.Content(e.src),
-					Line:     int(node.StartPoint().Row) + 1,
+					Name:     id.Utf8Text(e.src),
+					Line:     int(node.StartPosition().Row) + 1,
 					Language: e.lang,
 					Kind:     symbols.RefKindCall,
 				}, true
@@ -1306,12 +1321,12 @@ func (e *symbolExtractor) extractRefDart(nodeType string, node *sitter.Node) (sy
 	}
 
 	// Case 2: Previous sibling is an identifier → top-level / constructor call.
-	if prev.Type() == "identifier" {
-		name := prev.Content(e.src)
+	if prev.Kind() == "identifier" {
+		name := prev.Utf8Text(e.src)
 		if name != "" {
 			return symbols.Ref{
 				Name:     name,
-				Line:     int(node.StartPoint().Row) + 1,
+				Line:     int(node.StartPosition().Row) + 1,
 				Language: e.lang,
 				Kind:     symbols.RefKindCall,
 			}, true
@@ -1329,9 +1344,9 @@ func (e *symbolExtractor) extractImportSwift(nodeType string, node *sitter.Node)
 	}
 	// `import Foundation` → identifier(simple_identifier("Foundation"))
 	if id := findChildByType(node, "identifier"); id != nil {
-		return symbols.Import{RawPath: strings.TrimSpace(id.Content(e.src)), Language: e.lang}, true
+		return symbols.Import{RawPath: strings.TrimSpace(id.Utf8Text(e.src)), Language: e.lang}, true
 	}
-	return symbols.Import{RawPath: strings.TrimSpace(node.Content(e.src)), Language: e.lang}, true
+	return symbols.Import{RawPath: strings.TrimSpace(node.Utf8Text(e.src)), Language: e.lang}, true
 }
 
 // extractRefSwift emits refs for call expressions and named type uses.
@@ -1340,13 +1355,13 @@ func (e *symbolExtractor) extractImportSwift(nodeType string, node *sitter.Node)
 // trigger once per `user_type` and each nested occurrence is visited
 // independently by the walker.
 func (e *symbolExtractor) extractRefSwift(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	switch nodeType {
 	case "call_expression":
 		if node.ChildCount() == 0 {
 			return symbols.Ref{}, false
 		}
-		if name := swiftCalleeName(node.Child(0), e.src); name != "" {
+		if name := swiftCalleeName(node.Child(uint(0)), e.src); name != "" {
 			return symbols.Ref{Name: name, Line: line, Language: e.lang, Kind: symbols.RefKindCall}, true
 		}
 	case "user_type":
@@ -1354,7 +1369,7 @@ func (e *symbolExtractor) extractRefSwift(nodeType string, node *sitter.Node) (s
 		// These are intentionally Kind=use so `trace` doesn't surface them
 		// while `cymbal impls` and type-level queries still can.
 		if id := findChildByType(node, "type_identifier"); id != nil {
-			return symbols.Ref{Name: id.Content(e.src), Line: line, Language: e.lang, Kind: symbols.RefKindUse}, true
+			return symbols.Ref{Name: id.Utf8Text(e.src), Line: line, Language: e.lang, Kind: symbols.RefKindUse}, true
 		}
 	}
 	return symbols.Ref{}, false
@@ -1363,20 +1378,20 @@ func (e *symbolExtractor) extractRefSwift(nodeType string, node *sitter.Node) (s
 // swiftCalleeName resolves the callable name from a call_expression's first child.
 // Handles bare identifiers (`Foo()`) and navigation expressions (`x.y.z()` → `z`).
 func swiftCalleeName(node *sitter.Node, src []byte) string {
-	switch node.Type() {
+	switch node.Kind() {
 	case "simple_identifier":
-		return node.Content(src)
+		return node.Utf8Text(src)
 	case "navigation_expression":
 		var lastSuffix *sitter.Node
 		for i := range int(node.ChildCount()) {
-			c := node.Child(i)
-			if c.Type() == "navigation_suffix" {
+			c := node.Child(uint(i))
+			if c.Kind() == "navigation_suffix" {
 				lastSuffix = c
 			}
 		}
 		if lastSuffix != nil {
 			if id := findChildByType(lastSuffix, "simple_identifier"); id != nil {
-				return id.Content(src)
+				return id.Utf8Text(src)
 			}
 		}
 	}
@@ -1429,8 +1444,8 @@ func (e *symbolExtractor) classifySwift(nodeType string, node *sitter.Node) (str
 func swiftClassKindAndName(node *sitter.Node) (string, *sitter.Node) {
 	var kind string
 	for i := range int(node.ChildCount()) {
-		c := node.Child(i)
-		switch c.Type() {
+		c := node.Child(uint(i))
+		switch c.Kind() {
 		case "struct":
 			kind = "struct"
 		case "class":
@@ -1467,7 +1482,7 @@ func swiftInsideTypeBody(node *sitter.Node) bool {
 	if p == nil {
 		return false
 	}
-	switch p.Type() {
+	switch p.Kind() {
 	case "class_body", "protocol_body", "enum_class_body":
 		return true
 	}
@@ -1489,8 +1504,8 @@ func swiftPropertyIsLet(node *sitter.Node) bool {
 func swiftSignature(node *sitter.Node, src []byte) string {
 	var openParen, body *sitter.Node
 	for i := range int(node.ChildCount()) {
-		c := node.Child(i)
-		switch c.Type() {
+		c := node.Child(uint(i))
+		switch c.Kind() {
 		case "(":
 			if openParen == nil {
 				openParen = c
@@ -1577,16 +1592,16 @@ func (e *symbolExtractor) extractImportCSharp(nodeType string, node *sitter.Node
 	var target *sitter.Node
 	var aliasCandidate *sitter.Node
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		switch c.Type() {
+		c := node.Child(uint(i))
+		switch c.Kind() {
 		case "qualified_name", "generic_name":
 			target = c
 		case "identifier":
 			// In `using Alias = System.IO.Path;` the first identifier is
 			// followed by `=`; treat it as alias, not the target. In
 			// `using System;` the lone identifier IS the target.
-			next := node.Child(i + 1)
-			if next != nil && next.Type() == "=" {
+			next := node.Child(uint(i + 1))
+			if next != nil && next.Kind() == "=" {
 				aliasCandidate = c
 				continue
 			}
@@ -1600,7 +1615,7 @@ func (e *symbolExtractor) extractImportCSharp(nodeType string, node *sitter.Node
 		}
 		target = aliasCandidate
 	}
-	raw := strings.TrimSpace(target.Content(e.src))
+	raw := strings.TrimSpace(target.Utf8Text(e.src))
 	if raw == "" {
 		return symbols.Import{}, false
 	}
@@ -1608,12 +1623,12 @@ func (e *symbolExtractor) extractImportCSharp(nodeType string, node *sitter.Node
 }
 
 func (e *symbolExtractor) extractRefCSharp(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	switch nodeType {
 	case "invocation_expression":
 		fn := node.ChildByFieldName("function")
 		if fn == nil && node.ChildCount() > 0 {
-			fn = node.Child(0)
+			fn = node.Child(uint(0))
 		}
 		if fn == nil {
 			return symbols.Ref{}, false
@@ -1629,8 +1644,8 @@ func (e *symbolExtractor) extractRefCSharp(nodeType string, node *sitter.Node) (
 		if typeNode == nil {
 			// Fall back: first identifier or qualified_name after `new`.
 			for i := 0; i < int(node.ChildCount()); i++ {
-				c := node.Child(i)
-				if c.Type() == "identifier" || c.Type() == "qualified_name" || c.Type() == "generic_name" {
+				c := node.Child(uint(i))
+				if c.Kind() == "identifier" || c.Kind() == "qualified_name" || c.Kind() == "generic_name" {
 					typeNode = c
 					break
 				}
@@ -1713,19 +1728,19 @@ func (e *symbolExtractor) collectPHPImports(node *sitter.Node) {
 	// Look for a leading namespace_name prefix (only present for grouped form).
 	var groupPrefix string
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		if c.Type() == "namespace_name" {
-			groupPrefix = strings.TrimSpace(c.Content(e.src))
+		c := node.Child(uint(i))
+		if c.Kind() == "namespace_name" {
+			groupPrefix = strings.TrimSpace(c.Utf8Text(e.src))
 			break
 		}
-		if c.Type() == "namespace_use_clause" || c.Type() == "namespace_use_group" {
+		if c.Kind() == "namespace_use_clause" || c.Kind() == "namespace_use_group" {
 			break
 		}
 	}
 
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		switch c.Type() {
+		c := node.Child(uint(i))
+		switch c.Kind() {
 		case "namespace_use_clause":
 			if path := phpUseClausePath(c, e.src); path != "" {
 				e.imports = append(e.imports, symbols.Import{RawPath: path, Language: e.lang})
@@ -1733,8 +1748,8 @@ func (e *symbolExtractor) collectPHPImports(node *sitter.Node) {
 		case "namespace_use_group":
 			// Each child clause within the group resolves as <groupPrefix>\<clause>.
 			for j := 0; j < int(c.ChildCount()); j++ {
-				cc := c.Child(j)
-				if cc.Type() != "namespace_use_clause" && cc.Type() != "namespace_use_group_clause" {
+				cc := c.Child(uint(j))
+				if cc.Kind() != "namespace_use_clause" && cc.Kind() != "namespace_use_group_clause" {
 					continue
 				}
 				leaf := phpUseClausePath(cc, e.src)
@@ -1755,17 +1770,17 @@ func (e *symbolExtractor) collectPHPImports(node *sitter.Node) {
 // namespace_use_group_clause), stripping any `as Alias` suffix.
 func phpUseClausePath(n *sitter.Node, src []byte) string {
 	for i := 0; i < int(n.ChildCount()); i++ {
-		c := n.Child(i)
-		switch c.Type() {
+		c := n.Child(uint(i))
+		switch c.Kind() {
 		case "qualified_name", "namespace_name", "name":
-			return strings.TrimSpace(c.Content(src))
+			return strings.TrimSpace(c.Utf8Text(src))
 		}
 	}
-	return strings.TrimSpace(n.Content(src))
+	return strings.TrimSpace(n.Utf8Text(src))
 }
 
 func (e *symbolExtractor) extractRefPHP(nodeType string, node *sitter.Node) (symbols.Ref, bool) {
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	switch nodeType {
 	case "function_call_expression":
 		fn := node.ChildByFieldName("function")
@@ -1782,7 +1797,7 @@ func (e *symbolExtractor) extractRefPHP(nodeType string, node *sitter.Node) (sym
 		if nameNode == nil {
 			return symbols.Ref{}, false
 		}
-		name := strings.TrimSpace(nameNode.Content(e.src))
+		name := strings.TrimSpace(nameNode.Utf8Text(e.src))
 		if name == "" {
 			return symbols.Ref{}, false
 		}
@@ -1792,8 +1807,8 @@ func (e *symbolExtractor) extractRefPHP(nodeType string, node *sitter.Node) (sym
 		// fully-qualified forms (`new \Fully\Qualified\Name()`) the leading
 		// '\' is a separate anonymous child followed by a qualified_name.
 		for i := 0; i < int(node.ChildCount()); i++ {
-			c := node.Child(i)
-			switch c.Type() {
+			c := node.Child(uint(i))
+			switch c.Kind() {
 			case "name", "qualified_name", "named_type":
 				name := extractCallName(c, e.src, e.lang)
 				// extractCallName only strips `.` separators; PHP uses `\`
@@ -1813,7 +1828,7 @@ func (e *symbolExtractor) extractRefPHP(nodeType string, node *sitter.Node) (sym
 
 // --- Lua ---
 //
-// Grammar refs (tree-sitter-lua, smacker fork):
+// Grammar refs (tree-sitter-lua):
 //   function_statement         → "function Foo() end" / "function M.foo() end" /
 //                                "local function helper() end"
 //     children: optional `local`, function_start, function_name (or identifier),
@@ -1824,16 +1839,26 @@ func (e *symbolExtractor) extractRefPHP(nodeType string, node *sitter.Node) (sym
 //   require("x") / require "x" are function_call forms — handled as imports.
 
 func (e *symbolExtractor) classifyLua(nodeType string, node *sitter.Node) (string, *sitter.Node) {
-	if nodeType != "function_statement" {
+	if nodeType != "function_statement" && nodeType != "function_declaration" {
 		return "", nil
 	}
 	// function_name child for "function X.y()" and "function X()";
 	// identifier child for "local function helper()".
-	if fn := findChildByType(node, "function_name"); fn != nil {
+	if fn := node.ChildByFieldName("name"); fn != nil {
 		// Emit the method name (last identifier in M.greet / M:new).
 		kind := "function"
 		// Treat `M:method` as method.
-		if strings.Contains(fn.Content(e.src), ":") {
+		if fn.Kind() == "method_index_expression" || strings.Contains(fn.Utf8Text(e.src), ":") {
+			kind = "method"
+		}
+		if id := lastIdentifier(fn); id != nil {
+			return kind, id
+		}
+		return kind, fn
+	}
+	if fn := findChildByType(node, "function_name"); fn != nil {
+		kind := "function"
+		if strings.Contains(fn.Utf8Text(e.src), ":") {
 			kind = "method"
 		}
 		if id := lastIdentifier(fn); id != nil {
@@ -1852,8 +1877,8 @@ func (e *symbolExtractor) classifyLua(nodeType string, node *sitter.Node) (strin
 func lastIdentifier(n *sitter.Node) *sitter.Node {
 	var last *sitter.Node
 	for i := 0; i < int(n.ChildCount()); i++ {
-		c := n.Child(i)
-		if c.Type() == "identifier" {
+		c := n.Child(uint(i))
+		if c.Kind() == "identifier" {
 			last = c
 		}
 	}
@@ -1868,18 +1893,18 @@ func (e *symbolExtractor) extractImportLua(nodeType string, node *sitter.Node) (
 	if node.ChildCount() == 0 {
 		return symbols.Import{}, false
 	}
-	callee := node.Child(0)
-	if callee.Type() != "identifier" || strings.TrimSpace(callee.Content(e.src)) != "require" {
+	callee := node.Child(uint(0))
+	if callee.Kind() != "identifier" || strings.TrimSpace(callee.Utf8Text(e.src)) != "require" {
 		return symbols.Import{}, false
 	}
-	// Argument shapes in tree-sitter-lua (smacker fork):
+	// Argument shapes in tree-sitter-lua:
 	//   require("x") → function_arguments wrapping string
 	//   require "x"  → string_argument (direct wrapper with string_start/_content/_end)
 	//   require 'x'  → same as above
 	for i := 1; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		switch c.Type() {
-		case "function_arguments", "string_argument":
+		c := node.Child(uint(i))
+		switch c.Kind() {
+		case "arguments", "function_arguments", "string_argument":
 			if s := findDescendantString(c, e.src); s != "" {
 				return symbols.Import{RawPath: s, Language: e.lang}, true
 			}
@@ -1898,14 +1923,14 @@ func findDescendantString(n *sitter.Node, src []byte) string {
 	if n == nil {
 		return ""
 	}
-	switch n.Type() {
+	switch n.Kind() {
 	case "string_content":
-		return n.Content(src)
+		return n.Utf8Text(src)
 	case "string", "string_argument":
 		return luaStringContent(n, src)
 	}
 	for i := 0; i < int(n.ChildCount()); i++ {
-		if s := findDescendantString(n.Child(i), src); s != "" {
+		if s := findDescendantString(n.Child(uint(i)), src); s != "" {
 			return s
 		}
 	}
@@ -1915,10 +1940,10 @@ func findDescendantString(n *sitter.Node, src []byte) string {
 func luaStringContent(n *sitter.Node, src []byte) string {
 	// tree-sitter-lua: string → string_start "string_content" string_end
 	if c := findChildByType(n, "string_content"); c != nil {
-		return c.Content(src)
+		return c.Utf8Text(src)
 	}
 	// Fallback: strip surrounding quotes.
-	raw := n.Content(src)
+	raw := n.Utf8Text(src)
 	if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
 		return raw[1 : len(raw)-1]
 	}
@@ -1932,12 +1957,12 @@ func (e *symbolExtractor) extractRefLua(nodeType string, node *sitter.Node) (sym
 	if node.ChildCount() == 0 {
 		return symbols.Ref{}, false
 	}
-	first := node.Child(0)
+	first := node.Child(uint(0))
 	// Don't emit a ref for `require(...)` — it's surfaced as an import.
-	if first.Type() == "identifier" && strings.TrimSpace(first.Content(e.src)) == "require" {
+	if first.Kind() == "identifier" && strings.TrimSpace(first.Utf8Text(e.src)) == "require" {
 		return symbols.Ref{}, false
 	}
-	// tree-sitter-lua (smacker fork) flattens `util.debug(…)` and `M:new(…)`
+	// tree-sitter-lua flattens `util.debug(…)` and `M:new(…)`
 	// into a child list:
 	//   function_call
 	//     identifier            ← receiver (for method-like forms)
@@ -1949,13 +1974,13 @@ func (e *symbolExtractor) extractRefLua(nodeType string, node *sitter.Node) (sym
 	// first identifier.
 	var name string
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		if c.Type() == "function_call_paren" || c.Type() == "function_arguments" ||
-			c.Type() == "string_argument" || c.Type() == "string" {
+		c := node.Child(uint(i))
+		if c.Kind() == "arguments" || c.Kind() == "function_call_paren" || c.Kind() == "function_arguments" ||
+			c.Kind() == "string_argument" || c.Kind() == "string" {
 			break
 		}
-		if c.Type() == "identifier" {
-			name = strings.TrimSpace(c.Content(e.src))
+		if c.Kind() == "identifier" {
+			name = strings.TrimSpace(c.Utf8Text(e.src))
 		}
 	}
 	if name == "" {
@@ -1967,7 +1992,7 @@ func (e *symbolExtractor) extractRefLua(nodeType string, node *sitter.Node) (sym
 	}
 	return symbols.Ref{
 		Name:     name,
-		Line:     int(node.StartPoint().Row) + 1,
+		Line:     int(node.StartPosition().Row) + 1,
 		Language: e.lang,
 		Kind:     symbols.RefKindCall,
 	}, true
@@ -2004,22 +2029,22 @@ func (e *symbolExtractor) extractImportBash(nodeType string, node *sitter.Node) 
 	if cn == nil {
 		return symbols.Import{}, false
 	}
-	cmd := strings.TrimSpace(cn.Content(e.src))
+	cmd := strings.TrimSpace(cn.Utf8Text(e.src))
 	if cmd != "source" && cmd != "." {
 		return symbols.Import{}, false
 	}
 	// First `word` after the command_name is the path being sourced.
 	seenCmd := false
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
+		c := node.Child(uint(i))
 		if !seenCmd {
-			if c == cn {
+			if sameNode(c, cn) {
 				seenCmd = true
 			}
 			continue
 		}
-		if c.Type() == "word" || c.Type() == "string" || c.Type() == "raw_string" {
-			raw := strings.TrimSpace(c.Content(e.src))
+		if c.Kind() == "word" || c.Kind() == "string" || c.Kind() == "raw_string" {
+			raw := strings.TrimSpace(c.Utf8Text(e.src))
 			// Strip surrounding quotes if present.
 			if len(raw) >= 2 {
 				if (raw[0] == '"' && raw[len(raw)-1] == '"') ||
@@ -2044,7 +2069,7 @@ func (e *symbolExtractor) extractRefBash(nodeType string, node *sitter.Node) (sy
 	if cn == nil {
 		return symbols.Ref{}, false
 	}
-	name := strings.TrimSpace(cn.Content(e.src))
+	name := strings.TrimSpace(cn.Utf8Text(e.src))
 	if name == "" {
 		return symbols.Ref{}, false
 	}
@@ -2059,7 +2084,7 @@ func (e *symbolExtractor) extractRefBash(nodeType string, node *sitter.Node) (sy
 	}
 	return symbols.Ref{
 		Name:     name,
-		Line:     int(node.StartPoint().Row) + 1,
+		Line:     int(node.StartPosition().Row) + 1,
 		Language: e.lang,
 		Kind:     symbols.RefKindCall,
 	}, true
@@ -2088,18 +2113,18 @@ func (e *symbolExtractor) extractSignature(node *sitter.Node, kind string) strin
 		// Parameters: try field name first, then language-specific node types.
 		params := node.ChildByFieldName("parameters")
 		if params != nil {
-			sig = params.Content(e.src)
+			sig = params.Utf8Text(e.src)
 		} else if fvp := findChildByType(node, "function_value_parameters"); fvp != nil {
 			// Kotlin
-			sig = fvp.Content(e.src)
+			sig = fvp.Utf8Text(e.src)
 		} else if fpl := findChildByType(node, "formal_parameter_list"); fpl != nil {
 			// Dart
-			sig = fpl.Content(e.src)
+			sig = fpl.Utf8Text(e.src)
 		}
 
 		// Return type: append if present. Covers TypeScript, Python, Rust, Go.
 		if ret := node.ChildByFieldName("return_type"); ret != nil {
-			rt := ret.Content(e.src)
+			rt := ret.Utf8Text(e.src)
 			switch e.lang {
 			case "python":
 				sig += " -> " + rt
@@ -2117,13 +2142,13 @@ func (e *symbolExtractor) extractSignature(node *sitter.Node, kind string) strin
 		// TypeScript type_annotation on the node (alternative to return_type field).
 		if sig != "" && e.lang == "typescript" || e.lang == "tsx" || e.lang == "javascript" || e.lang == "jsx" {
 			if ta := findChildByType(node, "type_annotation"); ta != nil && node.ChildByFieldName("return_type") == nil {
-				sig += ta.Content(e.src)
+				sig += ta.Utf8Text(e.src)
 			}
 		}
 		return sig
 
 	case "struct", "class", "interface", "trait", "object", "enum", "mixin", "extension":
-		content := node.Content(e.src)
+		content := node.Utf8Text(e.src)
 		for i, ch := range content {
 			if ch == '\n' || ch == '{' {
 				return content[:i]
@@ -2207,7 +2232,7 @@ func typeNameText(node *sitter.Node, src []byte) string {
 	// Java "scoped_type_identifier", C# "qualified_name", Ruby "scope_resolution",
 	// etc. Tree-sitter grammars expose the final segment as a named field when
 	// available; fall back to the last identifier-like child.
-	switch node.Type() {
+	switch node.Kind() {
 	case "attribute", "nested_identifier", "nested_type_identifier",
 		"scoped_type_identifier", "qualified_name", "qualified_type",
 		"scope_resolution":
@@ -2223,23 +2248,23 @@ func typeNameText(node *sitter.Node, src []byte) string {
 		}
 		// Last identifier-like child.
 		for i := int(node.ChildCount()) - 1; i >= 0; i-- {
-			c := node.Child(i)
-			switch c.Type() {
+			c := node.Child(uint(i))
+			switch c.Kind() {
 			case "type_identifier", "identifier", "constant":
-				return c.Content(src)
+				return c.Utf8Text(src)
 			}
 		}
 	}
 	// Prefer a direct identifier-like child if present.
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		switch c.Type() {
+		c := node.Child(uint(i))
+		switch c.Kind() {
 		case "type_identifier", "identifier":
-			return c.Content(src)
+			return c.Utf8Text(src)
 		}
 	}
 	// Fall back to textual content, trimming generics / qualifiers.
-	text := strings.TrimSpace(node.Content(src))
+	text := strings.TrimSpace(node.Utf8Text(src))
 	if text == "" {
 		return ""
 	}
@@ -2273,8 +2298,8 @@ func (e *symbolExtractor) collectImplementsFromClause(clause *sitter.Node, line 
 	}
 	var out []symbols.Ref
 	for i := 0; i < int(clause.ChildCount()); i++ {
-		c := clause.Child(i)
-		if _, ok := wanted[c.Type()]; !ok {
+		c := clause.Child(uint(i))
+		if _, ok := wanted[c.Kind()]; !ok {
 			continue
 		}
 		if ref, ok := e.implementsRef(c, line); ok {
@@ -2291,25 +2316,25 @@ func (e *symbolExtractor) collectImplementsFromClause(clause *sitter.Node, line 
 // contained type is a user_type.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsSwift(node *sitter.Node) []symbols.Ref {
-	switch node.Type() {
+	switch node.Kind() {
 	case "class_declaration", "protocol_declaration":
 	default:
 		return nil
 	}
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 
 	var out []symbols.Ref
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		switch c.Type() {
+		c := node.Child(uint(i))
+		switch c.Kind() {
 		case "inheritance_specifier":
 			if ref, ok := e.implementsRef(c, line); ok {
 				out = append(out, ref)
 			}
 		case "type_inheritance_clause", "inheritance_clause":
 			for j := 0; j < int(c.ChildCount()); j++ {
-				gc := c.Child(j)
-				if gc.Type() == "inheritance_specifier" {
+				gc := c.Child(uint(j))
+				if gc.Kind() == "inheritance_specifier" {
 					if ref, ok := e.implementsRef(gc, line); ok {
 						out = append(out, ref)
 					}
@@ -2327,11 +2352,11 @@ func (e *symbolExtractor) extractImplementsSwift(node *sitter.Node) []symbols.Re
 // io.Reader and Foo.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsGo(node *sitter.Node) []symbols.Ref {
-	if node.Type() != "type_spec" {
+	if node.Kind() != "type_spec" {
 		return nil
 	}
 	typeNode := node.ChildByFieldName("type")
-	if typeNode == nil || typeNode.Type() != "interface_type" {
+	if typeNode == nil || typeNode.Kind() != "interface_type" {
 		return nil
 	}
 
@@ -2341,9 +2366,9 @@ func (e *symbolExtractor) extractImplementsGo(node *sitter.Node) []symbols.Ref {
 	// (while method specs show up as `method_elem`). Older grammar versions
 	// may expose the identifier directly on interface_type; handle both.
 	emit := func(n *sitter.Node) {
-		switch n.Type() {
+		switch n.Kind() {
 		case "type_identifier":
-			if ref, ok := e.implementsRef(n, int(n.StartPoint().Row)+1); ok {
+			if ref, ok := e.implementsRef(n, int(n.StartPosition().Row)+1); ok {
 				out = append(out, ref)
 			}
 		case "qualified_type":
@@ -2351,17 +2376,17 @@ func (e *symbolExtractor) extractImplementsGo(node *sitter.Node) []symbols.Ref {
 			if nameNode == nil {
 				nameNode = n
 			}
-			if ref, ok := e.implementsRef(nameNode, int(n.StartPoint().Row)+1); ok {
+			if ref, ok := e.implementsRef(nameNode, int(n.StartPosition().Row)+1); ok {
 				out = append(out, ref)
 			}
 		}
 	}
 	for i := 0; i < int(typeNode.ChildCount()); i++ {
-		c := typeNode.Child(i)
-		switch c.Type() {
+		c := typeNode.Child(uint(i))
+		switch c.Kind() {
 		case "type_elem":
 			for j := 0; j < int(c.ChildCount()); j++ {
-				emit(c.Child(j))
+				emit(c.Child(uint(j)))
 			}
 		case "type_identifier", "qualified_type":
 			emit(c)
@@ -2376,12 +2401,12 @@ func (e *symbolExtractor) extractImplementsGo(node *sitter.Node) []symbols.Ref {
 // interface_declaration → extends_interfaces.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsJava(node *sitter.Node) []symbols.Ref {
-	switch node.Type() {
+	switch node.Kind() {
 	case "class_declaration", "interface_declaration":
 	default:
 		return nil
 	}
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	var out []symbols.Ref
 
 	if sc := node.ChildByFieldName("superclass"); sc != nil {
@@ -2393,8 +2418,8 @@ func (e *symbolExtractor) extractImplementsJava(node *sitter.Node) []symbols.Ref
 		}
 	}
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		switch c.Type() {
+		c := node.Child(uint(i))
+		switch c.Kind() {
 		case "super_interfaces", "extends_interfaces":
 			// Contains a type_list of type_identifier / generic_type entries.
 			list := findChildByType(c, "type_list")
@@ -2402,8 +2427,8 @@ func (e *symbolExtractor) extractImplementsJava(node *sitter.Node) []symbols.Ref
 				list = c
 			}
 			for j := 0; j < int(list.ChildCount()); j++ {
-				item := list.Child(j)
-				switch item.Type() {
+				item := list.Child(uint(j))
+				switch item.Kind() {
 				case "type_identifier", "generic_type", "scoped_type_identifier":
 					if ref, ok := e.implementsRef(item, line); ok {
 						out = append(out, ref)
@@ -2421,12 +2446,12 @@ func (e *symbolExtractor) extractImplementsJava(node *sitter.Node) []symbols.Ref
 // whose entries are identifier / qualified_name / generic_name.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsCSharp(node *sitter.Node) []symbols.Ref {
-	switch node.Type() {
+	switch node.Kind() {
 	case "class_declaration", "struct_declaration", "interface_declaration", "record_declaration":
 	default:
 		return nil
 	}
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	base := findChildByType(node, "base_list")
 	if base == nil {
 		return nil
@@ -2441,23 +2466,36 @@ func (e *symbolExtractor) extractImplementsCSharp(node *sitter.Node) []symbols.R
 // user_type (or constructor_invocation → user_type) child.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsKotlin(node *sitter.Node) []symbols.Ref {
-	switch node.Type() {
+	switch node.Kind() {
 	case "class_declaration", "object_declaration":
 	default:
 		return nil
 	}
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	var out []symbols.Ref
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		if c.Type() != "delegation_specifier" {
-			continue
-		}
-		// Find the user_type inside (may be nested under constructor_invocation).
-		if ut := findDescendantByType(c, "user_type"); ut != nil {
-			if ref, ok := e.implementsRef(ut, line); ok {
-				out = append(out, ref)
+		c := node.Child(uint(i))
+		switch c.Kind() {
+		case "delegation_specifier":
+			if ut := findDescendantByType(c, "user_type"); ut != nil {
+				if ref, ok := e.implementsRef(ut, line); ok {
+					out = append(out, ref)
+				}
 			}
+		case "delegation_specifiers":
+			for j := 0; j < int(c.ChildCount()); j++ {
+				spec := c.Child(uint(j))
+				if spec.Kind() != "delegation_specifier" {
+					continue
+				}
+				if ut := findDescendantByType(spec, "user_type"); ut != nil {
+					if ref, ok := e.implementsRef(ut, line); ok {
+						out = append(out, ref)
+					}
+				}
+			}
+		default:
+			continue
 		}
 	}
 	return out
@@ -2468,20 +2506,20 @@ func (e *symbolExtractor) extractImplementsKotlin(node *sitter.Node) []symbols.R
 // class / trait / object definitions with extends_clause + with_clauses.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsScala(node *sitter.Node) []symbols.Ref {
-	switch node.Type() {
+	switch node.Kind() {
 	case "class_definition", "trait_definition", "object_definition":
 	default:
 		return nil
 	}
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	var out []symbols.Ref
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		switch c.Type() {
+		c := node.Child(uint(i))
+		switch c.Kind() {
 		case "extends_clause", "template_body":
 			for j := 0; j < int(c.ChildCount()); j++ {
-				gc := c.Child(j)
-				switch gc.Type() {
+				gc := c.Child(uint(j))
+				switch gc.Kind() {
 				case "type_identifier", "generic_type":
 					if ref, ok := e.implementsRef(gc, line); ok {
 						out = append(out, ref)
@@ -2499,21 +2537,21 @@ func (e *symbolExtractor) extractImplementsScala(node *sitter.Node) []symbols.Re
 // interface_declaration → extends_type_clause.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsTSJS(node *sitter.Node) []symbols.Ref {
-	switch node.Type() {
+	switch node.Kind() {
 	case "class_declaration", "class", "interface_declaration":
 	default:
 		return nil
 	}
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	var out []symbols.Ref
 
 	// Walk any heritage clause children.
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		switch c.Type() {
+		c := node.Child(uint(i))
+		switch c.Kind() {
 		case "class_heritage":
 			for j := 0; j < int(c.ChildCount()); j++ {
-				out = append(out, e.tsjsHeritageEntry(c.Child(j), line)...)
+				out = append(out, e.tsjsHeritageEntry(c.Child(uint(j)), line)...)
 			}
 		case "extends_clause", "implements_clause", "extends_type_clause":
 			out = append(out, e.tsjsHeritageEntry(c, line)...)
@@ -2526,12 +2564,12 @@ func (e *symbolExtractor) tsjsHeritageEntry(node *sitter.Node, line int) []symbo
 	if node == nil {
 		return nil
 	}
-	switch node.Type() {
+	switch node.Kind() {
 	case "extends_clause", "implements_clause", "extends_type_clause":
 		var out []symbols.Ref
 		for i := 0; i < int(node.ChildCount()); i++ {
-			c := node.Child(i)
-			switch c.Type() {
+			c := node.Child(uint(i))
+			switch c.Kind() {
 			case "identifier", "type_identifier", "generic_type",
 				"nested_identifier", "nested_type_identifier":
 				if ref, ok := e.implementsRef(c, line); ok {
@@ -2549,14 +2587,14 @@ func (e *symbolExtractor) tsjsHeritageEntry(node *sitter.Node, line int) []symbo
 // impl Trait for Type { ... } → implements edge from Type to Trait.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsRust(node *sitter.Node) []symbols.Ref {
-	if node.Type() != "impl_item" {
+	if node.Kind() != "impl_item" {
 		return nil
 	}
 	trait := node.ChildByFieldName("trait")
 	if trait == nil {
 		return nil
 	}
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	if ref, ok := e.implementsRef(trait, line); ok {
 		return []symbols.Ref{ref}
 	}
@@ -2568,27 +2606,27 @@ func (e *symbolExtractor) extractImplementsRust(node *sitter.Node) []symbols.Ref
 // class_definition → superclass / interfaces / mixins clauses.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsDart(node *sitter.Node) []symbols.Ref {
-	switch node.Type() {
+	switch node.Kind() {
 	case "class_definition", "mixin_declaration":
 	default:
 		return nil
 	}
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	var out []symbols.Ref
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		switch c.Type() {
+		c := node.Child(uint(i))
+		switch c.Kind() {
 		case "superclass", "interfaces", "mixins":
 			for j := 0; j < int(c.ChildCount()); j++ {
-				gc := c.Child(j)
-				switch gc.Type() {
+				gc := c.Child(uint(j))
+				switch gc.Kind() {
 				case "type_identifier", "type_name":
 					if ref, ok := e.implementsRef(gc, line); ok {
 						out = append(out, ref)
 					}
 				case "type_list":
 					for k := 0; k < int(gc.ChildCount()); k++ {
-						if ref, ok := e.implementsRef(gc.Child(k), line); ok {
+						if ref, ok := e.implementsRef(gc.Child(uint(k)), line); ok {
 							out = append(out, ref)
 						}
 					}
@@ -2605,18 +2643,18 @@ func (e *symbolExtractor) extractImplementsDart(node *sitter.Node) []symbols.Ref
 // Best-effort; structural protocols (PEP 544) are out of scope.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsPython(node *sitter.Node) []symbols.Ref {
-	if node.Type() != "class_definition" {
+	if node.Kind() != "class_definition" {
 		return nil
 	}
 	supers := node.ChildByFieldName("superclasses")
 	if supers == nil {
 		return nil
 	}
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	var out []symbols.Ref
 	for i := 0; i < int(supers.ChildCount()); i++ {
-		c := supers.Child(i)
-		switch c.Type() {
+		c := supers.Child(uint(i))
+		switch c.Kind() {
 		case "identifier", "attribute", "subscript":
 			if ref, ok := e.implementsRef(c, line); ok {
 				out = append(out, ref)
@@ -2631,8 +2669,8 @@ func (e *symbolExtractor) extractImplementsPython(node *sitter.Node) []symbols.R
 // class X < Y → implements Y. Module include/extend also emit implements edges.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsRuby(node *sitter.Node) []symbols.Ref {
-	line := int(node.StartPoint().Row) + 1
-	switch node.Type() {
+	line := int(node.StartPosition().Row) + 1
+	switch node.Kind() {
 	case "class":
 		if sc := node.ChildByFieldName("superclass"); sc != nil {
 			// superclass node wraps the actual name.
@@ -2648,7 +2686,7 @@ func (e *symbolExtractor) extractImplementsRuby(node *sitter.Node) []symbols.Ref
 		if method == nil {
 			return nil
 		}
-		m := method.Content(e.src)
+		m := method.Utf8Text(e.src)
 		if m != "include" && m != "extend" && m != "prepend" {
 			return nil
 		}
@@ -2658,8 +2696,8 @@ func (e *symbolExtractor) extractImplementsRuby(node *sitter.Node) []symbols.Ref
 		}
 		var out []symbols.Ref
 		for i := 0; i < int(args.ChildCount()); i++ {
-			c := args.Child(i)
-			if c.Type() == "constant" || c.Type() == "scope_resolution" {
+			c := args.Child(uint(i))
+			if c.Kind() == "constant" || c.Kind() == "scope_resolution" {
 				if ref, ok := e.implementsRef(c, line); ok {
 					out = append(out, ref)
 				}
@@ -2676,20 +2714,20 @@ func (e *symbolExtractor) extractImplementsRuby(node *sitter.Node) []symbols.Ref
 // interface_declaration → base_clause for extends.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsPHP(node *sitter.Node) []symbols.Ref {
-	switch node.Type() {
+	switch node.Kind() {
 	case "class_declaration", "interface_declaration", "trait_declaration":
 	default:
 		return nil
 	}
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	var out []symbols.Ref
 	for i := 0; i < int(node.ChildCount()); i++ {
-		c := node.Child(i)
-		switch c.Type() {
+		c := node.Child(uint(i))
+		switch c.Kind() {
 		case "base_clause", "class_interface_clause":
 			for j := 0; j < int(c.ChildCount()); j++ {
-				gc := c.Child(j)
-				switch gc.Type() {
+				gc := c.Child(uint(j))
+				switch gc.Kind() {
 				case "name", "qualified_name":
 					if ref, ok := e.implementsRef(gc, line); ok {
 						out = append(out, ref)
@@ -2707,12 +2745,12 @@ func (e *symbolExtractor) extractImplementsPHP(node *sitter.Node) []symbols.Ref 
 // identifier / qualified_identifier / template_type names.
 // -----------------------------------------------------------------------------
 func (e *symbolExtractor) extractImplementsCpp(node *sitter.Node) []symbols.Ref {
-	switch node.Type() {
+	switch node.Kind() {
 	case "class_specifier", "struct_specifier":
 	default:
 		return nil
 	}
-	line := int(node.StartPoint().Row) + 1
+	line := int(node.StartPosition().Row) + 1
 	base := findChildByType(node, "base_class_clause")
 	if base == nil {
 		return nil

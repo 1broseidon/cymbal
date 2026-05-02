@@ -138,6 +138,10 @@ func Indexed() {
 
 func helper() {}
 `)
+	writeFile(t, repo, "service.pb.go", `package main
+
+func GeneratedOnly() {}
+`)
 
 	dbPath := filepath.Join(t.TempDir(), "cymbal.db")
 	cmd := commandWithDB(dbPath)
@@ -157,6 +161,7 @@ func helper() {}
 	}
 	requireOutputContains(t, stderr, "Indexing ")
 	requireOutputContains(t, stderr, "Done in")
+	requireOutputContains(t, stderr, "1 excluded")
 
 	results, err := index.SearchSymbols(dbPath, index.SearchQuery{Text: "Indexed", Exact: true, Limit: 5})
 	if err != nil {
@@ -164,6 +169,13 @@ func helper() {}
 	}
 	if len(results) != 1 || results[0].Name != "Indexed" {
 		t.Fatalf("indexed command did not write expected symbol: %+v", results)
+	}
+	results, err = index.SearchSymbols(dbPath, index.SearchQuery{Text: "GeneratedOnly", Exact: true, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("index command should skip generated files by default: %+v", results)
 	}
 
 	if _, _, err := captureProcessOutput(t, func() error {
@@ -469,6 +481,17 @@ func TestCodecovCLISearchRefsShowContextRunEModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireOutputContains(t, stdout, `"symbol"`)
+
+	contextMultiJSONCmd := newContextTestCommand(dbPath)
+	setTestFlag(t, contextMultiJSONCmd, "json", "true")
+	stdout, _, err = captureProcessOutput(t, func() error {
+		return contextCmd.RunE(contextMultiJSONCmd, []string{"Execute", "helper"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireOutputContains(t, stdout, `"Execute"`)
+	requireOutputContains(t, stdout, `"helper"`)
 }
 
 func TestCodecovCLIOutlineLsInvestigateRunEModes(t *testing.T) {
@@ -484,6 +507,20 @@ func TestCodecovCLIOutlineLsInvestigateRunEModes(t *testing.T) {
 	}
 	requireOutputContains(t, stdout, "Execute")
 
+	outlineMultiNamesCmd := newOutlineTestCommand(dbPath)
+	setTestFlag(t, outlineMultiNamesCmd, "names", "true")
+	stdout, _, err = captureProcessOutput(t, func() error {
+		return outlineCmd.RunE(outlineMultiNamesCmd, []string{
+			filepath.Join(repo, "main.go"),
+			filepath.Join(repo, "lib", "lib.go"),
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireOutputContains(t, stdout, "Execute")
+	requireOutputContains(t, stdout, "Shared")
+
 	outlineJSONCmd := newOutlineTestCommand(dbPath)
 	setTestFlag(t, outlineJSONCmd, "json", "true")
 	setTestFlag(t, outlineJSONCmd, "signatures", "true")
@@ -494,6 +531,21 @@ func TestCodecovCLIOutlineLsInvestigateRunEModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireOutputContains(t, stdout, `"name": "Execute"`)
+
+	outlineMultiJSONCmd := newOutlineTestCommand(dbPath)
+	setTestFlag(t, outlineMultiJSONCmd, "json", "true")
+	stdout, _, err = captureProcessOutput(t, func() error {
+		return outlineCmd.RunE(outlineMultiJSONCmd, []string{
+			filepath.Join(repo, "main.go"),
+			filepath.Join(repo, "lib", "lib.go"),
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireOutputContains(t, stdout, `main.go"`)
+	requireOutputContains(t, stdout, `lib/lib.go"`)
+	requireOutputContains(t, stdout, `"name": "Shared"`)
 
 	emptyFile := filepath.Join(repo, "empty.go")
 	writeFile(t, repo, "empty.go", "package main\n")

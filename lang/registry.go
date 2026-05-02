@@ -1,29 +1,28 @@
 package lang
 
 import (
-	dart "github.com/UserNobody14/tree-sitter-dart/bindings/go"
-	apex "github.com/lynxbat/go-tree-sitter-apex"
-	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/bash"
-	"github.com/smacker/go-tree-sitter/c"
-	"github.com/smacker/go-tree-sitter/cpp"
-	"github.com/smacker/go-tree-sitter/csharp"
-	"github.com/smacker/go-tree-sitter/elixir"
-	"github.com/smacker/go-tree-sitter/golang"
-	"github.com/smacker/go-tree-sitter/hcl"
-	"github.com/smacker/go-tree-sitter/java"
-	"github.com/smacker/go-tree-sitter/javascript"
-	"github.com/smacker/go-tree-sitter/kotlin"
-	"github.com/smacker/go-tree-sitter/lua"
-	"github.com/smacker/go-tree-sitter/php"
-	"github.com/smacker/go-tree-sitter/protobuf"
-	"github.com/smacker/go-tree-sitter/python"
-	"github.com/smacker/go-tree-sitter/ruby"
-	"github.com/smacker/go-tree-sitter/rust"
-	"github.com/smacker/go-tree-sitter/scala"
-	"github.com/smacker/go-tree-sitter/swift"
-	"github.com/smacker/go-tree-sitter/typescript/typescript"
-	"github.com/smacker/go-tree-sitter/yaml"
+	tsdart "github.com/UserNobody14/tree-sitter-dart/bindings/go"
+	tsswift "github.com/alex-pinkus/tree-sitter-swift/bindings/go"
+	tsprotobuf "github.com/coder3101/tree-sitter-proto/bindings/go"
+	tshcl "github.com/tree-sitter-grammars/tree-sitter-hcl/bindings/go"
+	tskotlin "github.com/tree-sitter-grammars/tree-sitter-kotlin/bindings/go"
+	tslua "github.com/tree-sitter-grammars/tree-sitter-lua/bindings/go"
+	tsyaml "github.com/tree-sitter-grammars/tree-sitter-yaml/bindings/go"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	tsbash "github.com/tree-sitter/tree-sitter-bash/bindings/go"
+	tscsharp "github.com/tree-sitter/tree-sitter-c-sharp/bindings/go"
+	tsc "github.com/tree-sitter/tree-sitter-c/bindings/go"
+	tscpp "github.com/tree-sitter/tree-sitter-cpp/bindings/go"
+	tselixir "github.com/tree-sitter/tree-sitter-elixir/bindings/go"
+	tsgo "github.com/tree-sitter/tree-sitter-go/bindings/go"
+	tsjava "github.com/tree-sitter/tree-sitter-java/bindings/go"
+	tsjavascript "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
+	tsphp "github.com/tree-sitter/tree-sitter-php/bindings/go"
+	tspython "github.com/tree-sitter/tree-sitter-python/bindings/go"
+	tsruby "github.com/tree-sitter/tree-sitter-ruby/bindings/go"
+	tsrust "github.com/tree-sitter/tree-sitter-rust/bindings/go"
+	tsscala "github.com/tree-sitter/tree-sitter-scala/bindings/go"
+	tstypescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
 // Default is the global language registry used throughout cymbal.
@@ -35,112 +34,107 @@ var Default = NewRegistry(
 	Language{
 		Name:       "go",
 		Extensions: []string{".go"},
-		TreeSitter: golang.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tsgo.Language()),
 	},
 	Language{
 		Name:       "python",
 		Extensions: []string{".py", ".pyw"},
-		TreeSitter: python.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tspython.Language()),
 	},
 	Language{
 		Name:       "javascript",
 		Extensions: []string{".js", ".jsx", ".mjs", ".cjs"},
-		TreeSitter: javascript.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tsjavascript.Language()),
 	},
 	Language{
 		Name:       "typescript",
 		Extensions: []string{".ts", ".tsx", ".mts", ".cts"},
-		TreeSitter: typescript.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tstypescript.LanguageTypescript()),
 	},
 	Language{
 		Name:       "rust",
 		Extensions: []string{".rs"},
-		TreeSitter: rust.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tsrust.Language()),
 	},
 	Language{
 		Name:       "ruby",
 		Extensions: []string{".rb", ".rake", ".gemspec"},
-		TreeSitter: ruby.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tsruby.Language()),
 	},
 	Language{
 		Name:       "java",
 		Extensions: []string{".java"},
-		TreeSitter: java.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tsjava.Language()),
 	},
 	Language{
 		Name:       "c",
 		Extensions: []string{".c", ".h"},
-		TreeSitter: c.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tsc.Language()),
 	},
 	Language{
 		Name:       "cpp",
 		Extensions: []string{".cpp", ".cc", ".hpp", ".cxx", ".hxx", ".hh"},
-		TreeSitter: cpp.GetLanguage(),
-	},
-	Language{
-		Name:       "apex",
-		Extensions: []string{".cls", ".trigger"},
-		TreeSitter: apex.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tscpp.Language()),
 	},
 	Language{
 		Name:       "csharp",
 		Extensions: []string{".cs"},
-		TreeSitter: csharp.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tscsharp.Language()),
 	},
 	Language{
 		Name:       "dart",
 		Extensions: []string{".dart"},
-		TreeSitter: sitter.NewLanguage(dart.Language()),
+		TreeSitter: sitter.NewLanguage(tsdart.Language()),
 	},
 	Language{
 		Name:       "swift",
 		Extensions: []string{".swift"},
-		TreeSitter: swift.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tsswift.Language()),
 	},
 	Language{
 		Name:       "kotlin",
 		Extensions: []string{".kt", ".kts"},
-		TreeSitter: kotlin.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tskotlin.Language()),
 	},
 	Language{
 		Name:       "lua",
 		Extensions: []string{".lua"},
-		TreeSitter: lua.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tslua.Language()),
 	},
 	Language{
 		Name:       "php",
 		Extensions: []string{".php"},
-		TreeSitter: php.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tsphp.LanguagePHP()),
 	},
 	Language{
 		Name:       "bash",
 		Extensions: []string{".sh", ".bash", ".zsh"},
-		TreeSitter: bash.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tsbash.Language()),
 	},
 	Language{
 		Name:       "scala",
 		Extensions: []string{".scala", ".sc"},
-		TreeSitter: scala.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tsscala.Language()),
 	},
 	Language{
 		Name:       "yaml",
 		Extensions: []string{".yaml", ".yml"},
-		TreeSitter: yaml.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tsyaml.Language()),
 	},
 	Language{
 		Name:       "elixir",
 		Extensions: []string{".ex", ".exs"},
-		TreeSitter: elixir.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tselixir.Language()),
 	},
 	Language{
 		Name:       "hcl",
 		Extensions: []string{".tf", ".hcl", ".tfvars"},
-		TreeSitter: hcl.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tshcl.Language()),
 	},
 	Language{
 		Name:       "protobuf",
 		Extensions: []string{".proto"},
-		TreeSitter: protobuf.GetLanguage(),
+		TreeSitter: sitter.NewLanguage(tsprotobuf.Language()),
 	},
 
 	// ── Recognition-only languages (no tree-sitter grammar) ─────────
@@ -148,6 +142,10 @@ var Default = NewRegistry(
 	// Indexing/parsing code should use lang.Default.Supported to select the
 	// parseable subset and must not assume every known language is indexable.
 
+	Language{
+		Name:       "apex",
+		Extensions: []string{".cls", ".trigger"},
+	},
 	Language{
 		Name:       "zig",
 		Extensions: []string{".zig"},

@@ -24,6 +24,19 @@ Examples:
 		jsonOut := getJSONFlag(cmd)
 		callers, _ := cmd.Flags().GetInt("callers")
 
+		if jsonOut && len(args) > 1 {
+			out := make(map[string]any, len(args))
+			for _, name := range args {
+				result, err := index.SymbolContext(dbPath, name, callers)
+				if err != nil {
+					out[name] = map[string]any{"error": err.Error()}
+					continue
+				}
+				out[name] = result
+			}
+			return writeJSON(out)
+		}
+
 		for i, name := range args {
 			if i > 0 {
 				fmt.Println()

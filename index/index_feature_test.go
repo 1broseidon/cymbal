@@ -209,6 +209,114 @@ func TestFeatureIndexStalePruning(t *testing.T) {
 	}
 }
 
+func TestFeatureIndexGeneratedFilesAreExcludedByDefault(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc Indexed() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "service.pb.go"), []byte("package main\nfunc GeneratedOnly() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := Index(dir, dbPath, Options{Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.FilesIndexed != 1 {
+		t.Fatalf("expected only ordinary source file indexed, got %+v", stats)
+	}
+	if stats.FilesExcluded != 1 || stats.BytesExcluded == 0 {
+		t.Fatalf("expected generated file exclusion to be reported, got %+v", stats)
+	}
+
+	found, err := SearchSymbols(dbPath, SearchQuery{Text: "GeneratedOnly", Exact: true, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 0 {
+		t.Fatalf("generated symbol should not be indexed by default, got %+v", found)
+	}
+
+	includeDB := filepath.Join(t.TempDir(), "include.db")
+	stats, err = Index(dir, includeDB, Options{Workers: 1, IncludeGenerated: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.FilesExcluded != 0 {
+		t.Fatalf("include-generated should disable default generated excludes, got %+v", stats)
+	}
+	found, err = SearchSymbols(includeDB, SearchQuery{Text: "GeneratedOnly", Exact: true, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("expected generated symbol with IncludeGenerated, got %+v", found)
+	}
+}
+
+func TestFeatureIndexCustomExcludesPrunePreviouslyIndexedFiles(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	if err := os.MkdirAll(filepath.Join(dir, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app", "main.go"), []byte("package app\nfunc KeepMe() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app", "private.go"), []byte("package app\nfunc DropMe() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Index(dir, dbPath, Options{Workers: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := SearchSymbols(dbPath, SearchQuery{Text: "DropMe", Exact: true, Limit: 5}); err != nil || len(found) != 1 {
+		t.Fatalf("expected DropMe before exclude, got %+v err=%v", found, err)
+	}
+
+	stats, err := Index(dir, dbPath, Options{Workers: 1, Exclude: []string{"app/private.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.FilesExcluded != 1 || stats.StaleRemoved != 1 {
+		t.Fatalf("expected excluded file to be pruned from existing index, got %+v", stats)
+	}
+	if found, err := SearchSymbols(dbPath, SearchQuery{Text: "DropMe", Exact: true, Limit: 5}); err != nil || len(found) != 0 {
+		t.Fatalf("expected DropMe to be pruned after exclude, got %+v err=%v", found, err)
+	}
+}
+
+func TestFeatureEnsureFreshHonorsStoredIndexExcludes(t *testing.T) {
+	defer CloseAll()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc KeepMe() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "skip.go"), []byte("package main\nfunc DropMe() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Index(dir, dbPath, Options{Workers: 1, Exclude: []string{"skip.go"}}); err != nil {
+		t.Fatal(err)
+	}
+	if refreshed := EnsureFresh(dbPath); refreshed != 0 {
+		t.Fatalf("expected excluded file to stay excluded during EnsureFresh, refreshed=%d", refreshed)
+	}
+
+	found, err := SearchSymbols(dbPath, SearchQuery{Text: "DropMe", Exact: true, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 0 {
+		t.Fatalf("EnsureFresh should not index stored exclude, got %+v", found)
+	}
+}
+
 func TestFeatureIndexPerRepoIsolation(t *testing.T) {
 	dir1 := createTestRepo(t)
 	dir2 := t.TempDir()
