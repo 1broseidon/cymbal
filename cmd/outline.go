@@ -30,7 +30,6 @@ var outlineCmd = &cobra.Command{
 		}
 
 		multi := len(args) > 1
-		anyOK := false
 		for i, target := range args {
 			symbols, err := outlineSymbols(dbPath, target)
 			if err != nil {
@@ -57,10 +56,6 @@ var outlineCmd = &cobra.Command{
 			); err != nil {
 				return err
 			}
-			anyOK = true
-		}
-		if !anyOK {
-			return nil
 		}
 		return nil
 	},

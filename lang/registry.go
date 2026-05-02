@@ -1,8 +1,9 @@
 package lang
 
 import (
-	tsdart "github.com/UserNobody14/tree-sitter-dart/bindings/go"
-	tsswift "github.com/alex-pinkus/tree-sitter-swift/bindings/go"
+	tsdart "github.com/1broseidon/cymbal/internal/tsgrammars/tree-sitter-dart/bindings/go"
+	tselixir "github.com/1broseidon/cymbal/internal/tsgrammars/tree-sitter-elixir/bindings/go"
+	tsswift "github.com/1broseidon/cymbal/internal/tsgrammars/tree-sitter-swift/bindings/go"
 	tsprotobuf "github.com/coder3101/tree-sitter-proto/bindings/go"
 	tshcl "github.com/tree-sitter-grammars/tree-sitter-hcl/bindings/go"
 	tskotlin "github.com/tree-sitter-grammars/tree-sitter-kotlin/bindings/go"
@@ -13,7 +14,6 @@ import (
 	tscsharp "github.com/tree-sitter/tree-sitter-c-sharp/bindings/go"
 	tsc "github.com/tree-sitter/tree-sitter-c/bindings/go"
 	tscpp "github.com/tree-sitter/tree-sitter-cpp/bindings/go"
-	tselixir "github.com/tree-sitter/tree-sitter-elixir/bindings/go"
 	tsgo "github.com/tree-sitter/tree-sitter-go/bindings/go"
 	tsjava "github.com/tree-sitter/tree-sitter-java/bindings/go"
 	tsjavascript "github.com/tree-sitter/tree-sitter-javascript/bindings/go"

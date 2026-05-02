@@ -3,7 +3,7 @@ package tree_sitter_dart_test
 import (
 	"testing"
 
-	tree_sitter_dart "github.com/UserNobody14/tree-sitter-dart/bindings/go"
+	tree_sitter_dart "github.com/1broseidon/cymbal/internal/tsgrammars/tree-sitter-dart/bindings/go"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 

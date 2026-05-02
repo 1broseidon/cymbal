@@ -1,10 +1,6 @@
 package cmd
 
-import (
-	"strings"
-
-	"github.com/1broseidon/cymbal/internal/pathmatch"
-)
+import "github.com/1broseidon/cymbal/internal/pathmatch"
 
 func normalizeRelPath(rel string) string {
 	return pathmatch.Normalize(rel)
@@ -12,14 +8,6 @@ func normalizeRelPath(rel string) string {
 
 func matchAnyPath(rel string, globs []string) bool {
 	return pathmatch.MatchAny(rel, globs)
-}
-
-func hasGlobMeta(glob string) bool {
-	return strings.ContainsAny(glob, "*?[")
-}
-
-func matchPathGlob(glob, rel string) bool {
-	return pathmatch.MatchGlob(glob, rel)
 }
 
 func widenPathFilterLimit(limit int, hasFilters bool) int {

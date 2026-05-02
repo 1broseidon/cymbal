@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -64,6 +65,9 @@ func ParseSource(src []byte, filePath, lang string, tsLang *sitter.Language) (*s
 	}
 
 	extractor.walk(tree.RootNode(), "", 0)
+	if lang == "kotlin" && tree.RootNode().HasError() {
+		extractor.recoverKotlinTopLevelTypes()
+	}
 	return &symbols.ParseResult{
 		Symbols: extractor.symbols,
 		Imports: extractor.imports,
@@ -78,6 +82,214 @@ type symbolExtractor struct {
 	symbols  []symbols.Symbol
 	imports  []symbols.Import
 	refs     []symbols.Ref
+}
+
+var kotlinTopLevelTypeRE = regexp.MustCompile(`^\s*(?:(?:@[^\s(]+(?:\([^)]*\))?)\s+)*(?:(?:public|private|protected|internal|abstract|final|open|sealed|data|value|inline|annotation|enum|fun)\s+)*(interface|object|class)\s+([A-Za-z_][A-Za-z0-9_]*)`)
+
+func (e *symbolExtractor) recoverKotlinTopLevelTypes() {
+	depth := 0
+	for lineIdx, line := range strings.Split(string(e.src), "\n") {
+		lineNo := lineIdx + 1
+		if depth == 0 {
+			e.recoverKotlinTopLevelTypeLine(line, lineNo)
+		}
+		depth += strings.Count(line, "{")
+		depth -= strings.Count(line, "}")
+		if depth < 0 {
+			depth = 0
+		}
+	}
+}
+
+func (e *symbolExtractor) recoverKotlinTopLevelTypeLine(line string, lineNo int) {
+	match := kotlinTopLevelTypeRE.FindStringSubmatchIndex(line)
+	if match == nil {
+		return
+	}
+
+	keyword := line[match[2]:match[3]]
+	name := line[match[4]:match[5]]
+	decl := line[match[0]:match[1]]
+
+	kind := keyword
+	if keyword == "class" && strings.Contains(" "+decl+" ", " enum ") {
+		kind = "enum"
+	}
+	if !e.hasSymbol(name, kind) {
+		signature := strings.TrimSpace(line)
+		if before, _, ok := strings.Cut(signature, "{"); ok {
+			signature = strings.TrimSpace(before)
+		}
+		e.symbols = append(e.symbols, symbols.Symbol{
+			Name:      name,
+			Kind:      kind,
+			File:      e.filePath,
+			StartLine: lineNo,
+			EndLine:   lineNo,
+			StartCol:  leadingWhitespaceLen(line),
+			EndCol:    len(line),
+			Signature: signature,
+			Language:  e.lang,
+		})
+	}
+
+	for _, target := range kotlinFallbackImplementsTargets(line[match[5]:]) {
+		if e.hasImplementsRef(target, lineNo) {
+			continue
+		}
+		e.refs = append(e.refs, symbols.Ref{
+			Name:     target,
+			Line:     lineNo,
+			Language: e.lang,
+			Kind:     symbols.RefKindImplements,
+		})
+	}
+}
+
+func (e *symbolExtractor) hasSymbol(name, kind string) bool {
+	for _, sym := range e.symbols {
+		if sym.Name == name && sym.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *symbolExtractor) hasImplementsRef(name string, line int) bool {
+	for _, ref := range e.refs {
+		if ref.Name == name && ref.Line == line && ref.Kind == symbols.RefKindImplements {
+			return true
+		}
+	}
+	return false
+}
+
+func leadingWhitespaceLen(s string) int {
+	return len(s) - len(strings.TrimLeft(s, " \t"))
+}
+
+func kotlinFallbackImplementsTargets(rest string) []string {
+	colon := kotlinTopLevelColon(rest)
+	if colon < 0 {
+		return nil
+	}
+	clause := rest[colon+1:]
+	if before, _, ok := strings.Cut(clause, "{"); ok {
+		clause = before
+	}
+	if before, _, ok := strings.Cut(clause, " where "); ok {
+		clause = before
+	}
+
+	var targets []string
+	for _, part := range kotlinSplitTopLevelComma(clause) {
+		name := kotlinFallbackSimpleTypeName(part)
+		if name != "" {
+			targets = append(targets, name)
+		}
+	}
+	return targets
+}
+
+func kotlinTopLevelColon(s string) int {
+	parens := 0
+	angles := 0
+	for i, r := range s {
+		switch r {
+		case '{':
+			return -1
+		case '(':
+			if angles == 0 {
+				parens++
+			}
+		case ')':
+			if parens > 0 {
+				parens--
+			}
+		case '<':
+			if parens == 0 {
+				angles++
+			}
+		case '>':
+			if angles > 0 {
+				angles--
+			}
+		case ':':
+			if parens == 0 && angles == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func kotlinSplitTopLevelComma(s string) []string {
+	var parts []string
+	start := 0
+	parens := 0
+	angles := 0
+	for i, r := range s {
+		switch r {
+		case '(':
+			if angles == 0 {
+				parens++
+			}
+		case ')':
+			if parens > 0 {
+				parens--
+			}
+		case '<':
+			if parens == 0 {
+				angles++
+			}
+		case '>':
+			if angles > 0 {
+				angles--
+			}
+		case ',':
+			if parens == 0 && angles == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
+}
+
+func kotlinFallbackSimpleTypeName(part string) string {
+	part = strings.TrimSpace(part)
+	if part == "" {
+		return ""
+	}
+	if before, _, ok := strings.Cut(part, "("); ok {
+		part = before
+	}
+	if before, _, ok := strings.Cut(part, "<"); ok {
+		part = before
+	}
+	part = strings.TrimSpace(part)
+	if idx := strings.LastIndex(part, "."); idx >= 0 {
+		part = part[idx+1:]
+	}
+	for i, r := range part {
+		if i == 0 && kotlinIdentifierStart(r) {
+			continue
+		}
+		if i > 0 && kotlinIdentifierPart(r) {
+			continue
+		}
+		return part[:i]
+	}
+	return part
+}
+
+func kotlinIdentifierStart(r rune) bool {
+	return r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z'
+}
+
+func kotlinIdentifierPart(r rune) bool {
+	return kotlinIdentifierStart(r) || r >= '0' && r <= '9'
 }
 
 func (e *symbolExtractor) walk(node *sitter.Node, parent string, depth int) {
@@ -915,18 +1127,35 @@ func kotlinInsideClassBody(node *sitter.Node) bool {
 	return t == "class_body" || t == "enum_class_body"
 }
 
+func kotlinClassKind(node *sitter.Node, src []byte) string {
+	kind := "class"
+	for i := range int(node.ChildCount()) {
+		child := node.Child(uint(i))
+		switch child.Kind() {
+		case "interface":
+			return "interface"
+		case "modifiers":
+			if kotlinModifiersContain(child, src, "enum") {
+				kind = "enum"
+			}
+		}
+	}
+	return kind
+}
+
+func kotlinModifiersContain(mods *sitter.Node, src []byte, want string) bool {
+	for i := range int(mods.ChildCount()) {
+		if mods.Child(uint(i)).Utf8Text(src) == want {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *symbolExtractor) classifyKotlin(nodeType string, node *sitter.Node) (string, *sitter.Node) {
 	switch nodeType {
 	case "class_declaration":
-		// Distinguish class / interface / enum by leading keyword child.
-		kind := "class"
-		text := strings.TrimSpace(node.Utf8Text(e.src))
-		if strings.HasPrefix(text, "interface ") {
-			kind = "interface"
-		} else if strings.Contains(text, "enum class") {
-			kind = "enum"
-		}
-		return kind, node.ChildByFieldName("name")
+		return kotlinClassKind(node, e.src), node.ChildByFieldName("name")
 	case "object_declaration":
 		return "object", node.ChildByFieldName("name")
 	case "companion_object":
