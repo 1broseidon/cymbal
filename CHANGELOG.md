@@ -2,7 +2,7 @@
 
 All notable changes to cymbal are documented here.
 
-## [Unreleased]
+## [0.12.2] - 2026-05-02
 
 ### Added
 
@@ -13,6 +13,8 @@ All notable changes to cymbal are documented here.
 ### Fixed
 
 - **Elixir and Scala parser coverage exposed real extraction gaps** — Elixir function/macro symbols now use the callable name instead of including arguments, and Scala now has dedicated symbol/ref extraction for classes, traits, objects, methods, fields, and call expressions.
+- **Agent reminder text leads with the Grep/Glob/Read tools Claude Code actually routes through** — the `cymbal hook remind` trailing line previously compared cymbal to `rg`/`grep`/`find`/`fd`, but Claude Code's system prompt directs the model away from shelling out to those tools. The reminder now leads with Grep/Glob/Read and keeps shell tools in parens for shell-style agents (Cursor, Aider, Cline, etc.). Fixes [#46](https://github.com/1broseidon/cymbal/issues/46).
+- **`cymbal` no longer dumps full Usage text on every RunE error** — Cobra's default behavior printed the entire help block whenever a command returned an error (e.g. `cymbal search` with no matches), drowning the real error and confusing AI agents that re-read it as a hint to retry. The root command now sets `SilenceUsage`, so the error message itself still prints but the Usage/Flags block stays out of the way. `--help` and unknown-flag paths continue to show Usage as expected.
 
 ## [0.12.1] - 2026-04-23
 
