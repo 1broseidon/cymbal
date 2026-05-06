@@ -216,8 +216,8 @@ func TestPhase3IndexFacadeQueries(t *testing.T) {
 	if len(byName) != 1 {
 		t.Fatalf("SymbolsByName Execute = %+v", byName)
 	}
-	if root := RepoRootFromDB(dbPath); root != repo {
-		t.Fatalf("RepoRootFromDB() = %q, want %q", root, repo)
+	if root := RepoRootFromDB(dbPath); root != wantRepo {
+		t.Fatalf("RepoRootFromDB() = %q, want %q", root, wantRepo)
 	}
 }
 
