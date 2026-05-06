@@ -1,11 +1,11 @@
 BINARY := cymbal
 CGO_CFLAGS := -DSQLITE_ENABLE_FTS5
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.12.1)
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 VERSION_PKG := github.com/1broseidon/cymbal/cmd
-LDFLAGS := -X $(VERSION_PKG).version=v0.12.1 -X $(VERSION_PKG).commit=$(COMMIT) -X $(VERSION_PKG).date=$(DATE)
+LDFLAGS := -X $(VERSION_PKG).version=$(VERSION) -X $(VERSION_PKG).commit=$(COMMIT) -X $(VERSION_PKG).date=$(DATE)
 MODULE := $(shell go list -m)
 COVER_PACKAGES := $(shell git ls-files '*.go' | while read file; do dirname "$$file"; done | sort -u | grep -v '^bench$$' | while read dir; do go list "./$$dir"; done | grep -v '^$(MODULE)$$')
 

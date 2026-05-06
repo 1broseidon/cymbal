@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -97,19 +98,20 @@ func runPhase3Git(t *testing.T, repo string, args ...string) {
 
 func TestPhase3IndexFacadeQueries(t *testing.T) {
 	repo, dbPath := newPhase3Repo(t)
+	wantRepo := canonicalPath(repo)
 
 	stats, err := RepoStats(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Path != repo || stats.SymbolCount == 0 || stats.Languages["go"] == 0 {
+	if stats.Path != wantRepo || stats.SymbolCount == 0 || stats.Languages["go"] == 0 {
 		t.Fatalf("unexpected repo stats: %+v", stats)
 	}
 	structure, err := Structure(dbPath, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if structure.RepoRoot != repo || structure.Symbols == 0 {
+	if structure.RepoRoot != wantRepo || structure.Symbols == 0 {
 		t.Fatalf("Structure() = %+v", structure)
 	}
 
@@ -117,7 +119,7 @@ func TestPhase3IndexFacadeQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(repos) != 1 || repos[0].Path != repo {
+	if len(repos) != 1 || repos[0].Path != wantRepo {
 		t.Fatalf("ListRepos() = %+v, want repo %s", repos, repo)
 	}
 
@@ -214,8 +216,59 @@ func TestPhase3IndexFacadeQueries(t *testing.T) {
 	if len(byName) != 1 {
 		t.Fatalf("SymbolsByName Execute = %+v", byName)
 	}
-	if root := RepoRootFromDB(dbPath); root != repo {
-		t.Fatalf("RepoRootFromDB() = %q, want %q", root, repo)
+	if root := RepoRootFromDB(dbPath); root != wantRepo {
+		t.Fatalf("RepoRootFromDB() = %q, want %q", root, wantRepo)
+	}
+}
+
+func TestFeatureIndexCanonicalizesSymlinkedRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation is not consistently available on Windows")
+	}
+	t.Setenv("CYMBAL_CACHE_DIR", t.TempDir())
+
+	base := t.TempDir()
+	realRepo := filepath.Join(base, "real")
+	if err := os.Mkdir(realRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkRepo := filepath.Join(base, "link")
+	if err := os.Symlink(realRepo, linkRepo); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	writePhase3File(t, realRepo, "main.go", "package main\n\nfunc ThroughSymlink() {}\n")
+
+	dbPath := filepath.Join(t.TempDir(), "canonical.db")
+	if _, err := Index(linkRepo, dbPath, Options{Workers: 1, Force: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	outlineFromReal, err := FileOutline(dbPath, filepath.Join(realRepo, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !symbolsContain(outlineFromReal, "ThroughSymlink") {
+		t.Fatalf("outline via real path missing symbol: %+v", outlineFromReal)
+	}
+	outlineFromLink, err := FileOutline(dbPath, filepath.Join(linkRepo, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !symbolsContain(outlineFromLink, "ThroughSymlink") {
+		t.Fatalf("outline via symlink path missing symbol: %+v", outlineFromLink)
+	}
+
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	repoRoot, err := store.GetMeta("repo_root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repoRoot != canonicalPath(realRepo) {
+		t.Fatalf("repo_root = %q, want canonical %q", repoRoot, canonicalPath(realRepo))
 	}
 }
 
@@ -271,6 +324,8 @@ func TestPhase3ContextInvestigateAndGraphFacades(t *testing.T) {
 }
 
 func TestPhase3EnsureFreshAutoDetectsGitRepo(t *testing.T) {
+	defer CloseAll()
+
 	repo := t.TempDir()
 	t.Setenv("CYMBAL_CACHE_DIR", t.TempDir())
 	writePhase3File(t, repo, "go.mod", "module example.com/autofresh\n\ngo 1.25\n")
@@ -324,6 +379,8 @@ func TestPhase3RankSymbolsOrdersExactAndExportedMatches(t *testing.T) {
 }
 
 func TestPhase3StoreInsertFileAllAndHashHelpers(t *testing.T) {
+	defer CloseAll()
+
 	store, dbPath := newTestStore(t)
 	filePath := filepath.Join(t.TempDir(), "manual.go")
 	content := []byte("package manual\n\nfunc Manual() { helper() }\n")

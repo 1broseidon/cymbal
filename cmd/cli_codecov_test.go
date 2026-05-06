@@ -589,7 +589,7 @@ func TestCodecovCLIOutlineLsInvestigateRunEModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireOutputContains(t, stdout, repo)
+	requireOutputContains(t, stdout, canonicalTestPath(repo))
 
 	lsReposJSONCmd := newLsTestCommand(dbPath)
 	setTestFlag(t, lsReposJSONCmd, "repos", "true")
