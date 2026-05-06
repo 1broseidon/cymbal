@@ -2,11 +2,12 @@
 
 All notable changes to cymbal are documented here.
 
-## [0.12.4] - 2026-05-06
+## [0.12.5] - 2026-05-06
 
 ### Fixed
 
 - **Release tests now pass on macOS arm64 runners** — repository and file paths are canonicalized at the index, outline, and diff boundaries, so macOS `/var/...` and `/private/var/...` temp-directory spellings use the same per-repo database and git-relative diff paths.
+- **Release tests now pass on Windows runners** — CLI path assertions now compare canonical repository roots, and facade tests close cached SQLite stores before temporary database cleanup so Windows can remove test DB files cleanly.
 - **OpenCode project-scope tests no longer depend on the developer's user config** — tests now isolate config roots, and the managed plugin symlink guard still rejects symlinks inside the OpenCode plugin path without rejecting normal platform-level aliases like macOS `/var -> /private/var`.
 - **Makefile builds now embed the requested version** — `make build VERSION=vX.Y.Z` now passes `$(VERSION)` through ldflags instead of the stale hardcoded `v0.12.1` value.
 

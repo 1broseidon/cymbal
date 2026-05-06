@@ -324,6 +324,8 @@ func TestPhase3ContextInvestigateAndGraphFacades(t *testing.T) {
 }
 
 func TestPhase3EnsureFreshAutoDetectsGitRepo(t *testing.T) {
+	defer CloseAll()
+
 	repo := t.TempDir()
 	t.Setenv("CYMBAL_CACHE_DIR", t.TempDir())
 	writePhase3File(t, repo, "go.mod", "module example.com/autofresh\n\ngo 1.25\n")
@@ -377,6 +379,8 @@ func TestPhase3RankSymbolsOrdersExactAndExportedMatches(t *testing.T) {
 }
 
 func TestPhase3StoreInsertFileAllAndHashHelpers(t *testing.T) {
+	defer CloseAll()
+
 	store, dbPath := newTestStore(t)
 	filePath := filepath.Join(t.TempDir(), "manual.go")
 	content := []byte("package manual\n\nfunc Manual() { helper() }\n")

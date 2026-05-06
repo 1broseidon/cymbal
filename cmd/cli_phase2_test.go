@@ -79,6 +79,18 @@ class UserService implements Service {
 	return repo, dbPath
 }
 
+func canonicalTestPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err == nil {
+		path = abs
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved
+	}
+	return filepath.Clean(path)
+}
+
 func writeFile(t *testing.T, root, rel, content string) {
 	t.Helper()
 	path := filepath.Join(root, rel)
@@ -273,7 +285,7 @@ func TestPhase2CommandOutputsForRepoViews(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		requireOutputContains(t, stderr, repo)
+		requireOutputContains(t, stderr, canonicalTestPath(repo))
 		requireOutputContains(t, stdout, "Most referenced symbols:")
 
 		stdout, _, err = captureProcessOutput(t, func() error {
