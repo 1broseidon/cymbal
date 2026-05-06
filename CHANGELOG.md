@@ -2,7 +2,7 @@
 
 All notable changes to cymbal are documented here.
 
-## [0.13.0] - 2026-05-06
+## [0.13.1] - 2026-05-06
 
 ### Changed
 
@@ -13,6 +13,7 @@ All notable changes to cymbal are documented here.
 ### Fixed
 
 - **Generated tree-sitter parser tables are skipped during indexing** — the walker ignores vendored `internal/tsgrammars/**/src/parser*.c` files so initial indexing does not spend time parsing generated grammar sources.
+- **Release tests now pass on Windows for the official tree-sitter release line** — CLI JSON path assertions use platform-native separators, and index facade tests close cached SQLite stores before temporary database cleanup.
 
 ## [0.12.5] - 2026-05-06
 

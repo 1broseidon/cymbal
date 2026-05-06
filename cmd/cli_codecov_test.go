@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -544,7 +545,7 @@ func TestCodecovCLIOutlineLsInvestigateRunEModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireOutputContains(t, stdout, `main.go"`)
-	requireOutputContains(t, stdout, `lib/lib.go"`)
+	requireOutputContains(t, stdout, strconv.Quote(filepath.Join("lib", "lib.go")))
 	requireOutputContains(t, stdout, `"name": "Shared"`)
 
 	emptyFile := filepath.Join(repo, "empty.go")

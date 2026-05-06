@@ -210,6 +210,8 @@ func TestFeatureIndexStalePruning(t *testing.T) {
 }
 
 func TestFeatureIndexGeneratedFilesAreExcludedByDefault(t *testing.T) {
+	defer CloseAll()
+
 	dir := t.TempDir()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
@@ -257,6 +259,8 @@ func TestFeatureIndexGeneratedFilesAreExcludedByDefault(t *testing.T) {
 }
 
 func TestFeatureIndexCustomExcludesPrunePreviouslyIndexedFiles(t *testing.T) {
+	defer CloseAll()
+
 	dir := t.TempDir()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
