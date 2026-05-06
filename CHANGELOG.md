@@ -2,6 +2,18 @@
 
 All notable changes to cymbal are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- **Migrated from smacker to the official tree-sitter Go bindings** — cymbal now uses `github.com/tree-sitter/go-tree-sitter` and official grammar modules, with parser/tree lifetimes closed explicitly and symbol extraction updated for the official node and position APIs. ([#50](https://github.com/1broseidon/cymbal/pull/50))
+- **Vendored grammar packaging is now safe for Go library consumers** — Dart, Elixir, and Swift grammars live under `internal/tsgrammars` with upstream metadata, avoiding non-propagating `replace` directives for downstream `go get` users.
+- **Path filtering is shared across commands and indexing** — include/exclude matching now uses `internal/pathmatch` with normalized slash paths and recursive `**` glob support.
+
+### Fixed
+
+- **Generated tree-sitter parser tables are skipped during indexing** — the walker ignores vendored `internal/tsgrammars/**/src/parser*.c` files so initial indexing does not spend time parsing generated grammar sources.
+
 ## [0.12.5] - 2026-05-06
 
 ### Fixed
