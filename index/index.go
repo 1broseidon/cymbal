@@ -89,6 +89,7 @@ func RepoDBPath(repoRoot string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	repoRoot = canonicalPath(repoRoot)
 	h := sha256.Sum256([]byte(repoRoot))
 	hash := hex.EncodeToString(h[:8]) // 16 hex chars
 	return filepath.Join(base, "repos", hash, "index.db"), nil
@@ -117,6 +118,18 @@ func FindGitRoot(dir string) (string, error) {
 		d = parent
 	}
 	return "", fmt.Errorf("no git repository found from %s", dir)
+}
+
+func canonicalPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err == nil {
+		path = abs
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved
+	}
+	return filepath.Clean(path)
 }
 
 // parseResult holds the output of a parse worker.
@@ -194,6 +207,7 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
+	root = canonicalPath(root)
 
 	if dbPath == "" {
 		var err error
@@ -406,11 +420,7 @@ func autoDetectRoot() string {
 	if err != nil {
 		return ""
 	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return ""
-	}
-	return abs
+	return canonicalPath(root)
 }
 
 // startProgress launches a goroutine that prints indexing progress to stderr.
@@ -514,6 +524,7 @@ func FileOutline(dbPath, filePath string) ([]SymbolResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	filePath = canonicalPath(filePath)
 	return store.FileSymbols(filePath)
 }
 

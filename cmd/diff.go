@@ -85,7 +85,9 @@ func runDiff(dbPath, name, base string, stat, jsonOut bool) error {
 	}
 
 	// Compute relative path from repo root.
-	relPath, err := filepath.Rel(repoRoot, sym.File)
+	repoRoot = canonicalExistingPath(repoRoot)
+	symFile := canonicalExistingPath(sym.File)
+	relPath, err := filepath.Rel(repoRoot, symFile)
 	if err != nil {
 		return fmt.Errorf("computing relative path: %w", err)
 	}
@@ -177,6 +179,18 @@ func gitRepoRoot(dir string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func canonicalExistingPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err == nil {
+		path = abs
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved
+	}
+	return filepath.Clean(path)
 }
 
 // filterDiffHunks filters unified diff output to only hunks whose new-file

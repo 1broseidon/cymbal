@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -643,6 +644,45 @@ func TestOpenCodeInstallUserScopeWritesManagedPlugin(t *testing.T) {
 	}
 }
 
+func TestOpenCodeInstallAllowsSymlinkedAncestorOutsideConfigRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation is not consistently available on Windows")
+	}
+	home := t.TempDir()
+	base := t.TempDir()
+	realRoot := filepath.Join(base, "real")
+	if err := os.Mkdir(realRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkRoot := filepath.Join(base, "link")
+	if err := os.Symlink(realRoot, linkRoot); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	configRoot := filepath.Join(linkRoot, "config")
+	if err := os.Mkdir(configRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("APPDATA", configRoot)
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _, err := adapter.install("user", false)
+	if err != nil {
+		t.Fatalf("install failed through symlinked ancestor outside config root: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("expected managed plugin file at %s: %v", target, err)
+	}
+}
+
 func TestOpenCodeInstallDryRunDoesNotWrite(t *testing.T) {
 	dir := t.TempDir()
 	withTestWorkingDir(t, dir)
@@ -915,6 +955,9 @@ func TestOpenCodeInstallRefusesWhenOtherScopeAlreadyHasManagedPlugin(t *testing.
 
 func withTestWorkingDir(t *testing.T, dir string) {
 	t.Helper()
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("APPDATA", configRoot)
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
