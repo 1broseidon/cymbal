@@ -336,6 +336,147 @@ func TestFeatureWalkerWithLangFilter(t *testing.T) {
 	}
 }
 
+func TestFeatureWalkerDefaultExcludesGeneratedFiles(t *testing.T) {
+	dir := t.TempDir()
+	paths := map[string]string{
+		"app/main.go": "package app\nfunc Main() {}\n",
+		"src/parser.c": `
+void ordinary_parser(void) {}
+`,
+		"internal/tsgrammars/tree-sitter-swift/src/parser.c": `
+void tree_sitter_swift(void) {}
+`,
+		"internal/tsgrammars/tree-sitter-swift/src/parser_abi14.c": `
+void tree_sitter_swift_abi14(void) {}
+`,
+		"pkg/service.pb.go":            "package pkg\nfunc ProtoGenerated() {}\n",
+		"pkg/zz_generated.deepcopy.go": "package pkg\nfunc DeepCopyGenerated() {}\n",
+		"web/app.min.js":               "function minified(){}",
+		"generated/out.go":             "package generated\nfunc GeneratedDir() {}\n",
+	}
+	for rel, content := range paths {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files, stats, err := WalkWithOptions(dir, 2, lang.Default.Supported, WalkOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := make(map[string]bool, len(files))
+	for _, f := range files {
+		got[f.RelPath] = true
+	}
+	for _, want := range []string{"app/main.go", "src/parser.c"} {
+		if !got[filepath.FromSlash(want)] {
+			t.Fatalf("expected %s to be walked; got=%v", want, got)
+		}
+	}
+	for _, skip := range []string{
+		"internal/tsgrammars/tree-sitter-swift/src/parser.c",
+		"internal/tsgrammars/tree-sitter-swift/src/parser_abi14.c",
+		"pkg/service.pb.go",
+		"pkg/zz_generated.deepcopy.go",
+		"web/app.min.js",
+		"generated/out.go",
+	} {
+		if got[filepath.FromSlash(skip)] {
+			t.Fatalf("expected generated file %s to be excluded; got=%v", skip, got)
+		}
+	}
+	if stats.FilesExcluded != 6 {
+		t.Fatalf("expected 6 generated files excluded, got %+v", stats)
+	}
+	if stats.BytesExcluded == 0 {
+		t.Fatalf("expected excluded byte count, got %+v", stats)
+	}
+}
+
+func TestFeatureWalkerIncludeGeneratedAndCustomExcludes(t *testing.T) {
+	dir := t.TempDir()
+	paths := map[string]string{
+		"app/main.go":       "package app\nfunc Main() {}\n",
+		"app/private.go":    "package app\nfunc Private() {}\n",
+		"pkg/service.pb.go": "package pkg\nfunc ProtoGenerated() {}\n",
+	}
+	for rel, content := range paths {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files, stats, err := WalkWithOptions(dir, 2, lang.Default.Supported, WalkOptions{
+		IncludeGenerated: true,
+		Exclude:          []string{"app/private.go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := make(map[string]bool, len(files))
+	for _, f := range files {
+		got[f.RelPath] = true
+	}
+	for _, want := range []string{"app/main.go", "pkg/service.pb.go"} {
+		if !got[filepath.FromSlash(want)] {
+			t.Fatalf("expected %s to be walked; got=%v", want, got)
+		}
+	}
+	if got[filepath.FromSlash("app/private.go")] {
+		t.Fatalf("expected custom exclude to skip private file; got=%v", got)
+	}
+	if stats.FilesExcluded != 1 {
+		t.Fatalf("expected only custom exclude to be counted, got %+v", stats)
+	}
+}
+
+func TestFeatureWalkerSkipsLargeFilesByDefault(t *testing.T) {
+	dir := t.TempDir()
+	large := bytes.Repeat([]byte("const value = 1;\n"), int(defaultMaxSourceFileBytes/16)+1024)
+	paths := map[string][]byte{
+		"app.ts":      []byte("export const app = 1;\n"),
+		"tooLarge.ts": large,
+	}
+	for rel, content := range paths {
+		full := filepath.Join(dir, rel)
+		if err := os.WriteFile(full, content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files, stats, err := WalkWithOptions(dir, 2, lang.Default.Supported, WalkOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].RelPath != "app.ts" {
+		t.Fatalf("expected only app.ts by default, got %+v", files)
+	}
+	if stats.FilesExcluded != 1 || stats.BytesExcluded == 0 {
+		t.Fatalf("expected large file exclusion, got %+v", stats)
+	}
+
+	files, stats, err = WalkWithOptions(dir, 2, lang.Default.Supported, WalkOptions{IncludeLargeFiles: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected large file when IncludeLargeFiles is true, got %+v stats=%+v", files, stats)
+	}
+	if stats.FilesExcluded != 0 {
+		t.Fatalf("expected no exclusions with IncludeLargeFiles, got %+v", stats)
+	}
+}
+
 func TestFeatureWalkerFileEntryFields(t *testing.T) {
 	dir := t.TempDir()
 	content := "package main\nfunc main() {}\n"

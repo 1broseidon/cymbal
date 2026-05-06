@@ -893,6 +893,34 @@ val GLOBAL = 42
 	}
 }
 
+func TestFeatureKotlinSingleLineTypeBodies(t *testing.T) {
+	src := []byte(`interface Greeter { fun greet(): String }
+class ConsoleGreeter : Greeter { override fun greet(): String = "hi" }
+class PrefixGreeter(private val prefix: String) : Greeter { override fun greet(): String = prefix }
+`)
+	result, err := ParseSource(src, "single.kt", "kotlin", lang.Default.TreeSitter("kotlin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if findSymbolKind(result.Symbols, "Greeter", "interface") == nil {
+		t.Fatal("expected single-line Kotlin interface")
+	}
+	if findSymbolKind(result.Symbols, "ConsoleGreeter", "class") == nil {
+		t.Fatal("expected single-line Kotlin class")
+	}
+	if findSymbolKind(result.Symbols, "PrefixGreeter", "class") == nil {
+		t.Fatal("expected single-line Kotlin class with constructor")
+	}
+	targets := implementsTargets(result.Refs)
+	if !hasTarget(targets, "Greeter") {
+		t.Fatalf("expected Kotlin implements edge to Greeter; got %v", targets)
+	}
+	if hasTarget(targets, "String") {
+		t.Fatalf("constructor parameter type should not be an implements edge; got %v", targets)
+	}
+}
+
 // --- Dart Language Feature Tests ---
 
 func TestFeatureDartSymbols(t *testing.T) {

@@ -1,0 +1,10 @@
+Source repository: github.com/elixir-lang/tree-sitter-elixir
+Source module path: github.com/tree-sitter/tree-sitter-elixir
+Source version: v0.3.5
+
+Vendored for cymbal's importable-library support. The upstream repository moved
+to github.com/elixir-lang/tree-sitter-elixir, but its Go module still declares
+github.com/tree-sitter/tree-sitter-elixir, and the old GitHub repo no longer
+resolves for downstream consumers. This copy is imported through
+github.com/1broseidon/cymbal/internal/tsgrammars so users do not need local
+replace directives.

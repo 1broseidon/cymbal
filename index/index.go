@@ -6,11 +6,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,20 +26,25 @@ import (
 
 // Options controls indexing behavior.
 type Options struct {
-	Workers int
-	Force   bool
+	Workers           int
+	Force             bool
+	Exclude           []string
+	IncludeGenerated  bool
+	IncludeLargeFiles bool
 }
 
 // Stats reports indexing results.
 type Stats struct {
-	FilesIndexed int
-	FilesSkipped int // unchanged (mtime match)
-	FilesUnsup   int // unsupported language
-	ParseErrors  int // parser.ParseFile failures
-	WriteErrors  int // DB write failures
-	SymbolsFound int
-	StaleRemoved int
-	Errors       int // total errors (ParseErrors + WriteErrors)
+	FilesIndexed  int
+	FilesSkipped  int // unchanged (mtime match)
+	FilesUnsup    int // unsupported language
+	FilesExcluded int // path/default exclude rules
+	BytesExcluded int64
+	ParseErrors   int // parser.ParseFile failures
+	WriteErrors   int // DB write failures
+	SymbolsFound  int
+	StaleRemoved  int
+	Errors        int // total errors (ParseErrors + WriteErrors)
 }
 
 // SearchQuery defines a search request.
@@ -227,8 +234,15 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 	if err := store.SetMeta("repo_root", root); err != nil {
 		return nil, fmt.Errorf("setting repo metadata: %w", err)
 	}
+	if err := storeIndexOptions(store, opts); err != nil {
+		return nil, fmt.Errorf("setting index metadata: %w", err)
+	}
 
-	files, err := walker.Walk(root, workers, lang.Default.Supported)
+	files, walkStats, err := walker.WalkWithOptions(root, workers, lang.Default.Supported, walker.WalkOptions{
+		Exclude:           opts.Exclude,
+		IncludeGenerated:  opts.IncludeGenerated,
+		IncludeLargeFiles: opts.IncludeLargeFiles,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("walking directory: %w", err)
 	}
@@ -356,14 +370,16 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 	pe := int(parseErrs.Load())
 	we := int(writeErrs.Load())
 	stats := &Stats{
-		FilesIndexed: int(indexed.Load()),
-		FilesSkipped: int(unchanged.Load()),
-		FilesUnsup:   int(unsup.Load()),
-		ParseErrors:  pe,
-		WriteErrors:  we,
-		SymbolsFound: int(found.Load()),
-		StaleRemoved: staleRemoved,
-		Errors:       pe + we,
+		FilesIndexed:  int(indexed.Load()),
+		FilesSkipped:  int(unchanged.Load()),
+		FilesUnsup:    int(unsup.Load()),
+		FilesExcluded: walkStats.FilesExcluded,
+		BytesExcluded: walkStats.BytesExcluded,
+		ParseErrors:   pe,
+		WriteErrors:   we,
+		SymbolsFound:  int(found.Load()),
+		StaleRemoved:  staleRemoved,
+		Errors:        pe + we,
 	}
 
 	return stats, nil
@@ -394,6 +410,7 @@ func EnsureFresh(dbPath string) int {
 	}
 
 	repoRoot, err := store.GetMeta("repo_root")
+	opts := loadIndexOptions(store)
 	store.Close()
 	if err != nil || repoRoot == "" {
 		repoRoot = autoDetectRoot()
@@ -403,11 +420,45 @@ func EnsureFresh(dbPath string) int {
 		fmt.Fprintf(os.Stderr, "Building index for %s ...\n", repoRoot)
 	}
 
-	stats, err := Index(repoRoot, dbPath, Options{})
+	stats, err := Index(repoRoot, dbPath, opts)
 	if err != nil {
 		return 0
 	}
 	return stats.FilesIndexed + stats.StaleRemoved
+}
+
+const (
+	metaIndexExclude           = "index_exclude"
+	metaIndexIncludeGenerated  = "index_include_generated"
+	metaIndexIncludeLargeFiles = "index_include_large_files"
+)
+
+func storeIndexOptions(store *Store, opts Options) error {
+	exclude, err := json.Marshal(opts.Exclude)
+	if err != nil {
+		return err
+	}
+	if err := store.SetMeta(metaIndexExclude, string(exclude)); err != nil {
+		return err
+	}
+	if err := store.SetMeta(metaIndexIncludeGenerated, strconv.FormatBool(opts.IncludeGenerated)); err != nil {
+		return err
+	}
+	return store.SetMeta(metaIndexIncludeLargeFiles, strconv.FormatBool(opts.IncludeLargeFiles))
+}
+
+func loadIndexOptions(store *Store) Options {
+	var opts Options
+	if raw, err := store.GetMeta(metaIndexExclude); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &opts.Exclude)
+	}
+	if raw, err := store.GetMeta(metaIndexIncludeGenerated); err == nil && raw != "" {
+		opts.IncludeGenerated, _ = strconv.ParseBool(raw)
+	}
+	if raw, err := store.GetMeta(metaIndexIncludeLargeFiles); err == nil && raw != "" {
+		opts.IncludeLargeFiles, _ = strconv.ParseBool(raw)
+	}
+	return opts
 }
 
 // autoDetectRoot resolves the git root from cwd for auto-indexing.

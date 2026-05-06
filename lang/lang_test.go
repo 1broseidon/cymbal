@@ -122,14 +122,14 @@ func TestForFileSpecialFilenames(t *testing.T) {
 
 func TestSupported(t *testing.T) {
 	// Languages with tree-sitter grammars
-	for _, name := range []string{"go", "python", "javascript", "typescript", "rust", "ruby", "java", "c", "cpp", "apex", "csharp", "dart", "swift", "kotlin", "lua", "php", "bash", "scala", "yaml", "elixir", "hcl", "protobuf"} {
+	for _, name := range []string{"go", "python", "javascript", "typescript", "rust", "ruby", "java", "c", "cpp", "csharp", "dart", "swift", "kotlin", "lua", "php", "bash", "scala", "yaml", "elixir", "hcl", "protobuf"} {
 		if !Default.Supported(name) {
 			t.Errorf("Supported(%q) = false, want true", name)
 		}
 	}
 
 	// Recognition-only languages should NOT be "supported" (no parser)
-	for _, name := range []string{"zig", "toml", "json", "markdown", "sql", "erlang", "haskell", "ocaml", "r", "perl", "vue", "svelte", "make", "dockerfile", "groovy", "cmake"} {
+	for _, name := range []string{"apex", "zig", "toml", "json", "markdown", "sql", "erlang", "haskell", "ocaml", "r", "perl", "vue", "svelte", "make", "dockerfile", "groovy", "cmake"} {
 		if Default.Supported(name) {
 			t.Errorf("Supported(%q) = true, want false (no tree-sitter grammar)", name)
 		}

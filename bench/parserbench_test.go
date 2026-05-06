@@ -7,19 +7,19 @@ import (
 	"testing"
 	"time"
 
-	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/golang"
-	"github.com/smacker/go-tree-sitter/python"
-	"github.com/smacker/go-tree-sitter/typescript/typescript"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	tsgo "github.com/tree-sitter/tree-sitter-go/bindings/go"
+	tspython "github.com/tree-sitter/tree-sitter-python/bindings/go"
+	tstypescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
 // This file measures tree-sitter parser init cost vs parse cost.
 // Run: CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go test -v -run=TestParserCost ./bench/
 
 var langs = map[string]*sitter.Language{
-	"go":         golang.GetLanguage(),
-	"python":     python.GetLanguage(),
-	"typescript": typescript.GetLanguage(),
+	"go":         sitter.NewLanguage(tsgo.Language()),
+	"python":     sitter.NewLanguage(tspython.Language()),
+	"typescript": sitter.NewLanguage(tstypescript.LanguageTypescript()),
 }
 
 // collectFiles walks a directory and returns paths matching the given extension.
@@ -80,10 +80,16 @@ func TestParserCost(t *testing.T) {
 
 			t0 := time.Now()
 			p := sitter.NewParser()
-			p.SetLanguage(lang)
+			if err := p.SetLanguage(lang); err != nil {
+				p.Close()
+				t.Fatalf("SetLanguage(%s): %v", tt.lang, err)
+			}
 			initDone := time.Now()
 
-			p.Parse(nil, src)
+			tree := p.Parse(src, nil)
+			if tree != nil {
+				tree.Close()
+			}
 			parseDone := time.Now()
 
 			totalInit += initDone.Sub(t0)
@@ -94,16 +100,20 @@ func TestParserCost(t *testing.T) {
 
 		// --- Measure: reuse one parser (pooled behavior) ---
 		poolParser := sitter.NewParser()
-		poolParser.SetLanguage(lang)
+		defer poolParser.Close()
+		if err := poolParser.SetLanguage(lang); err != nil {
+			t.Fatalf("SetLanguage(%s): %v", tt.lang, err)
+		}
 		var totalPoolParse time.Duration
 
 		for _, src := range sources {
 			t0 := time.Now()
-			poolParser.Parse(nil, src)
+			tree := poolParser.Parse(src, nil)
+			if tree != nil {
+				tree.Close()
+			}
 			totalPoolParse += time.Since(t0)
 		}
-		poolParser.Close()
-
 		// --- Report ---
 		n := len(sources)
 		fmt.Printf("\n=== %s (%d files) ===\n", tt.name, n)

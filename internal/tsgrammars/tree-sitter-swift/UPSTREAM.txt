@@ -1,0 +1,8 @@
+Source module: github.com/alex-pinkus/tree-sitter-swift
+Source version: v0.0.0-20260428021725-c354345348cf
+Source commit: c354345348cf
+
+Vendored for cymbal's official github.com/tree-sitter/go-tree-sitter migration.
+This copy is imported through github.com/1broseidon/cymbal/internal/tsgrammars
+so downstream Go consumers do not need local replace directives.
+Only src/parser.c and src/scanner.c are compiled by bindings/go/binding.go.

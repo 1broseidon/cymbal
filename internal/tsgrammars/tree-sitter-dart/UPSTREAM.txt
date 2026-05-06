@@ -1,0 +1,7 @@
+Source module: github.com/UserNobody14/tree-sitter-dart
+Source version: v0.0.0-20240901045915-8197a3123420
+Source commit: 8197a3123420
+
+Vendored for cymbal's official github.com/tree-sitter/go-tree-sitter migration.
+This copy is imported through github.com/1broseidon/cymbal/internal/tsgrammars
+so downstream Go consumers do not need local replace directives.

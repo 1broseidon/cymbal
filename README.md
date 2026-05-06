@@ -163,7 +163,7 @@ cymbal search PatchMulti MultiEdit EditTool PatchTool
 cymbal search "TODO" --text
 cymbal search --text 'os\.WriteFile\(' tools/file.go tools/patch.go
 cymbal show handleAuth
-cymbal outline internal/auth/handler.go
+cymbal outline internal/auth/handler.go internal/auth/service.go
 cymbal refs handleAuth
 cymbal importers internal/auth
 cymbal context handleAuth
@@ -256,6 +256,12 @@ Each repo gets its own database under the OS cache directory:
 - Windows: `%LOCALAPPDATA%\cymbal\repos\<hash>\index.db`
 
 Override with `--db <path>` or `CYMBAL_DB` when needed.
+
+Cymbal skips common generated and unusually large source files during indexing,
+including tree-sitter parser tables, protobuf outputs, minified JavaScript, and
+`generated/` / `__generated__/` subtrees. Use
+`cymbal index --include-generated`, `--include-large-files`, or repeatable
+`--exclude <glob>` flags when a repo needs different behavior.
 
 ## Benchmarks
 
@@ -367,7 +373,6 @@ Cymbal currently parses and indexes:
 - C / C++ (`.c`, `.h`, `.cpp`, `.cc`, `.hpp`, `.cxx`, `.hxx`, `.hh`)
 - C#
 - Java
-- Apex
 - Ruby (`.rb`, `.rake`, `.gemspec`)
 - Swift
 - Kotlin (`.kt`, `.kts`)
@@ -383,7 +388,7 @@ Cymbal currently parses and indexes:
 
 Cymbal also recognizes additional file types for classification and CLI path
 heuristics even when they are not parseable/indexable, including
-`Dockerfile`, `Makefile`, `Jenkinsfile`, `CMakeLists.txt`, JSON, TOML,
+`Dockerfile`, `Makefile`, `Jenkinsfile`, `CMakeLists.txt`, Apex, JSON, TOML,
 Markdown, SQL, Vue, Svelte, Zig, Erlang, Haskell, OCaml, R, and Perl.
 
 Adding a language requires a tree-sitter grammar plus symbol / import / ref

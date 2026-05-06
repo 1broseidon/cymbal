@@ -41,7 +41,10 @@ cymbal index [path] [flags]
 
 | Flag | Description |
 |------|-------------|
+| `--exclude <glob>` | Exclude files whose path matches this glob during indexing (repeatable) |
 | `-f, --force` | Force re-index all files |
+| `--include-generated` | Index generated files that cymbal skips by default |
+| `--include-large-files` | Index large source files that cymbal skips by default |
 | `-w, --workers <n>` | Number of parallel workers (0 = NumCPU) |
 
 ```sh
@@ -50,6 +53,9 @@ cymbal index .
 
 # Force re-index with 8 workers
 cymbal index . --force --workers 8
+
+# Skip an additional generated subtree
+cymbal index . --exclude 'src/generated/**'
 ```
 
 ---
@@ -103,7 +109,7 @@ cymbal ls --repos
 Show symbols defined in a file.
 
 ```sh
-cymbal outline <file> [flags]
+cymbal outline <file> [file2 ...] [flags]
 ```
 
 | Flag | Description |
@@ -113,6 +119,7 @@ cymbal outline <file> [flags]
 ```sh
 cymbal outline internal/auth/handler.go
 cymbal outline internal/auth/handler.go --signatures
+cymbal outline internal/auth/handler.go internal/auth/service.go --names
 ```
 
 ---

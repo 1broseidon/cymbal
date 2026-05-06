@@ -63,9 +63,12 @@ stats, err := index.Index("/path/to/repo", "", index.Options{})
 - `dbPath` — path to the SQLite database. Pass `""` to auto-compute from the repo root (stored under the OS cache directory)
 - `opts.Workers` — number of parallel parse workers. `0` defaults to `runtime.NumCPU()`
 - `opts.Force` — if `true`, re-index all files regardless of mtime
+- `opts.Exclude` — repeatable repo-relative path patterns to skip while indexing
+- `opts.IncludeGenerated` — if `true`, disables default generated-file skips
+- `opts.IncludeLargeFiles` — if `true`, disables default large-source-file skips
 
 **What it does:**
-1. Walks the directory tree, skipping dot-dirs, `node_modules`, `vendor`, etc.
+1. Walks the directory tree, skipping dot-dirs, `node_modules`, `vendor`, generated/large files, and any configured excludes
 2. Compares each file's mtime+size against the stored index — skips unchanged files
 3. Parses changed files with tree-sitter, extracting symbols, imports, and references
 4. Writes results to SQLite in batched transactions
@@ -329,7 +332,6 @@ Parseable/indexed languages:
 - C / C++
 - C#
 - Java
-- Apex
 - Ruby (`.rb`, `.rake`, `.gemspec`)
 - Swift
 - Kotlin (`.kt`, `.kts`)
@@ -343,7 +345,7 @@ Parseable/indexed languages:
 - Protobuf
 - Dart
 
-Recognized but not parseable/indexable examples: `Dockerfile`, `Makefile`, `Jenkinsfile`, `CMakeLists.txt`, JSON, TOML, Markdown, SQL, Vue, Svelte, Zig, Erlang, Haskell, OCaml, R, and Perl.
+Recognized but not parseable/indexable examples: `Dockerfile`, `Makefile`, `Jenkinsfile`, `CMakeLists.txt`, Apex, JSON, TOML, Markdown, SQL, Vue, Svelte, Zig, Erlang, Haskell, OCaml, R, and Perl.
 
 ---
 
