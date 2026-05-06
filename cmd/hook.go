@@ -1007,10 +1007,10 @@ func ensureSafeManagedTarget(path string) error {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("refusing to write inside symlinked OpenCode plugin directory %s", dir)
 		}
-		next := filepath.Dir(dir)
-		if next == dir {
-			break
-		}
+		// Stop at the first existing, non-symlink ancestor. This still catches
+		// symlinks inside the managed plugin path, while allowing platform-level
+		// aliases such as macOS /var -> /private/var.
+		return nil
 	}
 	return nil
 }
