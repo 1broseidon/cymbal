@@ -161,7 +161,7 @@ All notable changes to cymbal are documented here.
   - `cymbal hook nudge` reads a would-be shell command (from argv or a Claude Code-style JSON payload on stdin) and, if it looks like a code search on source-like input, emits a short suggestion for the cymbal equivalent. Never blocks. Output formats: `claude-code` (default JSON for `PreToolUse`), `text` (stderr), `json` (generic). Detection is deliberately narrow: `rg`/`grep`/`egrep`/`fgrep`/`ack`/`ag`/`find -name`/`fd`, skipping short queries, heavy regexes, and non-source globs to avoid false-positive nagging.
   - `cymbal hook remind` prints a tone-calibrated reminder block an agent can inject at session start or on demand. Formats: `text`, `json`, `claude-code`.
   - `cymbal hook install claude-code` / `uninstall claude-code` — one-liner installer for Claude Code. Merges `PreToolUse` (matcher=Bash) + `UserPromptSubmit` entries into `~/.claude/settings.json` with `--scope user|project` and `--dry-run`. Idempotent, marker-tagged, preserves unrelated user config.
-  - For other agents (Cursor, Windsurf, aider, Cline, Continue, Zed, Codex/OpenAI Agents SDK, generic shell), see [`docs/AGENT_HOOKS.md`](docs/AGENT_HOOKS.md) — the two subcommands are the whole surface and each integration is one or two lines of rules-file or config-file glue.
+  - For other agents (Cursor, Windsurf, aider, Cline, Continue, Zed, Codex/OpenAI Agents SDK, generic shell), see [`docs/AGENT_HOOKS.md`](https://github.com/1broseidon/cymbal/blob/main/docs/AGENT_HOOKS.md) — the two subcommands are the whole surface and each integration is one or two lines of rules-file or config-file glue.
 
 ### Changed
 
