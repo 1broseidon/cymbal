@@ -215,9 +215,13 @@ What it does:
 - The plugin soft-nudges bash `rg` / `grep` / `find` / `fd`-style commands
   back toward cymbal-first navigation before the shell runs them on
   non-Windows shells
+- When an update is available, the plugin shows a **native OS notification**
+  (macOS Notification Center, Linux `notify-send`, or Windows system tray)
+  so users see it regardless of whether they're in TUI or Desktop mode
 - Update guidance stays fresh automatically, but **cymbal still never
   self-updates by default** — it only surfaces the explicit update command to
   run
+- Set `CYMBAL_NO_UPDATE_NOTIFIER=1` to disable all update notifications
 
 Examples:
 

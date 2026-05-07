@@ -30,6 +30,9 @@ import (
 //   cymbal hook remind   print a short system block an agent can inject at
 //                        session start or on reminders.
 //
+//   cymbal hook notify   emit a structured update notification payload for
+//                        agent plugins that want to surface update notices.
+//
 // The nudge/remind surface is agent-agnostic. For the most popular agent we
 // also ship a one-liner installer:
 //
@@ -43,11 +46,11 @@ import (
 
 var hookCmd = &cobra.Command{
 	Use:   "hook",
-	Short: "Agent-integration hooks (nudge, remind, install)",
+	Short: "Agent-integration hooks (nudge, remind, notify, install)",
 	Long: `Hooks that keep coding agents using cymbal instead of sliding back to
 raw grep/find as context grows. See https://github.com/1broseidon/cymbal/issues/23.
 
-The three primitive subcommands are agent-agnostic. Use 'hook install <agent>'
+The agent-agnostic subcommands are nudge, remind, and notify. Use 'hook install <agent>'
 to wire them into your agent's native hook points.`,
 }
 
@@ -107,6 +110,27 @@ Update checks:
 	},
 }
 
+var hookNotifyCmd = &cobra.Command{
+	Use:   "notify [--format=json|text] [--update=cache|if-stale]",
+	Short: "Emit a structured update notification payload for agent plugins",
+	Long: `Emit a structured update notification payload when cymbal has an
+available update and the notification throttle allows it.
+
+Formats:
+  --format=json         (default) structured payload for agent plugins
+  --format=text         plain text notice; empty output when no notice is due
+
+Update checks:
+  --update=cache        (default) use cached update status only
+  --update=if-stale     refresh update status with a bounded live check only
+                        when the cache is stale or missing`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		format, _ := cmd.Flags().GetString("format")
+		updateMode, _ := cmd.Flags().GetString("update")
+		return emitHookNotify(cmd.OutOrStdout(), format, updateMode)
+	},
+}
+
 var hookInstallCmd = &cobra.Command{
 	Use:   "install <agent>",
 	Short: "Install cymbal hooks into the given agent (claude-code, opencode)",
@@ -141,6 +165,8 @@ func init() {
 	hookNudgeCmd.Flags().String("format", "claude-code", "output format: claude-code, text, json")
 	hookRemindCmd.Flags().String("format", "text", "output format: text, json, claude-code")
 	hookRemindCmd.Flags().String("update", "cache", "update check mode: cache, if-stale")
+	hookNotifyCmd.Flags().String("format", "json", "output format: json, text")
+	hookNotifyCmd.Flags().String("update", "cache", "update check mode: cache, if-stale")
 	hookInstallCmd.Flags().String("scope", "user", "install scope: user (default) or project")
 	hookInstallCmd.Flags().Bool("dry-run", false, "show intended changes without writing")
 	hookUninstallCmd.Flags().String("scope", "user", "uninstall scope: user (default) or project")
@@ -148,6 +174,7 @@ func init() {
 
 	hookCmd.AddCommand(hookNudgeCmd)
 	hookCmd.AddCommand(hookRemindCmd)
+	hookCmd.AddCommand(hookNotifyCmd)
 	hookCmd.AddCommand(hookInstallCmd)
 	hookCmd.AddCommand(hookUninstallCmd)
 	rootCmd.AddCommand(hookCmd)
@@ -492,7 +519,12 @@ const (
 	remindUpdateTimeout = 800 * time.Millisecond
 )
 
-var reminderUpdateStatus = updatecheck.GetStatus
+var (
+	reminderUpdateStatus   = updatecheck.GetStatus
+	hookNotifyStatus       = updatecheck.GetStatus
+	hookNotifyShouldNotify = updatecheck.ShouldNotify
+	hookNotifyMarkNotified = updatecheck.MarkNotified
+)
 
 func emitRemind(w io.Writer, format string) error {
 	return emitRemindWithUpdate(w, format, remindUpdateCache)
@@ -535,6 +567,67 @@ func emitRemindWithUpdate(w io.Writer, format, updateMode string) error {
 	default:
 		return fmt.Errorf("unknown --format %q (want: text, json, claude-code)", format)
 	}
+}
+
+type hookNotifyPayload struct {
+	Notify        bool   `json:"notify"`
+	LatestVersion string `json:"latestVersion,omitempty"`
+	Title         string `json:"title,omitempty"`
+	Body          string `json:"body,omitempty"`
+	Command       string `json:"command,omitempty"`
+	ReleaseURL    string `json:"releaseURL,omitempty"`
+}
+
+func emitHookNotify(w io.Writer, format, updateMode string) error {
+	allowNetwork, timeout, err := reminderUpdateOptions(updateMode)
+	if err != nil {
+		return err
+	}
+	status, _ := hookNotifyStatus(context.Background(), updatecheck.Options{
+		CurrentVersion: currentVersion(),
+		AllowNetwork:   allowNetwork,
+		Timeout:        timeout,
+	})
+	shouldNotify := hookNotifyShouldNotify(status)
+	if !shouldNotify {
+		switch format {
+		case "", "json":
+			enc := json.NewEncoder(w)
+			enc.SetIndent("", "  ")
+			return enc.Encode(hookNotifyPayload{Notify: false})
+		case "text":
+			return nil
+		default:
+			return fmt.Errorf("unknown --format %q (want: json, text)", format)
+		}
+	}
+	payload := hookNotifyPayload{
+		Notify:        true,
+		LatestVersion: status.LatestVersion,
+		Title:         fmt.Sprintf("cymbal %s is available", status.LatestVersion),
+		Body:          fmt.Sprintf("Update: %s", status.Command),
+		Command:       status.Command,
+		ReleaseURL:    status.ReleaseURL,
+	}
+	var writeErr error
+	switch format {
+	case "", "json":
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		writeErr = enc.Encode(payload)
+	case "text":
+		_, writeErr = fmt.Fprintln(w, payload.Title)
+		if writeErr == nil {
+			_, writeErr = fmt.Fprintln(w, payload.Body)
+		}
+	default:
+		return fmt.Errorf("unknown --format %q (want: json, text)", format)
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	_ = hookNotifyMarkNotified(status)
+	return nil
 }
 
 func reminderUpdateOptions(mode string) (bool, time.Duration, error) {
