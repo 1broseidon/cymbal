@@ -2,6 +2,13 @@
 
 All notable changes to cymbal are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **OpenCode plugins now surface update notices through native OS notifications** — when a newer cymbal version is available, the OpenCode plugin shows a platform-native notification (macOS Notification Center via `osascript`, Linux via `notify-send`, Windows via PowerShell) so users see updates regardless of TUI or Desktop mode. Respects `CYMBAL_NO_UPDATE_NOTIFIER` and cymbal's per-version notification throttle. ([#23](https://github.com/1broseidon/cymbal/issues/23))
+- **New `cymbal hook notify` command** — emits a structured JSON payload with update availability, version, and install command for agent plugins that want to surface update notices outside hidden system context. Supports `--format=json|text` and `--update=cache|if-stale`.
+
 ## [0.13.1] - 2026-05-06
 
 ### Changed

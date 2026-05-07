@@ -302,6 +302,26 @@ cymbal hook remind [flags]
 - `--update=if-stale` performs a bounded live update check only when cache is stale or missing.
 - Reminder output can surface update guidance, but cymbal still never self-updates by default.
 
+### `cymbal hook notify`
+
+Emit a structured update notification payload for agent plugins that want to
+surface update notices outside hidden system context.
+
+```sh
+cymbal hook notify [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--format <fmt>` | `json` (default) or `text` |
+| `--update <mode>` | `cache` (default) or `if-stale` |
+
+- Returns `{"notify": true, ...}` with version and command when an update is available and the notification throttle allows it.
+- Returns `{"notify": false}` when no update is available or the user was already notified recently.
+- `text` format prints a plain notice; empty output when no notice is due.
+- Respects `CYMBAL_NO_UPDATE_NOTIFIER`.
+- Uses cymbal's per-version notification throttle (24h TTL).
+
 ### `cymbal hook nudge`
 
 Inspect a would-be shell command and, if it looks like code navigation through

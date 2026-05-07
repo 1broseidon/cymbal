@@ -319,9 +319,11 @@ cymbal hook install opencode
 This installs a cymbal-managed OpenCode plugin under the documented plugin
 directory for the chosen scope. The plugin refreshes session guidance via
 `cymbal hook remind --update=if-stale` and soft-nudges bash grep/find/fd usage
-back toward cymbal-first navigation on non-Windows shells. Reminder/update guidance stays fresh
-without editing `AGENTS.md`. Cymbal still never self-updates by default; it
-only tells the agent or user which explicit update command to run.
+back toward cymbal-first navigation on non-Windows shells. When an update is
+available, the plugin also shows a native OS notification so users see it in
+both TUI and Desktop mode. Reminder/update guidance stays fresh without editing
+`AGENTS.md`. Cymbal still never self-updates by default; it only tells the
+agent or user which explicit update command to run.
 
 Claude Code also has a one-line installer:
 
