@@ -394,6 +394,140 @@ func TestEmitRemindSkipsUpdateWhenNotifierDisabled(t *testing.T) {
 	}
 }
 
+func TestEmitHookNotifyJSONIncludesPayload(t *testing.T) {
+	oldStatus, oldShouldNotify, oldMarkNotified := hookNotifyStatus, hookNotifyShouldNotify, hookNotifyMarkNotified
+	defer func() {
+		hookNotifyStatus = oldStatus
+		hookNotifyShouldNotify = oldShouldNotify
+		hookNotifyMarkNotified = oldMarkNotified
+	}()
+
+	markCalled := false
+	hookNotifyStatus = func(ctx context.Context, opts updatecheck.Options) (updatecheck.Status, error) {
+		return updatecheck.Status{
+			Available:     true,
+			LatestVersion: "v0.13.0",
+			Command:       "brew upgrade 1broseidon/tap/cymbal",
+			ReleaseURL:    "https://github.com/1broseidon/cymbal/releases/latest",
+		}, nil
+	}
+	hookNotifyShouldNotify = func(status updatecheck.Status) bool { return true }
+	hookNotifyMarkNotified = func(status updatecheck.Status) error {
+		markCalled = true
+		return nil
+	}
+
+	var buf bytes.Buffer
+	if err := emitHookNotify(&buf, "json", "cache"); err != nil {
+		t.Fatal(err)
+	}
+	if !markCalled {
+		t.Fatal("expected notification mark to be recorded")
+	}
+	var out hookNotifyPayload
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("json output must be valid: %v\n%s", err, buf.String())
+	}
+	if !out.Notify || out.LatestVersion != "v0.13.0" || out.Title != "cymbal v0.13.0 is available" {
+		t.Fatalf("unexpected payload: %+v", out)
+	}
+	if out.Body != "Update: brew upgrade 1broseidon/tap/cymbal" {
+		t.Fatalf("unexpected body: %+v", out)
+	}
+	if out.Command != "brew upgrade 1broseidon/tap/cymbal" || out.ReleaseURL != "https://github.com/1broseidon/cymbal/releases/latest" {
+		t.Fatalf("unexpected command metadata: %+v", out)
+	}
+}
+
+func TestEmitHookNotifyJSONFalseWhenThrottled(t *testing.T) {
+	oldStatus, oldShouldNotify, oldMarkNotified := hookNotifyStatus, hookNotifyShouldNotify, hookNotifyMarkNotified
+	defer func() {
+		hookNotifyStatus = oldStatus
+		hookNotifyShouldNotify = oldShouldNotify
+		hookNotifyMarkNotified = oldMarkNotified
+	}()
+
+	markCalled := false
+	hookNotifyStatus = func(ctx context.Context, opts updatecheck.Options) (updatecheck.Status, error) {
+		return updatecheck.Status{Available: true, LatestVersion: "v0.13.0"}, nil
+	}
+	hookNotifyShouldNotify = func(status updatecheck.Status) bool { return false }
+	hookNotifyMarkNotified = func(status updatecheck.Status) error {
+		markCalled = true
+		return nil
+	}
+
+	var buf bytes.Buffer
+	if err := emitHookNotify(&buf, "json", "cache"); err != nil {
+		t.Fatal(err)
+	}
+	if markCalled {
+		t.Fatal("mark should not be called when throttled")
+	}
+	var out hookNotifyPayload
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("json output must be valid: %v\n%s", err, buf.String())
+	}
+	if out.Notify {
+		t.Fatalf("expected notify=false when throttled, got %+v", out)
+	}
+}
+
+func TestEmitHookNotifyTextEmptyWhenNoUpdate(t *testing.T) {
+	oldStatus, oldShouldNotify, oldMarkNotified := hookNotifyStatus, hookNotifyShouldNotify, hookNotifyMarkNotified
+	defer func() {
+		hookNotifyStatus = oldStatus
+		hookNotifyShouldNotify = oldShouldNotify
+		hookNotifyMarkNotified = oldMarkNotified
+	}()
+
+	hookNotifyStatus = func(ctx context.Context, opts updatecheck.Options) (updatecheck.Status, error) {
+		return updatecheck.Status{Available: false}, nil
+	}
+	hookNotifyShouldNotify = func(status updatecheck.Status) bool { return false }
+	hookNotifyMarkNotified = func(status updatecheck.Status) error {
+		t.Fatal("mark should not be called when no update is available")
+		return nil
+	}
+
+	var buf bytes.Buffer
+	if err := emitHookNotify(&buf, "text", "cache"); err != nil {
+		t.Fatal(err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected empty text output, got %q", buf.String())
+	}
+}
+
+func TestEmitHookNotifyHonorsNotifierOptOut(t *testing.T) {
+	oldStatus, oldMarkNotified := hookNotifyStatus, hookNotifyMarkNotified
+	defer func() {
+		hookNotifyStatus = oldStatus
+		hookNotifyMarkNotified = oldMarkNotified
+	}()
+
+	t.Setenv("CYMBAL_NO_UPDATE_NOTIFIER", "1")
+	hookNotifyStatus = func(ctx context.Context, opts updatecheck.Options) (updatecheck.Status, error) {
+		return updatecheck.Status{Available: true, LatestVersion: "v0.13.0"}, nil
+	}
+	hookNotifyMarkNotified = func(status updatecheck.Status) error {
+		t.Fatal("mark should not be called when notifier is disabled")
+		return nil
+	}
+
+	var buf bytes.Buffer
+	if err := emitHookNotify(&buf, "json", "if-stale"); err != nil {
+		t.Fatal(err)
+	}
+	var out hookNotifyPayload
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("json output must be valid: %v\n%s", err, buf.String())
+	}
+	if out.Notify {
+		t.Fatalf("expected notify=false when notifier disabled, got %+v", out)
+	}
+}
+
 // ── claude-code install / uninstall round-trip ──
 
 func TestClaudeCodeInstallIsIdempotent(t *testing.T) {
