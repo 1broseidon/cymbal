@@ -616,8 +616,10 @@ func emitHookNotify(w io.Writer, format, updateMode string) error {
 		enc.SetIndent("", "  ")
 		writeErr = enc.Encode(payload)
 	case "text":
-		fmt.Fprintln(w, payload.Title)
-		fmt.Fprintln(w, payload.Body)
+		_, writeErr = fmt.Fprintln(w, payload.Title)
+		if writeErr == nil {
+			_, writeErr = fmt.Fprintln(w, payload.Body)
+		}
 	default:
 		return fmt.Errorf("unknown --format %q (want: json, text)", format)
 	}

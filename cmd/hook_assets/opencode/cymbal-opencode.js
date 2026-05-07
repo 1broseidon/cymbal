@@ -116,15 +116,25 @@ export async function showNativeNotification(notice) {
   }
 }
 
-export async function notifyUpdateFromReminder(text) {
+export async function notifyUpdateFromCymbal($) {
   if (updateNotifierDisabled()) return
 
-  const notice = parseUpdateNotice(text)
-  if (!notice) return
-  if (notifiedUpdateVersions.has(notice.version)) return
+  try {
+    const raw = await $`cymbal hook notify --format=json --update=cache`.quiet().nothrow().text()
+    const payload = JSON.parse(raw.trim() || "{}")
+    if (!payload.notify || !payload.latestVersion) return
+    if (notifiedUpdateVersions.has(payload.latestVersion)) return
 
-  notifiedUpdateVersions.add(notice.version)
-  await showNativeNotification(notice)
+    notifiedUpdateVersions.add(payload.latestVersion)
+    await showNativeNotification({
+      version: payload.latestVersion,
+      title: payload.title,
+      body: payload.body,
+      command: payload.command,
+    })
+  } catch (error) {
+    void error
+  }
 }
 
 export default async ({ $ }) => ({
@@ -132,10 +142,8 @@ export default async ({ $ }) => ({
     try {
       const reminder = await $`cymbal hook remind --format=text --update=if-stale`.text()
       const text = reminder.trim()
-      if (text) {
-        output.system.push(text)
-        await notifyUpdateFromReminder(text)
-      }
+      if (text) output.system.push(text)
+      await notifyUpdateFromCymbal($)
     } catch (error) {
       void error
     }
