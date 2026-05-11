@@ -170,17 +170,16 @@ unsigned tree_sitter_sql_external_scanner_serialize(void *payload, char *buffer)
   }
 
   memcpy(buffer, state->start_tag, tag_length);
-  if (state->start_tag != NULL) {
-    free(state->start_tag);
-    state->start_tag = NULL;
-  }
   return tag_length;
 }
 
 void tree_sitter_sql_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {
   LexerState *state = (LexerState *)payload;
-  state->start_tag = NULL;
-  // A length of 1 can't exists.
+  if (state->start_tag != NULL) {
+    free(state->start_tag);
+    state->start_tag = NULL;
+  }
+  // A length of 1 can't exist.
   if (length > 1) {
     state->start_tag = malloc(length);
     memcpy(state->start_tag, buffer, length);

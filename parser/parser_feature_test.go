@@ -2619,3 +2619,43 @@ export const inlineConst = (id: string): string => id
 		}
 	}
 }
+
+func TestFeatureSQLDDL(t *testing.T) {
+	src := []byte(`CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    amount NUMERIC(10, 2)
+);
+
+CREATE INDEX idx_orders_amount ON orders (amount);
+
+CREATE FUNCTION total_orders() RETURNS BIGINT AS $$
+    SELECT COUNT(*) FROM orders;
+$$ LANGUAGE sql;
+`)
+	result, err := ParseSource(src, "schema.sql", "sql", lang.Default.TreeSitter("sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		kind string
+	}{
+		{"orders", "table"},
+		{"idx_orders_amount", "index"},
+		{"total_orders", "function"},
+	}
+	for _, tc := range cases {
+		sym := findSymbol(result.Symbols, tc.name)
+		if sym == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected to find symbol %q", tc.name)
+		}
+		if sym.Kind != tc.kind {
+			t.Errorf("%s: expected kind %q, got %q", tc.name, tc.kind, sym.Kind)
+		}
+		if sym.Language != "sql" {
+			t.Errorf("%s: expected language \"sql\", got %q", tc.name, sym.Language)
+		}
+	}
+}
