@@ -66,7 +66,7 @@ func TestForFileExtensions(t *testing.T) {
 		{"worksheet.sc", "scala"},
 		{"vars.tfvars", "hcl"},
 
-		// Recognition-only (no tree-sitter)
+		// Extension-only languages (some now tree-sitter backed)
 		{"main.zig", "zig"},
 		{"config.toml", "toml"},
 		{"data.json", "json"},
@@ -75,7 +75,7 @@ func TestForFileExtensions(t *testing.T) {
 		{"module.erl", "erlang"},
 		{"Main.hs", "haskell"},
 		{"parser.ml", "ocaml"},
-		{"parser.mli", "ocaml"},
+		{"parser.mli", "ocaml_interface"},
 		{"analysis.r", "r"},
 		{"analysis.R", "r"},
 		{"script.pl", "perl"},
@@ -122,14 +122,14 @@ func TestForFileSpecialFilenames(t *testing.T) {
 
 func TestSupported(t *testing.T) {
 	// Languages with tree-sitter grammars
-	for _, name := range []string{"go", "python", "javascript", "typescript", "tsx", "rust", "ruby", "java", "c", "cpp", "csharp", "dart", "swift", "kotlin", "lua", "php", "bash", "scala", "yaml", "elixir", "hcl", "protobuf", "sql"} {
+	for _, name := range []string{"go", "python", "javascript", "typescript", "tsx", "rust", "ruby", "java", "c", "cpp", "csharp", "dart", "swift", "kotlin", "lua", "php", "bash", "scala", "yaml", "elixir", "hcl", "protobuf", "sql", "json", "toml", "haskell", "ocaml", "ocaml_interface"} {
 		if !Default.Supported(name) {
 			t.Errorf("Supported(%q) = false, want true", name)
 		}
 	}
 
 	// Recognition-only languages should NOT be "supported" (no parser)
-	for _, name := range []string{"apex", "zig", "toml", "json", "markdown", "erlang", "perl", "vue", "svelte", "make", "groovy", "cmake"} {
+	for _, name := range []string{"r", "apex", "zig", "markdown", "erlang", "perl", "vue", "svelte", "make", "dockerfile", "groovy", "cmake"} {
 		if Default.Supported(name) {
 			t.Errorf("Supported(%q) = true, want false (no tree-sitter grammar)", name)
 		}

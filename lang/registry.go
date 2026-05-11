@@ -9,6 +9,7 @@ import (
 	tshcl "github.com/tree-sitter-grammars/tree-sitter-hcl/bindings/go"
 	tskotlin "github.com/tree-sitter-grammars/tree-sitter-kotlin/bindings/go"
 	tslua "github.com/tree-sitter-grammars/tree-sitter-lua/bindings/go"
+	tstoml "github.com/tree-sitter-grammars/tree-sitter-toml/bindings/go"
 	tsyaml "github.com/tree-sitter-grammars/tree-sitter-yaml/bindings/go"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	tsbash "github.com/tree-sitter/tree-sitter-bash/bindings/go"
@@ -16,8 +17,11 @@ import (
 	tsc "github.com/tree-sitter/tree-sitter-c/bindings/go"
 	tscpp "github.com/tree-sitter/tree-sitter-cpp/bindings/go"
 	tsgo "github.com/tree-sitter/tree-sitter-go/bindings/go"
+	tshaskell "github.com/tree-sitter/tree-sitter-haskell/bindings/go"
 	tsjava "github.com/tree-sitter/tree-sitter-java/bindings/go"
 	tsjavascript "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
+	tsjson "github.com/tree-sitter/tree-sitter-json/bindings/go"
+	tsocaml "github.com/tree-sitter/tree-sitter-ocaml/bindings/go"
 	tsphp "github.com/tree-sitter/tree-sitter-php/bindings/go"
 	tspython "github.com/tree-sitter/tree-sitter-python/bindings/go"
 	tsruby "github.com/tree-sitter/tree-sitter-ruby/bindings/go"
@@ -150,12 +154,42 @@ var Default = NewRegistry(
 		Extensions: []string{".sql"},
 		TreeSitter: sitter.NewLanguage(tssql.Language()),
 	},
-
+	Language{
+		Name:       "json",
+		Extensions: []string{".json"},
+		TreeSitter: sitter.NewLanguage(tsjson.Language()),
+	},
+	Language{
+		Name:       "toml",
+		Extensions: []string{".toml"},
+		TreeSitter: sitter.NewLanguage(tstoml.Language()),
+	},
+	Language{
+		Name:       "haskell",
+		Extensions: []string{".hs"},
+		TreeSitter: sitter.NewLanguage(tshaskell.Language()),
+	},
+	Language{
+		// OCaml implementation files use the ocaml grammar.
+		Name:       "ocaml",
+		Extensions: []string{".ml"},
+		TreeSitter: sitter.NewLanguage(tsocaml.LanguageOCaml()),
+	},
+	Language{
+		// OCaml interface files use a distinct sub-grammar.
+		Name:       "ocaml_interface",
+		Extensions: []string{".mli"},
+		TreeSitter: sitter.NewLanguage(tsocaml.LanguageOCamlInterface()),
+	},
 	// ── Recognition-only languages (no tree-sitter grammar) ─────────
 	// These are kept for file classification and non-indexing CLI flows.
 	// Indexing/parsing code should use lang.Default.Supported to select the
 	// parseable subset and must not assume every known language is indexable.
 
+	Language{
+		Name:       "r",
+		Extensions: []string{".r", ".R"},
+	},
 	Language{
 		Name:       "apex",
 		Extensions: []string{".cls", ".trigger"},
@@ -165,32 +199,12 @@ var Default = NewRegistry(
 		Extensions: []string{".zig"},
 	},
 	Language{
-		Name:       "toml",
-		Extensions: []string{".toml"},
-	},
-	Language{
-		Name:       "json",
-		Extensions: []string{".json"},
-	},
-	Language{
 		Name:       "markdown",
 		Extensions: []string{".md"},
 	},
 	Language{
 		Name:       "erlang",
 		Extensions: []string{".erl"},
-	},
-	Language{
-		Name:       "haskell",
-		Extensions: []string{".hs"},
-	},
-	Language{
-		Name:       "ocaml",
-		Extensions: []string{".ml", ".mli"},
-	},
-	Language{
-		Name:       "r",
-		Extensions: []string{".r", ".R"},
 	},
 	Language{
 		Name:       "perl",

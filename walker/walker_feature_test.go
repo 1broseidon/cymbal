@@ -281,9 +281,11 @@ func TestFeatureWalkerWithSupportedFilterSkipsRecognitionOnly(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"main.go":     "go",
-		"module.mjs":  "javascript",
-		"vars.tfvars": "hcl",
+		"main.go":       "go",
+		"module.mjs":    "javascript",
+		"vars.tfvars":   "hcl",
+		"config.json":   "json",
+		"settings.toml": "toml",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("expected %d parseable files, got %d: %#v", len(want), len(got), got)
@@ -293,7 +295,8 @@ func TestFeatureWalkerWithSupportedFilterSkipsRecognitionOnly(t *testing.T) {
 			t.Errorf("Walk(..., lang.Default.Supported) missing or wrong for %s: got %q want %q", rel, got[rel], language)
 		}
 	}
-	for _, rel := range []string{"config.json", "README.md", "Dockerfile", "Makefile", "settings.toml"} {
+	// README.md (markdown), Dockerfile, and Makefile remain recognition-only.
+	for _, rel := range []string{"README.md", "Dockerfile", "Makefile"} {
 		if _, ok := got[rel]; ok {
 			t.Errorf("Walk(..., lang.Default.Supported) should skip non-parseable file %s", rel)
 		}
