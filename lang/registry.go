@@ -3,6 +3,7 @@ package lang
 import (
 	tsdart "github.com/1broseidon/cymbal/internal/tsgrammars/tree-sitter-dart/bindings/go"
 	tselixir "github.com/1broseidon/cymbal/internal/tsgrammars/tree-sitter-elixir/bindings/go"
+	tsnginx "github.com/1broseidon/cymbal/internal/tsgrammars/tree-sitter-nginx/bindings/go"
 	tsswift "github.com/1broseidon/cymbal/internal/tsgrammars/tree-sitter-swift/bindings/go"
 	tsprotobuf "github.com/coder3101/tree-sitter-proto/bindings/go"
 	tssql "github.com/1broseidon/cymbal/internal/tsgrammars/tree-sitter-sql/bindings/go"
@@ -145,6 +146,12 @@ var Default = NewRegistry(
 		TreeSitter: sitter.NewLanguage(tshcl.Language()),
 	},
 	Language{
+		Name:       "nginx",
+		Extensions: []string{".nginx"},
+		Filenames:  []string{"nginx.conf"},
+		TreeSitter: sitter.NewLanguage(tsnginx.Language()),
+	},
+	Language{
 		Name:       "protobuf",
 		Extensions: []string{".proto"},
 		TreeSitter: sitter.NewLanguage(tsprotobuf.Language()),
@@ -185,6 +192,9 @@ var Default = NewRegistry(
 	// These are kept for file classification and non-indexing CLI flows.
 	// Indexing/parsing code should use lang.Default.Supported to select the
 	// parseable subset and must not assume every known language is indexable.
+	//
+	// TODO: add grammars for make (tree-sitter-make) and cmake
+	// (tree-sitter-cmake) once upstream Go bindings stabilize.
 
 	Language{
 		Name:       "r",

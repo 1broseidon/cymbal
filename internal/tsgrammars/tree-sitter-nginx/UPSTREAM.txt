@@ -1,0 +1,8 @@
+upstream: https://github.com/opa-oz/tree-sitter-nginx
+commit:   47ade644d754cce57974aac44d2c9450e823d4f4
+license:  MIT
+
+vendored because the upstream bindings/go/go.mod declares the wrong module
+path (github.com/tree-sitter/tree-sitter-nginx) and uses the smacker API
+instead of github.com/tree-sitter/go-tree-sitter. The generated parser.c
+and scanner.c are taken verbatim from the upstream commit above.
