@@ -899,6 +899,8 @@ func (e *symbolExtractor) classifyNode(nodeType string, node *sitter.Node) (stri
 		return e.classifyLua(nodeType, node)
 	case "bash":
 		return e.classifyBash(nodeType, node)
+	case "sql":
+		return e.classifySQL(nodeType, node)
 	default:
 		return e.classifyGeneric(nodeType, node)
 	}
@@ -3125,4 +3127,44 @@ func (e *symbolExtractor) extractImplementsCpp(node *sitter.Node) []symbols.Ref 
 	}
 	return e.collectImplementsFromClause(base, line,
 		"type_identifier", "qualified_identifier", "template_type", "identifier")
+}
+
+// -----------------------------------------------------------------------------
+// SQL (DerekStride/tree-sitter-sql grammar)
+// Surfaces CREATE TABLE, CREATE INDEX, and CREATE FUNCTION/PROCEDURE as symbols.
+// Names are resolved from object_reference.name (identifier) or the column field
+// on create_index nodes.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) classifySQL(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	switch nodeType {
+	case "create_table":
+		// object_reference holds the table name; its "name" field is an identifier.
+		for i := range int(node.ChildCount()) {
+			child := node.Child(uint(i))
+			if child.Kind() == "object_reference" {
+				nameNode := child.ChildByFieldName("name")
+				if nameNode != nil {
+					return "table", nameNode
+				}
+			}
+		}
+	case "create_index":
+		// The index name is in the "column" field (an identifier) on the create_index node.
+		nameNode := node.ChildByFieldName("column")
+		if nameNode != nil {
+			return "index", nameNode
+		}
+	case "create_function":
+		// object_reference holds the function name.
+		for i := range int(node.ChildCount()) {
+			child := node.Child(uint(i))
+			if child.Kind() == "object_reference" {
+				nameNode := child.ChildByFieldName("name")
+				if nameNode != nil {
+					return "function", nameNode
+				}
+			}
+		}
+	}
+	return "", nil
 }

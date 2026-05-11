@@ -5,6 +5,7 @@ import (
 	tselixir "github.com/1broseidon/cymbal/internal/tsgrammars/tree-sitter-elixir/bindings/go"
 	tsswift "github.com/1broseidon/cymbal/internal/tsgrammars/tree-sitter-swift/bindings/go"
 	tsprotobuf "github.com/coder3101/tree-sitter-proto/bindings/go"
+	tssql "github.com/1broseidon/cymbal/internal/tsgrammars/tree-sitter-sql/bindings/go"
 	tshcl "github.com/tree-sitter-grammars/tree-sitter-hcl/bindings/go"
 	tskotlin "github.com/tree-sitter-grammars/tree-sitter-kotlin/bindings/go"
 	tslua "github.com/tree-sitter-grammars/tree-sitter-lua/bindings/go"
@@ -144,6 +145,11 @@ var Default = NewRegistry(
 		Extensions: []string{".proto"},
 		TreeSitter: sitter.NewLanguage(tsprotobuf.Language()),
 	},
+	Language{
+		Name:       "sql",
+		Extensions: []string{".sql"},
+		TreeSitter: sitter.NewLanguage(tssql.Language()),
+	},
 
 	// ── Recognition-only languages (no tree-sitter grammar) ─────────
 	// These are kept for file classification and non-indexing CLI flows.
@@ -169,10 +175,6 @@ var Default = NewRegistry(
 	Language{
 		Name:       "markdown",
 		Extensions: []string{".md"},
-	},
-	Language{
-		Name:       "sql",
-		Extensions: []string{".sql"},
 	},
 	Language{
 		Name:       "erlang",

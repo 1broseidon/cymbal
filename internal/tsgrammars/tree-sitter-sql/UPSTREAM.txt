@@ -1,0 +1,8 @@
+Source module: github.com/DerekStride/tree-sitter-sql
+Source version: v0.3.11
+
+Vendored for cymbal's internal tsgrammars collection.
+parser.c was generated via `tree-sitter generate` from grammar.js at v0.3.11 —
+the upstream repo gitignores parser.c so it is not present in the Go module cache.
+This copy is imported through github.com/1broseidon/cymbal/internal/tsgrammars
+so downstream Go consumers do not need local replace directives.
