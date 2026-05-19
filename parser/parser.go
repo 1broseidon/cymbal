@@ -901,6 +901,12 @@ func (e *symbolExtractor) classifyNode(nodeType string, node *sitter.Node) (stri
 		return e.classifyBash(nodeType, node)
 	case "sql":
 		return e.classifySQL(nodeType, node)
+	case "nginx":
+		return e.classifyNginx(nodeType, node)
+	case "haskell":
+		return e.classifyHaskell(nodeType, node)
+	case "ocaml", "ocaml_interface":
+		return e.classifyOCaml(nodeType, node)
 	default:
 		return e.classifyGeneric(nodeType, node)
 	}
@@ -3127,6 +3133,136 @@ func (e *symbolExtractor) extractImplementsCpp(node *sitter.Node) []symbols.Ref 
 	}
 	return e.collectImplementsFromClause(base, line,
 		"type_identifier", "qualified_identifier", "template_type", "identifier")
+}
+
+// -----------------------------------------------------------------------------
+// Nginx (opa-oz/tree-sitter-nginx grammar, vendored)
+// Surfaces upstream blocks (named) and location blocks (path as name).
+// - attribute where first keyword == "upstream" → upstream kind, value child is name
+// - location node                               → location kind, location_route child is path
+// Server blocks are anonymous and not surfaced.
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) classifyNginx(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	switch nodeType {
+	case "attribute":
+		// Look for keyword child to identify block type.
+		for i := range int(node.ChildCount()) {
+			child := node.Child(uint(i))
+			if child.Kind() != "keyword" {
+				continue
+			}
+			kw := string(child.Utf8Text(e.src))
+			if kw == "upstream" {
+				// The value child immediately after keyword is the upstream name.
+				for j := i + 1; j < int(node.ChildCount()); j++ {
+					sibling := node.Child(uint(j))
+					if sibling.Kind() == "value" {
+						return "upstream", sibling
+					}
+				}
+			}
+			break
+		}
+	case "location":
+		// location_route child holds the path string.
+		for i := range int(node.ChildCount()) {
+			child := node.Child(uint(i))
+			if child.Kind() == "location_route" {
+				return "location", child
+			}
+		}
+	}
+	return "", nil
+}
+
+// -----------------------------------------------------------------------------
+// Haskell (tree-sitter/tree-sitter-haskell grammar)
+// Surfaces top-level function bindings and data type declarations.
+// - function   → variable child carries the function name
+// - data_type  → name child carries the type constructor name
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) classifyHaskell(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	switch nodeType {
+	case "function":
+		// First child of kind "variable" is the function name.
+		for i := range int(node.ChildCount()) {
+			child := node.Child(uint(i))
+			if child.Kind() == "variable" {
+				return "function", child
+			}
+		}
+	case "data_type":
+		// The "name" child is the type constructor identifier.
+		nameNode := node.ChildByFieldName("name")
+		if nameNode != nil {
+			return "type", nameNode
+		}
+		// Fallback: first child of kind "name".
+		for i := range int(node.ChildCount()) {
+			child := node.Child(uint(i))
+			if child.Kind() == "name" {
+				return "type", child
+			}
+		}
+	}
+	return "", nil
+}
+
+// -----------------------------------------------------------------------------
+// OCaml (tree-sitter/tree-sitter-ocaml grammar)
+// Surfaces value definitions, type definitions, and module definitions.
+// - value_definition  → let_binding → value_name child
+// - type_definition   → type_binding → type_constructor child
+// - module_definition → module_binding → module_name child
+// -----------------------------------------------------------------------------
+func (e *symbolExtractor) classifyOCaml(nodeType string, node *sitter.Node) (string, *sitter.Node) {
+	switch nodeType {
+	case "value_definition":
+		// let_binding is the first named child; value_name within it is the identifier.
+		for i := range int(node.ChildCount()) {
+			child := node.Child(uint(i))
+			if child.Kind() == "let_binding" {
+				nameNode := child.ChildByFieldName("pattern")
+				if nameNode != nil && nameNode.Kind() == "value_name" {
+					return "function", nameNode
+				}
+				// value_name may appear directly as first child of let_binding.
+				for j := range int(child.ChildCount()) {
+					gc := child.Child(uint(j))
+					if gc.Kind() == "value_name" {
+						return "function", gc
+					}
+				}
+			}
+		}
+	case "type_definition":
+		// type_binding → type_constructor holds the type name.
+		for i := range int(node.ChildCount()) {
+			child := node.Child(uint(i))
+			if child.Kind() == "type_binding" {
+				for j := range int(child.ChildCount()) {
+					gc := child.Child(uint(j))
+					if gc.Kind() == "type_constructor" {
+						return "type", gc
+					}
+				}
+			}
+		}
+	case "module_definition":
+		// module_binding → module_name holds the module identifier.
+		for i := range int(node.ChildCount()) {
+			child := node.Child(uint(i))
+			if child.Kind() == "module_binding" {
+				for j := range int(child.ChildCount()) {
+					gc := child.Child(uint(j))
+					if gc.Kind() == "module_name" {
+						return "module", gc
+					}
+				}
+			}
+		}
+	}
+	return "", nil
 }
 
 // -----------------------------------------------------------------------------

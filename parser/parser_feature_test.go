@@ -2620,6 +2620,110 @@ export const inlineConst = (id: string): string => id
 	}
 }
 
+func TestFeatureNginxSymbols(t *testing.T) {
+	src := []byte(`server {
+    listen 80;
+    server_name example.com;
+    location / {
+        root /var/www/html;
+    }
+    location /api {
+        proxy_pass http://backend;
+    }
+}
+upstream backend {
+    server 127.0.0.1:8080;
+}
+`)
+	result, err := ParseSource(src, "nginx.conf", "nginx", lang.Default.TreeSitter("nginx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		kind string
+	}{
+		{"/ ", "location"},
+		{"/api ", "location"},
+		{"backend", "upstream"},
+	}
+	for _, tc := range cases {
+		sym := findSymbolKind(result.Symbols, tc.name, tc.kind)
+		if sym == nil {
+			debugParseResult(t, result)
+			t.Errorf("expected symbol %q of kind %q", tc.name, tc.kind)
+		}
+	}
+}
+
+func TestFeatureHaskellFunctions(t *testing.T) {
+	src := []byte(`module Foo where
+
+add :: Int -> Int -> Int
+add x y = x + y
+
+factorial :: Int -> Int
+factorial 0 = 1
+factorial n = n * factorial (n - 1)
+
+data Color = Red | Green | Blue
+`)
+	result, err := ParseSource(src, "Foo.hs", "haskell", lang.Default.TreeSitter("haskell"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		kind string
+	}{
+		{"add", "function"},
+		{"factorial", "function"},
+		{"Color", "type"},
+	}
+	for _, tc := range cases {
+		sym := findSymbolKind(result.Symbols, tc.name, tc.kind)
+		if sym == nil {
+			t.Errorf("expected symbol %q of kind %q", tc.name, tc.kind)
+		}
+	}
+}
+
+func TestFeatureOCamlFunctions(t *testing.T) {
+	src := []byte(`let add x y = x + y
+
+let factorial n =
+  let rec go n acc =
+    if n <= 0 then acc
+    else go (n - 1) (n * acc)
+  in go n 1
+
+type color = Red | Green | Blue
+
+module Util = struct
+  let helper x = x + 1
+end
+`)
+	result, err := ParseSource(src, "foo.ml", "ocaml", lang.Default.TreeSitter("ocaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		kind string
+	}{
+		{"add", "function"},
+		{"factorial", "function"},
+		{"color", "type"},
+		{"Util", "module"},
+	}
+	for _, tc := range cases {
+		sym := findSymbolKind(result.Symbols, tc.name, tc.kind)
+		if sym == nil {
+			t.Errorf("expected symbol %q of kind %q", tc.name, tc.kind)
+		}
+	}
+}
+
 func TestFeatureSQLDDL(t *testing.T) {
 	src := []byte(`CREATE TABLE orders (
     id SERIAL PRIMARY KEY,
