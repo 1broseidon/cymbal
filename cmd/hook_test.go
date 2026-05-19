@@ -1092,6 +1092,10 @@ func withTestWorkingDir(t *testing.T, dir string) {
 	configRoot := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	t.Setenv("APPDATA", configRoot)
+	// os.UserConfigDir on darwin ignores XDG_CONFIG_HOME and uses $HOME/Library/Application Support,
+	// so override HOME/USERPROFILE too to keep all scope lookups inside the tempdir.
+	t.Setenv("HOME", configRoot)
+	t.Setenv("USERPROFILE", configRoot)
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
