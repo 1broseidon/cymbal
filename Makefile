@@ -1,5 +1,5 @@
 BINARY := cymbal
-CGO_CFLAGS := -DSQLITE_ENABLE_FTS5
+GO_TAGS := sqlite_fts5
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -12,19 +12,19 @@ COVER_PACKAGES := $(shell git ls-files '*.go' | while read file; do dirname "$$f
 .PHONY: build build-check ci clean install lint test test-coverage vulncheck
 
 build:
-	CGO_CFLAGS="$(CGO_CFLAGS)" go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
+	go build -tags "$(GO_TAGS)" -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
 build-check:
-	CGO_CFLAGS="$(CGO_CFLAGS)" go build ./...
+	go build -tags "$(GO_TAGS)" ./...
 
 install:
-	CGO_CFLAGS="$(CGO_CFLAGS)" go install -ldflags "$(LDFLAGS)" .
+	go install -tags "$(GO_TAGS)" -ldflags "$(LDFLAGS)" .
 
 test:
-	CGO_CFLAGS="$(CGO_CFLAGS)" go test ./...
+	go test -tags "$(GO_TAGS)" ./...
 
 test-coverage:
-	CGO_CFLAGS="$(CGO_CFLAGS)" go test -covermode=atomic -coverprofile=coverage.txt $(COVER_PACKAGES)
+	go test -tags "$(GO_TAGS)" -covermode=atomic -coverprofile=coverage.txt $(COVER_PACKAGES)
 
 lint:
 	go vet ./...
