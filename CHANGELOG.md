@@ -2,6 +2,12 @@
 
 All notable changes to cymbal are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- **OpenCode hook installs now target the plugin directory OpenCode actually loads** — user-scope `cymbal hook install opencode` now writes to `~/.config/opencode/plugins/cymbal-opencode.js` instead of the Windows-native `%APPDATA%\opencode\plugins` path that OpenCode 1.15.9 ignores. The installer also honors `OPENCODE_CONFIG_DIR` by writing to `$OPENCODE_CONFIG_DIR/plugins/cymbal-opencode.js`, matching OpenCode's custom config directory behavior.
+
 ## [0.13.5] - 2026-05-19
 
 ### Fixed
