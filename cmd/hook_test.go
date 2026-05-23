@@ -1076,6 +1076,64 @@ func TestOpenCodeConfigDirHonorsExplicitOverride(t *testing.T) {
 	}
 }
 
+func TestOpenCodeInstallWithOverrideRefusesDefaultGlobalManagedPlugin(t *testing.T) {
+	home := t.TempDir()
+	overrideConfigDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	t.Setenv("OPENCODE_CONFIG_DIR", overrideConfigDir)
+
+	defaultConfigDir := filepath.Join(home, ".config", "opencode")
+	defaultPlugin := filepath.Join(defaultConfigDir, "plugins", "cymbal-opencode.js")
+	if err := os.MkdirAll(filepath.Dir(defaultPlugin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "// " + opencodeHookMarker + " managed by cymbal\n// cymbal-version: v0.0.1\nexport default async () => ({})\n"
+	if err := os.WriteFile(defaultPlugin, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := adapter.install("user", false); err == nil {
+		t.Fatal("expected user-scope override install to refuse duplicate default global managed plugin")
+	}
+}
+
+func TestOpenCodeProjectInstallWithOverrideRefusesDefaultGlobalManagedPlugin(t *testing.T) {
+	dir := t.TempDir()
+	withTestWorkingDir(t, dir)
+	home := t.TempDir()
+	overrideConfigDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	t.Setenv("OPENCODE_CONFIG_DIR", overrideConfigDir)
+
+	defaultConfigDir := filepath.Join(home, ".config", "opencode")
+	defaultPlugin := filepath.Join(defaultConfigDir, "plugins", "cymbal-opencode.js")
+	if err := os.MkdirAll(filepath.Dir(defaultPlugin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "// " + opencodeHookMarker + " managed by cymbal\n// cymbal-version: v0.0.1\nexport default async () => ({})\n"
+	if err := os.WriteFile(defaultPlugin, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter, err := lookupHookAdapter("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := adapter.install("project", false); err == nil {
+		t.Fatal("expected project-scope install to refuse duplicate default global managed plugin")
+	}
+}
+
 func TestOpenCodeInstallAllowsSymlinkedAncestorOutsideConfigRoot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation is not consistently available on Windows")

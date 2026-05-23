@@ -1245,11 +1245,37 @@ func opencodeConfigDir() (string, error) {
 	if configured := strings.TrimSpace(os.Getenv("OPENCODE_CONFIG_DIR")); configured != "" {
 		return configured, nil
 	}
+	return opencodeDefaultConfigDir()
+}
+
+func opencodeDefaultConfigDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "opencode"), nil
+}
+
+func opencodeUserPluginPaths() ([]string, error) {
+	configDir, err := opencodeConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	paths := []string{filepath.Join(configDir, "plugins", opencodeManagedPluginFile)}
+
+	defaultConfigDir, err := opencodeDefaultConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	defaultPath := filepath.Join(defaultConfigDir, "plugins", opencodeManagedPluginFile)
+	if !samePath(defaultPath, paths[0]) {
+		paths = append(paths, defaultPath)
+	}
+	return paths, nil
+}
+
+func samePath(a, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 func opencodePluginContents() string {
@@ -1280,20 +1306,12 @@ func installOpenCode(scope string, dryRun bool) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	otherScope := "user"
-	if scope == "user" {
-		otherScope = "project"
-	}
-	otherPath, err := opencodePluginPath(otherScope)
+	conflicts, err := opencodeManagedInstallConflicts(scope, path)
 	if err != nil {
 		return path, "", err
 	}
-	otherManaged, err := opencodeManagedFileExists(otherPath)
-	if err != nil {
-		return path, "", err
-	}
-	if otherManaged {
-		return path, "", fmt.Errorf("cymbal-managed OpenCode plugin already exists in %s scope at %s; uninstall it before installing %s scope", otherScope, otherPath, scope)
+	if len(conflicts) > 0 {
+		return path, "", fmt.Errorf("cymbal-managed OpenCode plugin already exists at %s; uninstall it before installing %s scope", conflicts[0], scope)
 	}
 	managed, err := openCodeManagedFileState(path)
 	if err != nil {
@@ -1310,6 +1328,46 @@ func installOpenCode(scope string, dryRun bool) (string, string, error) {
 		return path, "", err
 	}
 	return path, content, nil
+}
+
+func opencodeManagedInstallConflicts(scope, targetPath string) ([]string, error) {
+	var candidates []string
+	if scope == "project" {
+		userPaths, err := opencodeUserPluginPaths()
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, userPaths...)
+	} else {
+		projectPath, err := opencodePluginPath("project")
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, projectPath)
+		userPaths, err := opencodeUserPluginPaths()
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, userPaths...)
+	}
+
+	var conflicts []string
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		clean := filepath.Clean(candidate)
+		if seen[clean] || samePath(candidate, targetPath) {
+			continue
+		}
+		seen[clean] = true
+		managed, err := opencodeManagedFileExists(candidate)
+		if err != nil {
+			return nil, err
+		}
+		if managed {
+			conflicts = append(conflicts, candidate)
+		}
+	}
+	return conflicts, nil
 }
 
 func uninstallOpenCode(scope string, dryRun bool) (string, string, error) {
