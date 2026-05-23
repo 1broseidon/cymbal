@@ -1017,6 +1017,7 @@ func TestOpenCodeInstallUserScopeWritesManagedPlugin(t *testing.T) {
 	t.Setenv("HOMEPATH", "")
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	t.Setenv("APPDATA", configRoot)
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
 
 	adapter, err := lookupHookAdapter("opencode")
 	if err != nil {
@@ -1027,16 +1028,51 @@ func TestOpenCodeInstallUserScopeWritesManagedPlugin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install failed: %v", err)
 	}
-	resolvedConfigRoot, err := os.UserConfigDir()
+	configDir, err := opencodeConfigDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTarget := filepath.Join(resolvedConfigRoot, "opencode", "plugins", "cymbal-opencode.js")
+	wantTarget := filepath.Join(configDir, "plugins", "cymbal-opencode.js")
 	if target != wantTarget {
 		t.Fatalf("unexpected user target: got %q want %q", target, wantTarget)
 	}
 	if _, err := os.Stat(wantTarget); err != nil {
 		t.Fatalf("expected managed plugin file at %s: %v", wantTarget, err)
+	}
+}
+
+func TestOpenCodeConfigDirUsesHomeDotConfigAcrossPlatforms(t *testing.T) {
+	home := t.TempDir()
+	appData := t.TempDir()
+	xdgConfig := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	t.Setenv("APPDATA", appData)
+	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
+
+	got, err := opencodeConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".config", "opencode")
+	if got != want {
+		t.Fatalf("unexpected OpenCode config dir: got %q want %q", got, want)
+	}
+}
+
+func TestOpenCodeConfigDirHonorsExplicitOverride(t *testing.T) {
+	configured := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", configured)
+
+	got, err := opencodeConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != configured {
+		t.Fatalf("unexpected OpenCode config dir override: got %q want %q", got, configured)
 	}
 }
 
@@ -1336,6 +1372,7 @@ func TestOpenCodeInstallRefusesWhenOtherScopeAlreadyHasManagedPlugin(t *testing.
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOMEDRIVE", "")
 	t.Setenv("HOMEPATH", "")
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
 
 	adapter, err := lookupHookAdapter("opencode")
 	if err != nil {
