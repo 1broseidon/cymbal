@@ -213,9 +213,11 @@ What it does:
   `.opencode/plugins/cymbal-opencode.js`
 - The plugin refreshes startup guidance by calling
   `cymbal hook remind --format=text --update=if-stale`
-- The plugin soft-nudges bash `rg` / `grep` / `find` / `fd`-style commands
-  back toward cymbal-first navigation before the shell runs them on
-  non-Windows shells
+- The plugin exposes a single `CymbalPlugin` export for OpenCode's plugin
+  loader; helper functions stay internal so OpenCode does not try to load them
+  as plugins
+- The plugin soft-nudges Bash, Grep, and Glob code-search calls back toward
+  cymbal-first navigation before the tool runs on non-Windows shells
 - When an update is available, the plugin shows a **native OS notification**
   (macOS Notification Center, Linux `notify-send`, or Windows system tray)
   so users see it regardless of whether they're in TUI or Desktop mode

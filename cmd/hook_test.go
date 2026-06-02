@@ -998,10 +998,16 @@ func TestOpenCodeInstallProjectScopeWritesManagedPlugin(t *testing.T) {
 		t.Fatalf("expected managed plugin to delegate to remind with stale-aware updates, got %q", string(data))
 	}
 	if !strings.Contains(string(data), `"tool.execute.before"`) || !strings.Contains(string(data), `cymbal hook nudge --format=json`) {
-		t.Fatalf("expected managed plugin to install OpenCode bash nudge hook, got %q", string(data))
+		t.Fatalf("expected managed plugin to install OpenCode nudge hook, got %q", string(data))
 	}
-	if !strings.Contains(string(data), `tool_input: { command: output.args.command }`) || !strings.Contains(string(data), `process.platform === "win32"`) {
-		t.Fatalf("expected managed plugin to delegate structured nudge input and guard Windows shell rewriting, got %q", string(data))
+	if !strings.Contains(string(data), `export const CymbalPlugin`) || strings.Contains(string(data), `export default`) || strings.Contains(string(data), `export function`) {
+		t.Fatalf("expected managed plugin to expose only the OpenCode plugin export, got %q", string(data))
+	}
+	if !strings.Contains(string(data), `const nudgableTools = ["bash", "Grep", "Glob"]`) || !strings.Contains(string(data), `tool_name: input.tool === "bash" ? "bash" : input.tool`) {
+		t.Fatalf("expected managed plugin to nudge Bash/Grep/Glob through structured input, got %q", string(data))
+	}
+	if !strings.Contains(string(data), `process.platform === "win32"`) {
+		t.Fatalf("expected managed plugin to guard Windows shell rewriting, got %q", string(data))
 	}
 	if !strings.Contains(string(data), opencodeHookMarker) || !strings.Contains(string(data), currentVersion()) {
 		t.Fatalf("expected managed plugin metadata marker/version, got %q", string(data))
@@ -1197,7 +1203,10 @@ func TestOpenCodeInstallDryRunDoesNotWrite(t *testing.T) {
 		t.Fatalf("dry-run summary should show stale-aware remind integration, got %q", summary)
 	}
 	if !strings.Contains(summary, `"tool.execute.before"`) || !strings.Contains(summary, `cymbal hook nudge --format=json`) {
-		t.Fatalf("dry-run summary should include bash nudge integration, got %q", summary)
+		t.Fatalf("dry-run summary should include OpenCode nudge integration, got %q", summary)
+	}
+	if !strings.Contains(summary, `export const CymbalPlugin`) || strings.Contains(summary, `export default`) || strings.Contains(summary, `export function`) {
+		t.Fatalf("dry-run summary should expose only the OpenCode plugin export, got %q", summary)
 	}
 	if !strings.Contains(summary, opencodeHookMarker) || !strings.Contains(summary, currentVersion()) {
 		t.Fatalf("dry-run summary should include managed plugin metadata, got %q", summary)
@@ -1446,7 +1455,13 @@ func TestOpenCodeInstallRefusesWhenOtherScopeAlreadyHasManagedPlugin(t *testing.
 
 func withTestWorkingDir(t *testing.T, dir string) {
 	t.Helper()
+	home := t.TempDir()
 	configRoot := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	t.Setenv("APPDATA", configRoot)
 	wd, err := os.Getwd()

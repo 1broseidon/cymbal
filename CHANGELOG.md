@@ -6,7 +6,7 @@ All notable changes to cymbal are documented here.
 
 ### Fixed
 
-- **OpenCode hook installs now target the plugin directory OpenCode actually loads** — user-scope `cymbal hook install opencode` now writes to `~/.config/opencode/plugins/cymbal-opencode.js` instead of the Windows-native `%APPDATA%\opencode\plugins` path that OpenCode 1.15.9 ignores. The installer also honors `OPENCODE_CONFIG_DIR` by writing to `$OPENCODE_CONFIG_DIR/plugins/cymbal-opencode.js`, matching OpenCode's custom config directory behavior.
+- **OpenCode hook installs now target the plugin directory OpenCode actually loads and ship a loadable plugin export** — user-scope `cymbal hook install opencode` now writes to `~/.config/opencode/plugins/cymbal-opencode.js` instead of the Windows-native `%APPDATA%\opencode\plugins` path that OpenCode 1.15.9 ignores. The installer also honors `OPENCODE_CONFIG_DIR` by writing to `$OPENCODE_CONFIG_DIR/plugins/cymbal-opencode.js`, matching OpenCode's custom config directory behavior. The managed plugin now exposes a single `CymbalPlugin` export instead of extra module exports, matching OpenCode 1.15.13's plugin loader, and nudges OpenCode's Bash, Grep, and Glob tools. Fixes [#63](https://github.com/1broseidon/cymbal/issues/63).
 
 ## [0.13.5] - 2026-05-19
 

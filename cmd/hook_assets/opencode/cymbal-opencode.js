@@ -1,34 +1,13 @@
 import { spawn } from "node:child_process"
 
-export const notifiedUpdateVersions = new Set()
+const notifiedUpdateVersions = new Set()
 
-export function updateNotifierDisabled() {
+function updateNotifierDisabled() {
   const value = String(process.env.CYMBAL_NO_UPDATE_NOTIFIER ?? "").trim().toLowerCase()
   return value === "1" || value === "true" || value === "yes" || value === "on"
 }
 
-export function parseUpdateNotice(text) {
-  if (typeof text !== "string") return null
-
-  const normalized = text.replace(/\r\n?/g, "\n")
-  const match = normalized.match(
-    /(?:^|\n)cymbal update:\n  A newer version is available: ([^\n]+)\n  Run: ([^\n]+)\n(?:  If you can run shell commands here, run it now\.(?:\n|$))?/,
-  )
-  if (!match) return null
-
-  const version = match[1].trim()
-  const command = match[2].trim()
-  if (!version || !command) return null
-
-  return {
-    version,
-    command,
-    title: `cymbal update available`,
-    body: `A newer version is available: ${version}. Run: ${command}`,
-  }
-}
-
-export function appleScriptString(value) {
+function appleScriptString(value) {
   return String(value)
     .replaceAll("\\", "\\\\")
     .replaceAll('"', '\\"')
@@ -40,7 +19,7 @@ function powerShellSingleQuotedString(value) {
   return String(value).replaceAll("'", "''")
 }
 
-export function buildNotificationCommand(platform, notice, env) {
+function buildNotificationCommand(platform, notice, env) {
   if (!notice || typeof notice.title !== "string" || typeof notice.body !== "string") return null
 
   if (platform === "darwin") {
@@ -99,7 +78,7 @@ export function buildNotificationCommand(platform, notice, env) {
   return null
 }
 
-export async function showNativeNotification(notice) {
+async function showNativeNotification(notice) {
   const spec = buildNotificationCommand(process.platform, notice, process.env)
   if (!spec) return
 
@@ -116,7 +95,7 @@ export async function showNativeNotification(notice) {
   }
 }
 
-export async function notifyUpdateFromCymbal($) {
+async function notifyUpdateFromCymbal($) {
   if (updateNotifierDisabled()) return
 
   try {
@@ -127,17 +106,15 @@ export async function notifyUpdateFromCymbal($) {
 
     notifiedUpdateVersions.add(payload.latestVersion)
     await showNativeNotification({
-      version: payload.latestVersion,
       title: payload.title,
       body: payload.body,
-      command: payload.command,
     })
   } catch (error) {
     void error
   }
 }
 
-export default async ({ $ }) => ({
+export const CymbalPlugin = async ({ $ }) => ({
   "experimental.chat.system.transform": async (_input, output) => {
     try {
       const reminder = await $`cymbal hook remind --format=text --update=if-stale`.text()
@@ -149,16 +126,20 @@ export default async ({ $ }) => ({
     }
   },
   "tool.execute.before": async (input, output) => {
-    if (input.tool !== "bash") return
-    if (!output.args || typeof output.args.command !== "string") return
-
+    const nudgableTools = ["bash", "Grep", "Glob"]
+    if (!nudgableTools.includes(input.tool)) return
     if (process.platform === "win32") return
 
     try {
+      const toolInput = input.tool === "bash"
+        ? { command: output.args?.command }
+        : { ...output.args }
+      if (input.tool === "bash" && typeof toolInput.command !== "string") return
+
       const payload = new Response(
         JSON.stringify({
-          tool_name: "bash",
-          tool_input: { command: output.args.command },
+          tool_name: input.tool === "bash" ? "bash" : input.tool,
+          tool_input: toolInput,
         }),
       )
       const raw = await $`cymbal hook nudge --format=json < ${payload}`.quiet().nothrow().text()
@@ -169,7 +150,11 @@ export default async ({ $ }) => ({
       if (typeof result.suggest !== "string" || typeof result.why !== "string") return
 
       const notice = `cymbal nudge: ${result.suggest} — ${result.why}`.replaceAll("'", `'"'"'`)
-      output.args.command = `printf '%s\n' '${notice}' >&2; ${output.args.command}`
+      if (input.tool === "bash") {
+        output.args.command = `printf '%s\n' '${notice}' >&2; ${output.args.command}`
+      } else {
+        output.notice = notice
+      }
     } catch (error) {
       void error
     }

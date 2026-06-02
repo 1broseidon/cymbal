@@ -367,8 +367,10 @@ cymbal hook install claude-code
 ```
 
 For `opencode`, re-running install upgrades the existing cymbal-managed plugin
-file in place. If a non-cymbal file already exists at cymbal's target path,
-install refuses to overwrite it.
+file in place. The managed plugin is written with OpenCode's single `CymbalPlugin`
+export shape and nudges Bash, Grep, and Glob tool calls toward cymbal-first code
+navigation. If a non-cymbal file already exists at cymbal's target path, install
+refuses to overwrite it.
 
 Only one cymbal-managed OpenCode scope is supported at a time. If a managed
 plugin already exists in the other scope, install refuses until that scope is
