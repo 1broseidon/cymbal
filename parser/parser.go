@@ -2472,8 +2472,14 @@ func jsSignatureNode(node *sitter.Node) *sitter.Node {
 }
 
 // jsUnwrapToFunction returns the arrow_function or function node from a value,
-// unwrapping a call_expression wrapper (useCallback/useMemo/etc.) if present.
-// Only unwraps call_expressions with a bare identifier callee.
+// unwrapping call_expression wrappers (useCallback/useMemo/memo(forwardRef(...))
+// and similar) when the wrapped function is the FIRST argument. Restricting to
+// the first argument keeps utility calls that take trailing callbacks
+// (sortBy(items, fn), fetchWithRetry(url, cb)) from being misread as function
+// definitions. Only call_expressions with a bare identifier callee are
+// unwrapped (not member expressions like arr.map or obj.on). Known accepted
+// noise: first-argument-callback calls (setTimeout(fn, ms)) and useMemo of a
+// plain value still classify as functions.
 func jsUnwrapToFunction(node *sitter.Node) *sitter.Node {
 	switch node.Kind() {
 	case "arrow_function", "function", "function_expression":
@@ -2487,11 +2493,15 @@ func jsUnwrapToFunction(node *sitter.Node) *sitter.Node {
 		if args == nil {
 			return nil
 		}
+		// Find the first real argument (skipping punctuation and comments)
+		// and unwrap it recursively, so memo(forwardRef((props, ref) => ...))
+		// resolves to the inner function.
 		for i := range int(args.ChildCount()) {
 			arg := args.Child(uint(i))
-			if arg.Kind() == "arrow_function" || arg.Kind() == "function" || arg.Kind() == "function_expression" {
-				return arg
+			if !arg.IsNamed() || arg.Kind() == "comment" {
+				continue
 			}
+			return jsUnwrapToFunction(arg)
 		}
 	}
 	return nil

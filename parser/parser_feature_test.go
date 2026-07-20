@@ -2751,7 +2751,7 @@ var legacy = () => doThing()
 	}
 }
 
-func TestFeatureJSUseCallbackNotIndexedWithoutArrowArg(t *testing.T) {
+func TestFeatureTSCallWithoutFunctionArgNotIndexed(t *testing.T) {
 	// A call expression that does NOT contain an arrow/function arg should
 	// not produce a symbol.
 	src := []byte(`const result = fetchData('/api/users')
@@ -2767,7 +2767,7 @@ const config = Object.freeze({ key: 'value' })
 	}
 }
 
-func TestFeatureJSMemberCallWithCallbackNotIndexed(t *testing.T) {
+func TestFeatureTSMemberCallWithCallbackNotIndexed(t *testing.T) {
 	// Member-expression calls (arr.map, emitter.on, etc.) that take callback
 	// args must NOT produce symbols, even though they contain arrow functions.
 	src := []byte(`const doubled = arr.map((x) => x * 2)
@@ -2782,5 +2782,77 @@ const result = Promise.all([1,2,3].map(async (n) => fetch(n)))
 
 	for _, sym := range result.Symbols {
 		t.Errorf("unexpected symbol: %s (%s) - false positive from callback arg", sym.Name, sym.Kind)
+	}
+}
+
+func TestFeatureTSTrailingCallbackNotIndexed(t *testing.T) {
+	// Only a FIRST-argument function unwraps; utility calls taking trailing
+	// callbacks are values, not function definitions.
+	src := []byte(`const sorted = sortBy(items, (x) => x.name)
+const result = fetchWithRetry(url, () => retry())
+`)
+	result, err := ParseSource(src, "test.ts", "typescript", lang.Default.TreeSitter("typescript"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sym := range result.Symbols {
+		t.Errorf("unexpected symbol: %s (%s) - trailing callback must not classify as function", sym.Name, sym.Kind)
+	}
+}
+
+func TestFeatureTSFirstArgCallbackAcceptedNoise(t *testing.T) {
+	// Documented tradeoff: a first-argument callback (setTimeout) still
+	// classifies the binding as a function. Pin the behavior so a change is
+	// deliberate.
+	src := []byte(`const t = setTimeout(() => tick(), 100)
+`)
+	result, err := ParseSource(src, "test.ts", "typescript", lang.Default.TreeSitter("typescript"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if sym := findSymbolKind(result.Symbols, "t", "function"); sym == nil {
+		t.Fatal("expected t indexed as function (accepted first-arg-callback noise); if this changed deliberately, update jsUnwrapToFunction's doc comment")
+	}
+}
+
+func TestFeatureTSComposedWrapperIndexed(t *testing.T) {
+	// memo(forwardRef(fn)) unwraps recursively through first arguments.
+	src := []byte(`import { memo, forwardRef } from 'react'
+
+const FancyInput = memo(forwardRef((props: Props, ref: Ref) => null))
+`)
+	result, err := ParseSource(src, "FancyInput.tsx", "tsx", lang.Default.TreeSitter("tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sym := findSymbolKind(result.Symbols, "FancyInput", "function")
+	if sym == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected FancyInput indexed as function through memo(forwardRef(...))")
+	}
+	if !strings.Contains(sym.Signature, "props") {
+		t.Errorf("FancyInput signature %q missing inner function params", sym.Signature)
+	}
+}
+
+func TestFeatureTSExportVarLetArrowIndexed(t *testing.T) {
+	src := []byte(`export var legacy = (a: number) => a * 2
+export let handler = () => {}
+`)
+	result, err := ParseSource(src, "test.ts", "typescript", lang.Default.TreeSitter("typescript"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if sym := findSymbolKind(result.Symbols, "legacy", "function"); sym == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected exported var arrow function to be indexed")
+	}
+	if sym := findSymbolKind(result.Symbols, "handler", "function"); sym == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected exported let arrow function to be indexed")
 	}
 }
