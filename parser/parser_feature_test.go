@@ -2668,3 +2668,119 @@ export const Button = (label: string): JSX.Element => <button>{label}</button>
 		}
 	}
 }
+
+func TestFeatureTSUseCallbackIndexed(t *testing.T) {
+	src := []byte(`import { useCallback, useMemo } from 'react'
+
+export function AssetPage() {
+    const handleSave = useCallback(async (data: FormData) => {
+        await api.save(data)
+    }, [api])
+
+    const parseErrors = (response: unknown): string[] => {
+        return []
+    }
+
+    const sortRows = useMemo(() => (rows: Row[]) => rows.sort(), [])
+
+    const compute = useMemo(function computeInner(x: number) {
+        return x * 2
+    }, [])
+
+    return null
+}
+`)
+	result, err := ParseSource(src, "AssetPage.tsx", "tsx", lang.Default.TreeSitter("tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name       string
+		wantKind   string
+		wantParent string
+	}{
+		{"AssetPage", "function", ""},
+		{"handleSave", "function", "AssetPage"},
+		{"parseErrors", "function", "AssetPage"},
+		{"sortRows", "function", "AssetPage"},
+		{"compute", "function", "AssetPage"},
+	}
+	for _, tc := range cases {
+		sym := findSymbolKind(result.Symbols, tc.name, tc.wantKind)
+		if sym == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected to find %s (%s)", tc.name, tc.wantKind)
+		}
+		if sym.Parent != tc.wantParent {
+			t.Errorf("%s: parent=%q, want %q", tc.name, sym.Parent, tc.wantParent)
+		}
+	}
+
+	// Verify signatures are extracted through the call wrapper.
+	handleSave := findSymbol(result.Symbols, "handleSave")
+	if handleSave.Signature == "" {
+		t.Error("handleSave: signature is empty")
+	} else if !strings.Contains(handleSave.Signature, "data: FormData") {
+		t.Errorf("handleSave: signature %q missing parameter info", handleSave.Signature)
+	}
+}
+
+func TestFeatureTSLetVarArrowFunctions(t *testing.T) {
+	src := []byte(`let handler = (e: Event) => {
+    e.preventDefault()
+}
+
+var legacy = () => doThing()
+`)
+	result, err := ParseSource(src, "test.ts", "typescript", lang.Default.TreeSitter("typescript"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := findSymbolKind(result.Symbols, "handler", "function")
+	if handler == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find handler as function")
+	}
+
+	legacy := findSymbolKind(result.Symbols, "legacy", "function")
+	if legacy == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected to find legacy as function")
+	}
+}
+
+func TestFeatureJSUseCallbackNotIndexedWithoutArrowArg(t *testing.T) {
+	// A call expression that does NOT contain an arrow/function arg should
+	// not produce a symbol.
+	src := []byte(`const result = fetchData('/api/users')
+const config = Object.freeze({ key: 'value' })
+`)
+	result, err := ParseSource(src, "test.ts", "typescript", lang.Default.TreeSitter("typescript"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sym := range result.Symbols {
+		t.Errorf("unexpected symbol: %s (%s)", sym.Name, sym.Kind)
+	}
+}
+
+func TestFeatureJSMemberCallWithCallbackNotIndexed(t *testing.T) {
+	// Member-expression calls (arr.map, emitter.on, etc.) that take callback
+	// args must NOT produce symbols, even though they contain arrow functions.
+	src := []byte(`const doubled = arr.map((x) => x * 2)
+const sub = emitter.on('click', () => { cleanup() })
+const filtered = items.filter((item) => item.active)
+const result = Promise.all([1,2,3].map(async (n) => fetch(n)))
+`)
+	result, err := ParseSource(src, "test.ts", "typescript", lang.Default.TreeSitter("typescript"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sym := range result.Symbols {
+		t.Errorf("unexpected symbol: %s (%s) - false positive from callback arg", sym.Name, sym.Kind)
+	}
+}

@@ -984,7 +984,8 @@ func (e *symbolExtractor) classifyPythonInner(nodeType string, node *sitter.Node
 func (e *symbolExtractor) classifyJS(nodeType string, node *sitter.Node) (string, *sitter.Node) {
 	switch nodeType {
 	case "function_declaration", "class_declaration", "interface_declaration",
-		"type_alias_declaration", "enum_declaration", "lexical_declaration":
+		"type_alias_declaration", "enum_declaration", "lexical_declaration",
+		"variable_declaration":
 		// Skip if parent is export_statement — the parent already emits this symbol.
 		if node.Parent() != nil && node.Parent().Kind() == "export_statement" {
 			return "", nil
@@ -1017,19 +1018,29 @@ func (e *symbolExtractor) classifyJSInner(nodeType string, node *sitter.Node) (s
 		return "type", node.ChildByFieldName("name")
 	case "enum_declaration":
 		return "enum", node.ChildByFieldName("name")
-	case "lexical_declaration":
+	case "lexical_declaration", "variable_declaration":
 		for i := range int(node.ChildCount()) {
 			child := node.Child(uint(i))
 			if child.Kind() == "variable_declarator" {
 				nameNode := child.ChildByFieldName("name")
 				valueNode := child.ChildByFieldName("value")
-				if valueNode != nil && (valueNode.Kind() == "arrow_function" || valueNode.Kind() == "function") {
+				if valueNode != nil && jsValueIsFunction(valueNode) {
 					return "function", nameNode
 				}
 			}
 		}
 	}
 	return "", nil
+}
+
+// jsValueIsFunction reports whether a variable_declarator's value node
+// represents a function definition. Matches direct arrow functions/function
+// expressions, and also call_expression wrappers (useCallback, useMemo, etc.)
+// whose first argument is an arrow function or function expression.
+// Only matches call_expressions with a bare identifier callee (not member
+// expressions like arr.map or obj.on) to avoid false positives.
+func jsValueIsFunction(node *sitter.Node) bool {
+	return jsUnwrapToFunction(node) != nil
 }
 
 func (e *symbolExtractor) classifyRust(nodeType string, node *sitter.Node) (string, *sitter.Node) {
@@ -2450,15 +2461,40 @@ func jsSignatureNode(node *sitter.Node) *sitter.Node {
 			child := node.Child(uint(i))
 			if child.Kind() == "variable_declarator" {
 				if val := child.ChildByFieldName("value"); val != nil {
-					switch val.Kind() {
-					case "arrow_function", "function":
-						return val
+					if fn := jsUnwrapToFunction(val); fn != nil {
+						return fn
 					}
 				}
 			}
 		}
 	}
 	return node
+}
+
+// jsUnwrapToFunction returns the arrow_function or function node from a value,
+// unwrapping a call_expression wrapper (useCallback/useMemo/etc.) if present.
+// Only unwraps call_expressions with a bare identifier callee.
+func jsUnwrapToFunction(node *sitter.Node) *sitter.Node {
+	switch node.Kind() {
+	case "arrow_function", "function", "function_expression":
+		return node
+	case "call_expression":
+		callee := node.ChildByFieldName("function")
+		if callee == nil || callee.Kind() != "identifier" {
+			return nil
+		}
+		args := node.ChildByFieldName("arguments")
+		if args == nil {
+			return nil
+		}
+		for i := range int(args.ChildCount()) {
+			arg := args.Child(uint(i))
+			if arg.Kind() == "arrow_function" || arg.Kind() == "function" || arg.Kind() == "function_expression" {
+				return arg
+			}
+		}
+	}
+	return nil
 }
 
 func (e *symbolExtractor) extractSignature(node *sitter.Node, kind string) string {
