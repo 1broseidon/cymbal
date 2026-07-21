@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/1broseidon/cymbal/internal/pathmatch"
 	"github.com/1broseidon/cymbal/lang"
 	"github.com/1broseidon/cymbal/parser"
 	"github.com/1broseidon/cymbal/symbols"
@@ -740,6 +741,30 @@ func SearchSymbols(dbPath string, q SearchQuery) ([]SymbolResult, error) {
 		return nil, err
 	}
 	return store.SearchSymbols(q.Text, q.Kind, q.Language, q.Exact, q.IgnoreCase, q.Limit)
+}
+
+// ListFileNames returns the repo-relative paths of indexed files, sorted,
+// optionally filtered by exact language name and by a pathmatch pattern
+// (same semantics as the CLI --path/--exclude filters: substring for plain
+// strings, glob with ** support otherwise). The result reflects the current
+// index contents: files skipped by walk rules or exclusions are absent.
+func ListFileNames(dbPath, language, pattern string) ([]string, error) {
+	store, err := openCached(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	files, err := store.AllFiles(language)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(files))
+	for _, f := range files {
+		if pattern != "" && !pathmatch.MatchAny(f.RelPath, []string{pattern}) {
+			continue
+		}
+		names = append(names, f.RelPath)
+	}
+	return names, nil
 }
 
 // RepoStats returns overview statistics for the repo in the given database.

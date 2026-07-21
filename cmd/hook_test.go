@@ -281,6 +281,93 @@ func TestDetectGlobToolCodePattern(t *testing.T) {
 	}
 }
 
+func TestDetectGlobToolPassesPatternThrough(t *testing.T) {
+	s := detectNudge(nudgeInput{toolName: "Glob", pattern: "**/*.go"})
+	if !strings.Contains(s.Replacement, "cymbal ls --names") || !strings.Contains(s.Replacement, "**/*.go") {
+		t.Errorf("Glob nudge should carry the original pattern; got %q", s.Replacement)
+	}
+}
+
+func TestDetectGlobToolWithPathSuppressed(t *testing.T) {
+	// An explicit search root makes the pattern non-repo-relative; the nudge
+	// must stay silent rather than suggest a wrong scope.
+	if s := detectNudge(nudgeInput{toolName: "Glob", pattern: "**/*.go", globPath: "/some/subdir"}); s.Replacement != "" {
+		t.Errorf("Glob with explicit path must not nudge; got %q", s.Replacement)
+	}
+	// "." is Glob's default root — equivalent to no path, so still nudge.
+	if s := detectNudge(nudgeInput{toolName: "Glob", pattern: "**/*.go", globPath: "."}); s.Replacement == "" {
+		t.Error("Glob with path \".\" should still nudge")
+	}
+}
+
+func TestLsNamesRejectsNullWithJSON(t *testing.T) {
+	if err := lsNamesCheckFlags(true, true); err == nil || !strings.Contains(err.Error(), "--null") {
+		t.Errorf("expected --null/--json rejection, got %v", err)
+	}
+	if err := lsNamesCheckFlags(true, false); err != nil {
+		t.Errorf("--null alone must be accepted, got %v", err)
+	}
+}
+
+func TestDetectGlobToolBracePatternUnfiltered(t *testing.T) {
+	// pathmatch has no brace expansion; the nudge must not pass a pattern
+	// that would match nothing.
+	s := detectNudge(nudgeInput{toolName: "Glob", pattern: "**/*.{go,ts}"})
+	if s.Replacement != "cymbal ls --names" {
+		t.Errorf("brace pattern should suggest unfiltered inventory; got %q", s.Replacement)
+	}
+}
+
+func TestDetectGlobToolHyphenPatternTerminated(t *testing.T) {
+	s := detectNudge(nudgeInput{toolName: "Glob", pattern: "-weird*.go"})
+	if s.Replacement == "" {
+		t.Fatal("leading-hyphen code pattern should still nudge")
+	}
+	if !strings.Contains(s.Replacement, "-- ") {
+		t.Errorf("leading-hyphen pattern needs a -- terminator; got %q", s.Replacement)
+	}
+}
+
+// TestNudgeReplacementsParse pins that every suggested command actually
+// exists: the subcommand resolves and each --flag is defined on it. This
+// catches nudges that advertise commands or flags that were never shipped.
+func TestNudgeReplacementsParse(t *testing.T) {
+	suggestions := []Suggestion{
+		detectNudge(nudgeInput{toolName: "Glob", pattern: "**/*.go"}),
+		detectNudge(nudgeInput{toolName: "Read", filePath: "/repo/src/handler.go"}),
+		detectNudge(nudgeInput{toolName: "Grep", pattern: "HandleAuth"}),
+	}
+	for _, s := range suggestions {
+		if s.Replacement == "" {
+			t.Fatalf("expected a suggestion for every fixture; got %+v", s)
+		}
+		// Tokenize the way a shell would (handles quoted patterns with
+		// spaces); "--" terminates flag parsing.
+		fields := splitShellish(s.Replacement)
+		if len(fields) < 2 || fields[0] != "cymbal" {
+			t.Errorf("suggestion %q should start with a cymbal subcommand", s.Replacement)
+			continue
+		}
+		cmd, rest, err := rootCmd.Find(fields[1:])
+		if err != nil || cmd == rootCmd {
+			t.Errorf("suggestion %q does not resolve to a subcommand: %v", s.Replacement, err)
+			continue
+		}
+		for _, tok := range rest {
+			if tok == "--" {
+				break
+			}
+			if !strings.HasPrefix(tok, "--") {
+				continue
+			}
+			name := strings.TrimPrefix(tok, "--")
+			if cmd.Flags().Lookup(name) == nil && cmd.InheritedFlags().Lookup(name) == nil {
+				t.Errorf("suggestion %q uses flag --%s not defined on %q", s.Replacement, name, cmd.Name())
+			}
+		}
+	}
+}
+
 func TestDetectGlobToolNonCodePatternSkipped(t *testing.T) {
 	for _, pat := range []string{"*.json", "**/*.md", "logs/*.log", "*.yaml"} {
 		if s := detectNudge(nudgeInput{toolName: "Glob", pattern: pat}); s.Replacement != "" {
