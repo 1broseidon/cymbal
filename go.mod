@@ -1,6 +1,6 @@
 module github.com/1broseidon/cymbal
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/coder3101/tree-sitter-proto v0.0.0-20250826173151-a1fbf36c3029
