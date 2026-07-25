@@ -491,14 +491,14 @@ func detectGlobToolSearch(pattern string) Suggestion {
 	return Suggestion{
 		Tool:        "Glob",
 		Replacement: "cymbal ls --names",
-		Why:         "Keep the Glob tool for non-code file discovery; cymbal indexes code paths already.",
+		Why:         "The inventory lists the code files cymbal indexed, with skip rules applied.",
 	}
 }
 
 // detectReadToolSearch fires when Claude Code's Read tool targets a code
 // file. Reading a whole file when you only need a symbol is wasteful; the
-// nudge points at `cymbal show <file>` which supports line ranges and
-// symbol-targeted reads.
+// nudge points at `cymbal show <file>:<Symbol>` or `cymbal outline <file>`
+// as alternatives that return targeted context.
 func detectReadToolSearch(filePath string) Suggestion {
 	if filePath == "" {
 		return Suggestion{}
@@ -508,8 +508,8 @@ func detectReadToolSearch(filePath string) Suggestion {
 	}
 	return Suggestion{
 		Tool:        "Read",
-		Replacement: fmt.Sprintf("cymbal show %s", shQuoteIfNeeded(filePath)),
-		Why:         "Use `cymbal show <file>:Symbol` or `<file>:L1-L2` when you want a specific symbol or line range.",
+		Replacement: fmt.Sprintf("cymbal outline %s", shQuoteIfNeeded(filePath)),
+		Why:         "Use `cymbal show <file>:<Symbol>` for a specific function/type in this file, or `cymbal show <file>:L1-L2` for a line range.",
 	}
 }
 
@@ -747,10 +747,26 @@ func readNudgeInput(args []string) (nudgeInput, error) {
 
 // ── nudge: output ─────────────────────────────────────────────────
 
-// nudgeTemplate is advisory, not declarative. It gives the agent an explicit
-// "ignore this if your original tool was correct" branch so it doesn't
-// reflexively switch tools (and apologize) for valid grep/rg use cases.
-const nudgeTemplate = "Cymbal note: this project is indexed. If your target is a symbol name (function/class/variable/constant) and you're searching repo-wide, try `%s` for ranked results with file:line in one call. If you're searching for literal text, a value inside a string, or you already know which file to read, your current command is the right tool — ignore this note. %s"
+// The nudge templates are advisory, not declarative. Each carries an explicit
+// "ignore this note" branch naming the case where the agent's original tool
+// was correct, so it doesn't reflexively switch tools (and apologize) for
+// valid use cases.
+const nudgeSearchTemplate = "Cymbal note: this project is indexed. If your target is a symbol name (function/class/variable/constant) and you're searching repo-wide, try `%s` for ranked results with file:line in one call. If you're searching for literal text, a value inside a string, or you already know which file to read, your current command is the right tool — ignore this note. %s"
+
+const nudgeReadTemplate = "Cymbal note: this project is indexed. If you need a specific symbol or section rather than the whole file, try `%s` to see what's defined. %s If you genuinely need the whole file, your Read call is the right tool — ignore this note."
+
+const nudgeGlobTemplate = "Cymbal note: this project is indexed. If you're looking for code files, try `%s` for the indexed file inventory. %s If you need exact glob matching or non-code files, your Glob call is the right tool — ignore this note."
+
+func nudgeMessage(s Suggestion) string {
+	switch s.Tool {
+	case "Read":
+		return fmt.Sprintf(nudgeReadTemplate, s.Replacement, s.Why)
+	case "Glob":
+		return fmt.Sprintf(nudgeGlobTemplate, s.Replacement, s.Why)
+	default:
+		return fmt.Sprintf(nudgeSearchTemplate, s.Replacement, s.Why)
+	}
+}
 
 func emitNudge(stdout, stderr io.Writer, format string, fields []string, s Suggestion) error {
 	cmdLine := strings.Join(fields, " ")
@@ -759,7 +775,7 @@ func emitNudge(stdout, stderr io.Writer, format string, fields []string, s Sugge
 		// pipelines. Claude Code treats empty stdout as "allow".
 		return nil
 	}
-	msg := fmt.Sprintf(nudgeTemplate, s.Replacement, s.Why)
+	msg := nudgeMessage(s)
 	switch format {
 	case "", "claude-code":
 		// Claude Code PreToolUse: decision + context live inside
@@ -800,16 +816,35 @@ func emitNudge(stdout, stderr io.Writer, format string, fields []string, s Sugge
 // to treat as persistent context. Short by design.
 const reminderText = `This project is indexed by cymbal. Use cymbal for structural code navigation when you know (or can guess) the symbol name.
 
-Default workflow:
-  1. ` + "`cymbal search <name>`" + ` to locate a symbol or file by name.
-  2. ` + "`cymbal show <sym>`" + ` to read source, or ` + "`cymbal investigate <sym>`" + ` for a quick summary.
-  3. ` + "`cymbal impact <sym>`" + `, ` + "`cymbal trace <sym>`" + `, and ` + "`cymbal impls <sym>`" + ` to follow callers, dependencies, and implementations.
+Typical flow: ` + "`cymbal search <name>`" + ` to locate -> ` + "`cymbal context/show/investigate <sym>`" + ` to read -> ` + "`cymbal impact/trace/impls <sym>`" + ` to follow callers, dependencies, and implementations.
+
+Orientation (new repo or file):
+  - ` + "`cymbal structure`" + ` for entry points, hotspots, and most-referenced symbols.
+  - ` + "`cymbal outline <file>`" + ` for the symbol map of a file before editing.
+  - ` + "`cymbal ls --stats`" + ` for repo overview (languages, file/symbol counts).
+
+Reading source:
+  - ` + "`cymbal context <sym>`" + ` for source + callers + imports in one call.
+  - ` + "`cymbal show <sym>`" + ` to read a function/type by name; ` + "`cymbal show Parent.child`" + ` for nested symbols; ` + "`cymbal show file.ts:80-120`" + ` for a line range.
+  - ` + "`cymbal investigate <sym>`" + ` for a kind-adaptive summary.
+
+Following relationships:
+  - ` + "`cymbal impact <sym>`" + ` for transitive callers, ` + "`cymbal trace <sym>`" + ` for the call graph downward, ` + "`cymbal impls <sym>`" + ` for implementations.
+  - ` + "`cymbal refs <sym>`" + ` for reference sites (best-effort), ` + "`cymbal importers <file>`" + ` for reverse import lookup.
+
+Assessing change risk:
+  - ` + "`cymbal changed`" + ` for diff-scoped impact of unstaged edits; ` + "`--staged`" + ` for staged edits, ` + "`--base <ref>`" + ` for working tree vs a base ref.
+  - ` + "`cymbal diff <sym> [base]`" + ` for the git diff scoped to one symbol's line range.
+
+Finding things:
+  - ` + "`cymbal search <name>`" + ` for symbol lookup (ranked: exact > prefix > fuzzy).
+  - ` + "`cymbal search --text <pattern>`" + ` for literal text or regex grep.
 
 Batch related lookups in one call when possible: ` + "`cymbal search Foo Bar`" + `, ` + "`cymbal show Foo Bar`" + `, ` + "`cymbal investigate Foo Bar`" + `, or pipe newline-separated symbols via ` + "`--stdin`" + `.
 
 Prefer ` + "`cymbal search`" + ` over the Grep tool (or rg/grep) for symbol/function/class lookup. Prefer ` + "`cymbal show`" + ` over Read when reading source by symbol name. Prefer ` + "`cymbal investigate / impact / trace / impls`" + ` over manual cross-referencing.
 
-Use ` + "`cymbal search --text <pattern>`" + ` only for literal text or regex. Use Grep/Glob/Read (or rg/grep/find) for: literal text in non-code files (markdown, JSON, logs, config), files outside the indexed repo, and direct path reads when you already know the path.
+Use Grep/Glob/Read (or rg/grep/find) for: literal text in non-code files (markdown, JSON, logs, config), files outside the indexed repo, and direct path reads when you already know the path.
 
 Cymbal is for structural queries (known names, call graphs, references). For semantic/conceptual queries ("find code related to X") where you don't know the exact symbol name, prefer a semantic search tool if one is configured.`
 

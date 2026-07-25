@@ -104,6 +104,29 @@ cymbal ls --repos
 
 ---
 
+## `cymbal structure`
+
+Show the structural shape of the indexed codebase. All data is derived from the
+existing index. Reports entry points, most referenced symbols, most imported
+files, and largest packages. Designed to answer "I've never seen this repo —
+where do I start?"
+
+```sh
+cymbal structure [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n, --limit <n>` | Max items per section (default: 10) |
+
+```sh
+cymbal structure
+cymbal structure --limit 5
+cymbal structure --json
+```
+
+---
+
 ## `cymbal outline`
 
 Show symbols defined in a file.
@@ -196,6 +219,57 @@ cymbal show internal/auth/handler.go:80-120
 
 # Show with surrounding context
 cymbal show handleAuth -C 5
+```
+
+---
+
+## `cymbal context`
+
+Show bundled context for a symbol: source code, callers, and imports of the
+defining file (plus referenced types in `--json` output). The single best
+command for "I'm about to edit this symbol".
+
+```sh
+cymbal context <symbol> [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n, --callers <n>` | Max callers to show (default: 20) |
+
+```sh
+cymbal context OpenStore
+cymbal context ParseFile --callers 10
+```
+
+---
+
+## `cymbal diff`
+
+Show the git diff for a symbol's line range. Resolves the symbol to a file and
+line range, then runs `git diff` filtered to only hunks that overlap the
+symbol's definition.
+
+```sh
+cymbal diff <symbol> [base] [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--stat` | Show diffstat for the whole defining file (not symbol-filtered) |
+
+```sh
+# diff vs HEAD
+cymbal diff ParseFile
+
+# diff vs main branch
+cymbal diff ParseFile main
+
+# diff vs specific commit
+cymbal diff ParseFile abc123
+
+# show diffstat only
+cymbal diff --stat ParseFile
 ```
 
 ---

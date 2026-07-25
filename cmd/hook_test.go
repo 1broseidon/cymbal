@@ -292,10 +292,29 @@ func TestDetectGlobToolNonCodePatternSkipped(t *testing.T) {
 func TestDetectReadToolCodeFile(t *testing.T) {
 	s := detectNudge(nudgeInput{toolName: "Read", filePath: "/repo/src/handler.go"})
 	if s.Replacement == "" {
-		t.Fatalf("Read on a code file should nudge with cymbal show; got %+v", s)
+		t.Fatalf("Read on a code file should nudge; got %+v", s)
 	}
-	if !strings.Contains(s.Replacement, "cymbal show") {
-		t.Errorf("expected cymbal show in suggestion; got %q", s.Replacement)
+	if !strings.Contains(s.Replacement, "cymbal outline") {
+		t.Errorf("expected cymbal outline in suggestion; got %q", s.Replacement)
+	}
+	if !strings.Contains(s.Why, "cymbal show") {
+		t.Errorf("expected Why to mention cymbal show for symbol reads; got %q", s.Why)
+	}
+}
+
+func TestNudgeMessagePerToolTemplates(t *testing.T) {
+	read := nudgeMessage(Suggestion{Tool: "Read", Replacement: "cymbal outline foo.go", Why: "why"})
+	if !strings.Contains(read, "cymbal outline foo.go") || !strings.Contains(read, "ignore this note") {
+		t.Errorf("Read nudge missing replacement or escape hatch: %q", read)
+	}
+	glob := nudgeMessage(Suggestion{Tool: "Glob", Replacement: "cymbal ls --names", Why: "why"})
+	if !strings.Contains(glob, "file inventory") || !strings.Contains(glob, "ignore this note") {
+		t.Errorf("Glob nudge missing framing or escape hatch: %q", glob)
+	}
+	// Unknown/other tools fall through to the search template.
+	search := nudgeMessage(Suggestion{Tool: "Grep", Replacement: "cymbal search Foo", Why: "why"})
+	if !strings.Contains(search, "ranked results") || !strings.Contains(search, "ignore this note") {
+		t.Errorf("search nudge should use the search template: %q", search)
 	}
 }
 
