@@ -15,12 +15,17 @@ import (
 )
 
 var showCmd = &cobra.Command{
-	Use:   "show <symbol|file[:L1-L2]> [symbol2 ...]",
+	Use:   "show <symbol|file[:L1-L2|:Symbol]> [symbol2 ...]",
 	Short: "Read source by symbol name or file path",
 	Long: `Show source code for a symbol or file.
 
-If the argument contains '/' or ends with a known extension, it's treated as a file path.
-Otherwise, it's treated as a symbol name.
+file.go:SymbolName looks up a symbol with a file hint: results are narrowed to
+files whose path ends with (or contains) the hint, which disambiguates common
+names (Handler, Config) without the qualified Parent.child syntax. If nothing
+matches the hint, the search falls back to global results.
+
+Otherwise, an argument containing '/' or ending with a known extension is
+treated as a file path; anything else is a symbol name.
 
 Multi-symbol mode: pass more than one symbol, or pipe newline-separated names
 via --stdin, and show will render each one under a "═══ <name> ═══" header.
@@ -29,6 +34,7 @@ multiple reads in a single turn.
 
 Examples:
   cymbal show ParseFile                        # show symbol source
+  cymbal show store.go:SearchSymbols           # show symbol, narrowed by file hint
   cymbal show internal/index/store.go          # show full file
   cymbal show internal/index/store.go:80-120   # show lines 80-120
   cymbal show Foo Bar Baz                      # batch: three symbols at once
@@ -196,6 +202,9 @@ func buildShowSymbolPayload(dbPath, name string, ctx int, showAll bool, includes
 	}
 	allResults := filterByPath(res.Results, func(r index.SymbolResult) string { return r.RelPath }, includes, excludes)
 	if len(allResults) == 0 {
+		if file, sym := parseSymbolArg(name); file != "" && len(res.Results) == 0 {
+			return nil, fmt.Errorf("symbol not found: %s (no match in %s or globally)", sym, file)
+		}
 		return nil, fmt.Errorf("symbol not found: %s", name)
 	}
 	displayResults := allResults
@@ -237,8 +246,11 @@ func buildShowSymbolPayload(dbPath, name string, ctx int, showAll bool, includes
 // isFilePath returns true if the target looks like a file path (not file:Symbol).
 func isFilePath(target string) bool {
 	if idx := strings.LastIndex(target, ":"); idx > 0 {
-		suffix := target[idx+1:]
-		if len(suffix) > 0 && suffix[0] != 'L' && (suffix[0] < '0' || suffix[0] > '9') {
+		// Only a numeric suffix (with optional leading L) is a line range;
+		// anything else — including symbols starting with L, like :Load —
+		// routes to symbol lookup.
+		rangeStr := strings.TrimPrefix(target[idx+1:], "L")
+		if len(rangeStr) == 0 || rangeStr[0] < '0' || rangeStr[0] > '9' {
 			return false
 		}
 		target = target[:idx]
@@ -427,6 +439,9 @@ func showSymbol(dbPath, name string, ctx int, jsonOut, showAll bool, includes, e
 
 	allResults := filterByPath(res.Results, func(r index.SymbolResult) string { return r.RelPath }, includes, excludes)
 	if len(allResults) == 0 {
+		if file, sym := parseSymbolArg(name); file != "" && len(res.Results) == 0 {
+			return fmt.Errorf("symbol not found: %s (no match in %s or globally)", sym, file)
+		}
 		return fmt.Errorf("symbol not found: %s", name)
 	}
 	displayResults := allResults
