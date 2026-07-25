@@ -172,18 +172,21 @@ cymbal search parse --kind function --lang go
 Read source code by symbol name or file path.
 
 ```sh
-cymbal show <symbol|file[:L1-L2]> [flags]
+cymbal show <symbol|file[:L1-L2|:Symbol]> [flags]
 ```
 
 | Flag | Description |
 |------|-------------|
 | `-C, --context <n>` | Lines of context around the target |
 
-If the argument contains `/` or ends with a known extension, it's treated as a file path. Otherwise, it's treated as a symbol name.
+`file.go:SymbolName` looks up a symbol with a file hint: results are narrowed to files whose path ends with (or contains) the hint, falling back to global results if nothing matches. Otherwise, an argument containing `/` or ending with a known extension is treated as a file path; anything else is a symbol name.
 
 ```sh
 # Show a symbol's source
 cymbal show handleAuth
+
+# Narrow a common name by file hint
+cymbal show store.go:SearchSymbols
 
 # Show a file
 cymbal show internal/auth/handler.go
