@@ -279,6 +279,69 @@ func (s *Store) DeleteStalePaths(currentPaths map[string]struct{}) (int, error) 
 	return deleted, nil
 }
 
+// DeleteStalePathsUnder removes stored files that are under the given prefix
+// but not in currentPaths. Used when indexing a subtree to avoid pruning
+// files outside that subtree.
+func (s *Store) DeleteStalePathsUnder(prefix string, currentPaths map[string]struct{}) (int, error) {
+	stored, err := s.AllStoredPaths()
+	if err != nil {
+		return 0, err
+	}
+
+	pfx := prefix
+	if !strings.HasSuffix(pfx, string(filepath.Separator)) {
+		pfx += string(filepath.Separator)
+	}
+
+	var stale []string
+	for _, p := range stored {
+		if !strings.HasPrefix(p, pfx) {
+			continue
+		}
+		if _, ok := currentPaths[p]; !ok {
+			stale = append(stale, p)
+		}
+	}
+
+	if len(stale) == 0 {
+		return 0, nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	const batchSize = 100
+	deleted := 0
+	for i := 0; i < len(stale); i += batchSize {
+		end := i + batchSize
+		if end > len(stale) {
+			end = len(stale)
+		}
+		batch := stale[i:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for j, p := range batch {
+			placeholders[j] = "?"
+			args[j] = p
+		}
+		q := "DELETE FROM files WHERE path IN (" + strings.Join(placeholders, ",") + ")"
+		res, err := tx.Exec(q, args...)
+		if err != nil {
+			return 0, err
+		}
+		n, _ := res.RowsAffected()
+		deleted += int(n)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
 // HashFile computes SHA-256 of a file.
 func HashFile(path string) (string, error) {
 	data, err := os.ReadFile(path)

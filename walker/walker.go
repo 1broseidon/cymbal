@@ -32,6 +32,10 @@ type WalkOptions struct {
 	IncludeGenerated bool
 	// IncludeLargeFiles disables the default large-source-file skip rule.
 	IncludeLargeFiles bool
+	// RelBase, if set, is the base directory for RelPath computation and
+	// exclude matching instead of the walk root. Set it to the repo root
+	// when walking a subtree so paths stay repo-relative.
+	RelBase string
 }
 
 // WalkStats reports files omitted by walk-time path filters.
@@ -88,6 +92,10 @@ func Walk(root string, workers int, langFilter func(string) bool) ([]FileEntry, 
 func WalkWithOptions(root string, workers int, langFilter func(string) bool, opts WalkOptions) ([]FileEntry, WalkStats, error) {
 	if workers <= 0 {
 		workers = 8
+	}
+	relBase := opts.RelBase
+	if relBase == "" {
+		relBase = root
 	}
 
 	var mu sync.Mutex
@@ -147,7 +155,7 @@ func WalkWithOptions(root string, workers int, langFilter func(string) bool, opt
 			return nil
 		}
 
-		rel, err := filepath.Rel(root, path)
+		rel, err := filepath.Rel(relBase, path)
 		if err != nil {
 			rel = path
 		}

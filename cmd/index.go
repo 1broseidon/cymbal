@@ -13,8 +13,13 @@ import (
 var indexCmd = &cobra.Command{
 	Use:   "index [path]",
 	Short: "Index a directory for symbol discovery",
-	Long:  `Index a directory for symbol discovery.`,
-	Args:  cobra.MaximumNArgs(1),
+	Long: `Index a directory for symbol discovery.
+
+Pointing at a subdirectory of a git repo updates the repo's index in place,
+restricted to that subtree: files outside the subtree are neither reparsed
+nor pruned. Filter flags (--exclude, --include-*) on a subtree run apply to
+that run only; later query refreshes use the options from the last full index.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := "."
 		if len(args) > 0 {
@@ -29,6 +34,11 @@ var indexCmd = &cobra.Command{
 		if _, err := os.Stat(absPath); err != nil {
 			return fmt.Errorf("path not found: %s", absPath)
 		}
+		// Resolve symlinks so git-root detection (a lexical climb) sees the
+		// real location; otherwise a symlinked path gets an orphaned DB.
+		if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+			absPath = resolved
+		}
 
 		workers, _ := cmd.Flags().GetInt("workers")
 		force, _ := cmd.Flags().GetBool("force")
@@ -36,28 +46,45 @@ var indexCmd = &cobra.Command{
 		includeGenerated, _ := cmd.Flags().GetBool("include-generated")
 		includeLargeFiles, _ := cmd.Flags().GetBool("include-large-files")
 
-		// Use --db flag > CYMBAL_DB env > compute from target path.
+		// Resolve the repo root for DB path computation. If absPath is a
+		// subdirectory of a git repo, use the repo root for the DB and pass
+		// the subdirectory as a scope.
+		repoRoot := absPath
+		var scope string
+		if gitRoot, gitErr := index.FindGitRoot(absPath); gitErr == nil && gitRoot != absPath {
+			repoRoot = gitRoot
+			scope = absPath
+		}
+
+		// Use --db flag > CYMBAL_DB env > compute from repo root.
 		dbPath, _ := cmd.Flags().GetString("db")
 		if dbPath == "" {
 			if p := os.Getenv("CYMBAL_DB"); p != "" {
 				dbPath = p
 			} else {
-				dbPath, err = index.RepoDBPath(absPath)
+				dbPath, err = index.RepoDBPath(repoRoot)
 				if err != nil {
 					return fmt.Errorf("computing db path: %w", err)
 				}
 			}
 		}
 
+		if scope != "" && (len(excludes) > 0 || includeGenerated || includeLargeFiles) {
+			if _, err := os.Stat(dbPath); err == nil {
+				fmt.Fprintln(os.Stderr, "note: filter flags on a subtree index apply to this run only; later refreshes use the options from the last full index")
+			}
+		}
+
 		fmt.Fprintf(os.Stderr, "Indexing %s ...\n", absPath)
 		start := time.Now()
 
-		stats, err := index.Index(absPath, dbPath, index.Options{
+		stats, err := index.Index(repoRoot, dbPath, index.Options{
 			Workers:           workers,
 			Force:             force,
 			Exclude:           excludes,
 			IncludeGenerated:  includeGenerated,
 			IncludeLargeFiles: includeLargeFiles,
+			Scope:             scope,
 		})
 		if err != nil {
 			return fmt.Errorf("indexing failed: %w", err)

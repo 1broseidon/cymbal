@@ -539,3 +539,235 @@ func TestFeatureListReposUsesCacheDirOverride(t *testing.T) {
 		t.Fatalf("expected ListRepos to return %s from cache override, got %+v", dbPath, repos)
 	}
 }
+
+func TestFeatureIndexSubdirectoryScopeUsesCorrectDB(t *testing.T) {
+	dir := createTestRepo(t)
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	// Create a subdirectory with a file.
+	subdir := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	subFile := `package sub
+
+func SubHelper() string {
+    return "hello"
+}
+`
+	if err := os.WriteFile(filepath.Join(subdir, "helper.go"), []byte(subFile), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Index the full repo first.
+	stats1, err := Index(dir, dbPath, Options{Workers: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats1.FilesIndexed == 0 {
+		t.Fatal("expected files to be indexed")
+	}
+
+	// Now force-index only the subdirectory. This should update the same DB
+	// and NOT delete files outside the subdirectory.
+	stats2, err := Index(dir, dbPath, Options{Workers: 2, Force: true, Scope: subdir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats2.FilesIndexed != 1 {
+		t.Errorf("expected 1 file indexed in subdir, got %d", stats2.FilesIndexed)
+	}
+	// Files outside the scope should NOT be pruned.
+	if stats2.StaleRemoved != 0 {
+		t.Errorf("expected 0 stale removed (files outside scope preserved), got %d", stats2.StaleRemoved)
+	}
+
+	// Verify that symbols from the root are still present.
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	results, err := store.SearchSymbols("NewServer", "", "", true, false, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) == 0 {
+		t.Error("expected NewServer (from root) to still be in DB after subdir reindex")
+	}
+
+	results, err = store.SearchSymbols("SubHelper", "", "", true, false, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) == 0 {
+		t.Error("expected SubHelper (from subdir) to be in DB")
+	} else {
+		// rel_path must be relative to the repo root, not the walk scope.
+		want := filepath.Join("sub", "helper.go")
+		if results[0].RelPath != want {
+			t.Errorf("SubHelper rel_path = %q, want %q", results[0].RelPath, want)
+		}
+	}
+}
+
+func TestFeatureIndexSubdirectoryScopePrunesOnlyWithinScope(t *testing.T) {
+	dir := createTestRepo(t)
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	// Create a subdirectory with two files.
+	subdir := filepath.Join(dir, "pkg")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subdir, "a.go"), []byte("package pkg\nfunc A() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subdir, "b.go"), []byte("package pkg\nfunc B() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Index the full repo.
+	_, err := Index(dir, dbPath, Options{Workers: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete one file in the subdir.
+	os.Remove(filepath.Join(subdir, "b.go"))
+
+	// Reindex only the subdir - should prune b.go but not touch root files.
+	stats, err := Index(dir, dbPath, Options{Workers: 2, Scope: subdir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.StaleRemoved != 1 {
+		t.Errorf("expected 1 stale removed within scope, got %d", stats.StaleRemoved)
+	}
+
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	// B should be gone.
+	results, err := store.SearchSymbols("B", "", "", true, false, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Error("expected B to be pruned after deletion + scoped reindex")
+	}
+
+	// A and root-level symbols should still be there.
+	results, err = store.SearchSymbols("A", "", "", true, false, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) == 0 {
+		t.Error("expected A to still be present")
+	}
+
+	results, err = store.SearchSymbols("NewServer", "", "", true, false, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) == 0 {
+		t.Error("expected NewServer (root file) to still be present after scoped reindex")
+	}
+}
+
+func TestFeatureIndexScopeOutsideRootRejected(t *testing.T) {
+	dir := createTestRepo(t)
+	outside := t.TempDir()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	if _, err := Index(dir, dbPath, Options{Workers: 2, Scope: outside}); err == nil {
+		t.Fatal("expected error for scope outside repo root")
+	}
+}
+
+func TestFeatureIndexScopeEqualsRootActsUnscoped(t *testing.T) {
+	dir := createTestRepo(t)
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	if _, err := Index(dir, dbPath, Options{Workers: 2, Scope: dir, IncludeGenerated: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	// Scope == root is normalized to a full index, so options are stored.
+	raw, err := store.GetMeta("index_include_generated")
+	if err != nil || raw != "true" {
+		t.Errorf("index_include_generated = %q, %v; want \"true\" (scope==root should act unscoped)", raw, err)
+	}
+}
+
+func TestFeatureFirstScopedIndexStoresOptions(t *testing.T) {
+	dir := createTestRepo(t)
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	subdir := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subdir, "helper.go"), []byte("package sub\nfunc SubHelper() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// First-ever index is scoped: repo_root AND options must be seeded so a
+	// later EnsureFresh completes the repo with the same options.
+	if _, err := Index(dir, dbPath, Options{Workers: 2, Scope: subdir, IncludeGenerated: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if root, err := store.GetMeta("repo_root"); err != nil || root == "" {
+		t.Errorf("repo_root = %q, %v; want non-empty on first scoped index", root, err)
+	}
+	if raw, err := store.GetMeta("index_include_generated"); err != nil || raw != "true" {
+		t.Errorf("index_include_generated = %q, %v; want \"true\" on first scoped index", raw, err)
+	}
+}
+
+func TestFeatureScopedExcludeIsRepoRelative(t *testing.T) {
+	dir := createTestRepo(t)
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	subdir := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subdir, "helper.go"), []byte("package sub\nfunc SubHelper() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Index(dir, dbPath, Options{Workers: 2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Exclude patterns are repo-relative on scoped runs too: "sub/helper.go"
+	// must match even though the walk root is the subtree.
+	stats, err := Index(dir, dbPath, Options{Workers: 2, Force: true, Scope: subdir, Exclude: []string{"sub/helper.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.FilesExcluded != 1 {
+		t.Errorf("FilesExcluded = %d, want 1 (repo-relative pattern must match in scoped walk)", stats.FilesExcluded)
+	}
+	if stats.StaleRemoved != 1 {
+		t.Errorf("StaleRemoved = %d, want 1 (excluded file pruned from DB)", stats.StaleRemoved)
+	}
+}
