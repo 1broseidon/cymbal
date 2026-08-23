@@ -1024,7 +1024,7 @@ func (e *symbolExtractor) classifyJSInner(nodeType string, node *sitter.Node) (s
 			if child.Kind() == "variable_declarator" {
 				nameNode := child.ChildByFieldName("name")
 				valueNode := child.ChildByFieldName("value")
-				if valueNode != nil && jsValueIsFunction(valueNode) {
+				if valueNode != nil && jsValueIsFunction(valueNode, e.src) {
 					return "function", nameNode
 				}
 			}
@@ -1035,12 +1035,11 @@ func (e *symbolExtractor) classifyJSInner(nodeType string, node *sitter.Node) (s
 
 // jsValueIsFunction reports whether a variable_declarator's value node
 // represents a function definition. Matches direct arrow functions/function
-// expressions, and also call_expression wrappers (useCallback, useMemo, etc.)
-// whose first argument is an arrow function or function expression.
-// Only matches call_expressions with a bare identifier callee (not member
-// expressions like arr.map or obj.on) to avoid false positives.
-func jsValueIsFunction(node *sitter.Node) bool {
-	return jsUnwrapToFunction(node) != nil
+// expressions, call_expression wrappers (useCallback, useMemo, etc.) whose
+// first argument is a function, and TS cast/parenthesis wrappers around
+// either. See jsUnwrapToFunction for the callee rules.
+func jsValueIsFunction(node *sitter.Node, src []byte) bool {
+	return jsUnwrapToFunction(node, src) != nil
 }
 
 func (e *symbolExtractor) classifyRust(nodeType string, node *sitter.Node) (string, *sitter.Node) {
@@ -2441,7 +2440,7 @@ func (e *symbolExtractor) classifyGeneric(nodeType string, node *sitter.Node) (s
 // lexical_declaration) to the actual function/arrow_function/method_definition
 // node so parameters and return type can be located. Returns the input node
 // unchanged when it's already a function-bearing node.
-func jsSignatureNode(node *sitter.Node) *sitter.Node {
+func jsSignatureNode(node *sitter.Node, src []byte) *sitter.Node {
 	if node == nil {
 		return node
 	}
@@ -2453,7 +2452,7 @@ func jsSignatureNode(node *sitter.Node) *sitter.Node {
 			case "function_declaration", "function", "arrow_function", "method_definition":
 				return child
 			case "lexical_declaration", "variable_declaration":
-				return jsSignatureNode(child)
+				return jsSignatureNode(child, src)
 			}
 		}
 	case "lexical_declaration", "variable_declaration":
@@ -2461,7 +2460,7 @@ func jsSignatureNode(node *sitter.Node) *sitter.Node {
 			child := node.Child(uint(i))
 			if child.Kind() == "variable_declarator" {
 				if val := child.ChildByFieldName("value"); val != nil {
-					if fn := jsUnwrapToFunction(val); fn != nil {
+					if fn := jsUnwrapToFunction(val, src); fn != nil {
 						return fn
 					}
 				}
@@ -2472,21 +2471,38 @@ func jsSignatureNode(node *sitter.Node) *sitter.Node {
 }
 
 // jsUnwrapToFunction returns the arrow_function or function node from a value,
-// unwrapping call_expression wrappers (useCallback/useMemo/memo(forwardRef(...))
-// and similar) when the wrapped function is the FIRST argument. Restricting to
+// peeling TS cast/parenthesis wrappers (as/satisfies/(...)/!) and unwrapping
+// call_expression wrappers (useCallback/useMemo/memo(forwardRef(...)) and
+// similar) when the wrapped function is the FIRST argument. Restricting to
 // the first argument keeps utility calls that take trailing callbacks
 // (sortBy(items, fn), fetchWithRetry(url, cb)) from being misread as function
-// definitions. Only call_expressions with a bare identifier callee are
-// unwrapped (not member expressions like arr.map or obj.on). Known accepted
-// noise: first-argument-callback calls (setTimeout(fn, ms)) and useMemo of a
-// plain value still classify as functions.
-func jsUnwrapToFunction(node *sitter.Node) *sitter.Node {
+// definitions. Callees unwrap per jsHookLikeCallee: bare identifiers, plus
+// namespace-qualified hook-convention members (React.useCallback); method
+// calls like arr.map or emitter.on never do. Known accepted noise:
+// first-argument-callback calls (setTimeout(fn, ms)) and useMemo of a plain
+// value still classify as functions, and a double-arrow factory
+// (useMemo(() => (rows) => ...)) reports the outer thunk's signature ().
+func jsUnwrapToFunction(node *sitter.Node, src []byte) *sitter.Node {
+	// Peel wrappers that carry the value as their first named child:
+	// `(fn) as Handler`, `fn satisfies H`, `(fn)`, `fn!`.
+	for node != nil {
+		switch node.Kind() {
+		case "as_expression", "satisfies_expression",
+			"parenthesized_expression", "non_null_expression":
+			node = node.NamedChild(0)
+			continue
+		}
+		break
+	}
+	if node == nil {
+		return nil
+	}
 	switch node.Kind() {
 	case "arrow_function", "function", "function_expression":
 		return node
 	case "call_expression":
 		callee := node.ChildByFieldName("function")
-		if callee == nil || callee.Kind() != "identifier" {
+		if callee == nil || !jsHookLikeCallee(callee, src) {
 			return nil
 		}
 		args := node.ChildByFieldName("arguments")
@@ -2501,10 +2517,38 @@ func jsUnwrapToFunction(node *sitter.Node) *sitter.Node {
 			if !arg.IsNamed() || arg.Kind() == "comment" {
 				continue
 			}
-			return jsUnwrapToFunction(arg)
+			return jsUnwrapToFunction(arg, src)
 		}
 	}
 	return nil
+}
+
+// jsHookLikeCallee reports whether a call's callee can plausibly wrap a
+// function definition: a bare identifier (useCallback, memo, debounce), or a
+// namespace-qualified member whose object is a bare identifier and whose
+// property either follows the hook naming convention (use + capital letter:
+// React.useCallback, MyHooks.useThing) or is a React wrapper name
+// (React.memo / forwardRef / lazy). Method calls (arr.map, emitter.on,
+// styled.button, this.useThing) and computed access (React["useCallback"])
+// never match.
+func jsHookLikeCallee(callee *sitter.Node, src []byte) bool {
+	switch callee.Kind() {
+	case "identifier":
+		return true
+	case "member_expression":
+		obj := callee.ChildByFieldName("object")
+		prop := callee.ChildByFieldName("property")
+		if obj == nil || prop == nil || obj.Kind() != "identifier" || prop.Kind() != "property_identifier" {
+			return false
+		}
+		name := prop.Utf8Text(src)
+		switch name {
+		case "memo", "forwardRef", "lazy":
+			return true
+		}
+		return len(name) > 3 && strings.HasPrefix(name, "use") && name[3] >= 'A' && name[3] <= 'Z'
+	}
+	return false
 }
 
 func (e *symbolExtractor) extractSignature(node *sitter.Node, kind string) string {
@@ -2519,7 +2563,7 @@ func (e *symbolExtractor) extractSignature(node *sitter.Node, kind string) strin
 		// `const foo = (x) => ...`). Descend to the actual function-bearing node
 		// so parameters / return type can be located.
 		if e.lang == "typescript" || e.lang == "tsx" || e.lang == "javascript" {
-			node = jsSignatureNode(node)
+			node = jsSignatureNode(node, e.src)
 		}
 
 		var sig string
