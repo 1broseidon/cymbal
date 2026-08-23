@@ -208,6 +208,7 @@ type nudgeInput struct {
 	glob     string // Grep --glob filter
 	fileType string // Grep --type filter
 	filePath string // Read file_path
+	globPath string // Glob path (optional search root)
 }
 
 // detectSearchCommand inspects an already-tokenized argv (first element is
@@ -446,7 +447,7 @@ func detectNudge(in nudgeInput) Suggestion {
 	case "Grep":
 		return detectGrepToolSearch(in.pattern, in.glob, in.fileType)
 	case "Glob":
-		return detectGlobToolSearch(in.pattern)
+		return detectGlobToolSearch(in.pattern, in.globPath)
 	case "Read":
 		return detectReadToolSearch(in.filePath)
 	}
@@ -477,20 +478,34 @@ func detectGrepToolSearch(pattern, glob, fileType string) Suggestion {
 }
 
 // detectGlobToolSearch fires when the Glob tool's pattern targets code files.
-// The natural cymbal equivalent is `cymbal ls --names` (file inventory) or a
-// scoped `cymbal search --path <pattern> <symbol>` once a symbol is in hand —
-// the nudge points at the broader navigation surface rather than a single
-// command, since Glob alone doesn't carry symbol intent.
-func detectGlobToolSearch(pattern string) Suggestion {
-	if pattern == "" {
+// The cymbal equivalent is `cymbal ls --names '<pattern>'` — the indexed file
+// inventory, narrowed by the same pattern. When the Glob call carries an
+// explicit path (search root), the nudge stays silent: the pattern is
+// relative to that root and cannot be rebased reliably to repo-relative form.
+func detectGlobToolSearch(pattern, path string) Suggestion {
+	// "." is Glob's default root, equivalent to no path.
+	if path == "." {
+		path = ""
+	}
+	if pattern == "" || path != "" {
 		return Suggestion{}
 	}
 	if !globTargetsCode(pattern) {
 		return Suggestion{}
 	}
+	// pathmatch has no brace expansion, so a {go,ts}-style pattern would
+	// match nothing — suggest the unfiltered inventory instead.
+	replacement := "cymbal ls --names"
+	if !strings.ContainsAny(pattern, "{}") {
+		quoted := shQuoteIfNeeded(pattern)
+		if strings.HasPrefix(pattern, "-") {
+			quoted = "-- " + quoted
+		}
+		replacement += " " + quoted
+	}
 	return Suggestion{
 		Tool:        "Glob",
-		Replacement: "cymbal ls --names",
+		Replacement: replacement,
 		Why:         "The inventory lists the code files cymbal indexed, with skip rules applied.",
 	}
 }
@@ -717,6 +732,7 @@ func readNudgeInput(args []string) (nudgeInput, error) {
 				Pattern  string `json:"pattern"`
 				Glob     string `json:"glob"`
 				Type     string `json:"type"`
+				Path     string `json:"path"`
 				FilePath string `json:"file_path"`
 			} `json:"tool_input"`
 		}
@@ -730,6 +746,7 @@ func readNudgeInput(args []string) (nudgeInput, error) {
 				return in, nil
 			case "Glob":
 				in.pattern = payload.ToolInput.Pattern
+				in.globPath = payload.ToolInput.Path
 				return in, nil
 			case "Read":
 				in.filePath = payload.ToolInput.FilePath

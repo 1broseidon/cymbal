@@ -3,6 +3,7 @@ package index
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -769,5 +770,74 @@ func TestFeatureScopedExcludeIsRepoRelative(t *testing.T) {
 	}
 	if stats.StaleRemoved != 1 {
 		t.Errorf("StaleRemoved = %d, want 1 (excluded file pruned from DB)", stats.StaleRemoved)
+	}
+}
+func TestFeatureListFileNames(t *testing.T) {
+	dir := createTestRepo(t)
+	for rel, content := range map[string]string{
+		"sub/helper.go":        "package sub\nfunc SubHelper() {}\n",
+		"web/app.ts":           "export const app = 1\n",
+		"node_modules/skip.js": "var x = 1\n",
+	} {
+		path := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	if _, err := Index(dir, dbPath, Options{Workers: 2}); err != nil {
+		t.Fatal(err)
+	}
+
+	names, err := ListFileNames(dbPath, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	has := func(want string) bool {
+		for _, n := range names {
+			if n == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(filepath.Join("sub", "helper.go")) || !has(filepath.Join("web", "app.ts")) {
+		t.Errorf("expected indexed files in listing; got %v", names)
+	}
+	for _, n := range names {
+		if strings.Contains(n, "node_modules") {
+			t.Errorf("skip rules must apply: %v", names)
+		}
+	}
+	if !sort.StringsAreSorted(names) {
+		t.Errorf("names must be sorted; got %v", names)
+	}
+
+	tsOnly, err := ListFileNames(dbPath, "typescript", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tsOnly) != 1 || tsOnly[0] != filepath.Join("web", "app.ts") {
+		t.Errorf("lang filter: want only web/app.ts, got %v", tsOnly)
+	}
+
+	subOnly, err := ListFileNames(dbPath, "", "sub/**")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subOnly) != 1 || subOnly[0] != filepath.Join("sub", "helper.go") {
+		t.Errorf("glob pattern: want only sub/helper.go, got %v", subOnly)
+	}
+
+	none, err := ListFileNames(dbPath, "", "zz-no-such-path")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(none) != 0 {
+		t.Errorf("no-match pattern: want empty, got %v", none)
 	}
 }

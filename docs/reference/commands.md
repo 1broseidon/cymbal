@@ -79,7 +79,7 @@ cymbal version [--json]
 Show file tree, repo list, or repo statistics.
 
 ```sh
-cymbal ls [path] [flags]
+cymbal ls [path|pattern] [flags]
 ```
 
 | Flag | Description |
@@ -87,6 +87,9 @@ cymbal ls [path] [flags]
 | `-D, --depth <n>` | Max tree depth (0 = unlimited) |
 | `--repos` | List all indexed repositories |
 | `--stats` | Show repo overview (languages, file/symbol counts) |
+| `--names` | Flat sorted list of indexed file paths (one per line) |
+| `--lang <language>` | With `--names`: only files of this language |
+| `--null` | With `--names`: NUL-terminate entries (for `xargs -0`) |
 
 ```sh
 # File tree
@@ -100,6 +103,16 @@ cymbal ls --stats
 
 # All indexed repos
 cymbal ls --repos
+
+# Indexed file inventory (skip rules applied under default index options)
+cymbal ls --names
+
+# Narrow by pattern (same semantics as --path/--exclude) or language
+cymbal ls --names 'parser/**'
+cymbal ls --names --lang typescript
+
+# Feed batch commands (NUL-safe)
+cymbal ls --names --null 'cmd/**' | xargs -0 -n1 cymbal outline
 ```
 
 ---
