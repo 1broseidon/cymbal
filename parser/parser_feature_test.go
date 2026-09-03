@@ -2856,3 +2856,113 @@ export let handler = () => {}
 		t.Fatal("expected exported let arrow function to be indexed")
 	}
 }
+
+func TestFeatureTSCastWrappedFunctionsIndexed(t *testing.T) {
+	src := []byte(`import { useCallback } from 'react'
+
+const plain = ((y: string) => y) as Transform
+const viaHook = useCallback((x: number) => x * 2, []) as Handler
+const satisfied = ((z: boolean) => !z) satisfies Predicate
+const parens = ((n: number) => n + 1)
+`)
+	result, err := ParseSource(src, "test.ts", "typescript", lang.Default.TreeSitter("typescript"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name    string
+		wantSig string
+	}{
+		{"plain", "y: string"},
+		{"viaHook", "x: number"},
+		{"satisfied", "z: boolean"},
+		{"parens", "n: number"},
+	}
+	for _, tc := range cases {
+		sym := findSymbolKind(result.Symbols, tc.name, "function")
+		if sym == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected %s indexed as function through cast/paren wrapper", tc.name)
+		}
+		if !strings.Contains(sym.Signature, tc.wantSig) {
+			t.Errorf("%s: signature %q missing %q", tc.name, sym.Signature, tc.wantSig)
+		}
+	}
+}
+
+func TestFeatureTSNamespaceHooksIndexed(t *testing.T) {
+	src := []byte(`import * as React from 'react'
+
+const handleClick = React.useCallback((e: Event) => e.preventDefault(), [])
+const Card = React.memo(() => null)
+const Input = React.forwardRef((props: Props, ref: Ref) => null)
+const custom = MyHooks.useDebounce((v: string) => v.trim(), 300)
+`)
+	result, err := ParseSource(src, "test.tsx", "tsx", lang.Default.TreeSitter("tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"handleClick", "Card", "Input", "custom"} {
+		if sym := findSymbolKind(result.Symbols, name, "function"); sym == nil {
+			debugParseResult(t, result)
+			t.Fatalf("expected %s indexed as function via namespace-qualified hook", name)
+		}
+	}
+
+	handleClick := findSymbol(result.Symbols, "handleClick")
+	if !strings.Contains(handleClick.Signature, "e: Event") {
+		t.Errorf("handleClick: signature %q missing parameter info", handleClick.Signature)
+	}
+}
+
+func TestFeatureTSNonHookMemberCallsStillNotIndexed(t *testing.T) {
+	// The hook-convention opening must not readmit method calls: wrong
+	// property shape, non-identifier objects, chained namespaces, computed
+	// access, and use-prefixed-but-not-hook-cased names all stay excluded.
+	src := []byte(`const styledBtn = styled.button(() => ({}))
+const bound = this.useThing(() => 1)
+const chained = App.Hooks.useThing(() => 1)
+const computed = React["useCallback"](() => 1)
+const notHook = api.userFetch(() => 1)
+const useLower = api.username(() => 1)
+const mapped = arr.map((x) => x * 2)
+`)
+	result, err := ParseSource(src, "test.ts", "typescript", lang.Default.TreeSitter("typescript"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sym := range result.Symbols {
+		t.Errorf("unexpected symbol: %s (%s) - member-call guard regressed", sym.Name, sym.Kind)
+	}
+}
+
+func TestFeatureTSDoubleArrowFactorySignaturePinned(t *testing.T) {
+	// Documented behavior: a double-arrow factory indexes the OUTER thunk,
+	// so the signature is "()" rather than the inner "(rows: Row[])".
+	// Distinguishing useMemo (binding = factory's return) from useCallback
+	// (binding = the function itself) would need name-aware special casing;
+	// pinned here so any change is deliberate.
+	src := []byte(`import { useMemo } from 'react'
+
+export function Page() {
+    const sortRows = useMemo(() => (rows: Row[]) => rows.sort(), [])
+    return null
+}
+`)
+	result, err := ParseSource(src, "test.tsx", "tsx", lang.Default.TreeSitter("tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sym := findSymbolKind(result.Symbols, "sortRows", "function")
+	if sym == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected sortRows indexed as function")
+	}
+	if sym.Signature != "()" {
+		t.Errorf("double-arrow factory signature = %q, want %q (update the jsUnwrapToFunction doc comment if this changed deliberately)", sym.Signature, "()")
+	}
+}
