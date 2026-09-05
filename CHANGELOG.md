@@ -28,6 +28,8 @@ This release includes the changes merged after v0.14.0 in PRs #66–#76. Integra
 
 ### Fixed
 
+- **File hints narrow duplicate symbols correctly on Windows** — `show` and `investigate` normalize path separators when matching hints such as `alpha/dup.go:Dup` against indexed Windows paths. Both slash-separated and native Windows hints retain the existing substring matching and global fallback behavior.
+
 - **JS/TS/TSX function bindings survive casts and expression wrappers** — `as`, `satisfies`, parentheses, and non-null assertions are peeled before classification and signature extraction. Bindings such as `const h = useCallback((value) => value) as Handler` retain their function symbol and signature; wrapping a non-function value does not make it a function. (#76)
 - **`changed`: in-hunk lines starting with `-- `/`++ ` are no longer misparsed as file headers** — a deleted line whose content begins with `-- ` renders in a unified diff as `--- …` (every deleted Lua comment; any block-comment content), which the parser previously treated as a `---` file header: it clobbered the file's paths and silently dropped the rest of the hunk's changed symbols. Hunk-body lines are now matched before header prefixes, which git only emits before a file's first hunk.
 - **`changed`: filenames containing spaces are now analyzed** — git appends a tab separator after unquoted header paths containing a space (`--- a/my file.go\t`); the parser kept the tab, so both blob reads failed and the file was miscounted as "no parseable symbols". Exactly one trailing tab is now stripped (safe: a filename with a real tab is always C-quoted).

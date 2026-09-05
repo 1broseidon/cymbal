@@ -95,16 +95,18 @@ func TestFlexResolveFileHintBehaviour(t *testing.T) {
 	}
 
 	// The file hint wins when the name is defined in multiple files.
-	res, err := flexResolve(dbPath, "alpha/dup.go:Dup")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res.Results) != 1 || res.Results[0].RelPath != "alpha/dup.go" {
-		t.Errorf("file hint should narrow to alpha/dup.go; got %+v", res.Results)
+	for _, hint := range []string{"alpha/dup.go", filepath.Join("alpha", "dup.go")} {
+		res, err := flexResolve(dbPath, hint+":Dup")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Results) != 1 || res.Results[0].RelPath != filepath.Join("alpha", "dup.go") {
+			t.Errorf("file hint %q should narrow to alpha/dup.go; got %+v", hint, res.Results)
+		}
 	}
 
 	// A hint matching no file falls back to the global result set.
-	res, err = flexResolve(dbPath, "nosuch/file.go:Dup")
+	res, err := flexResolve(dbPath, "nosuch/file.go:Dup")
 	if err != nil {
 		t.Fatal(err)
 	}

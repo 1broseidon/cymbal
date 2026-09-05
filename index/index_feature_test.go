@@ -773,6 +773,8 @@ func TestFeatureScopedExcludeIsRepoRelative(t *testing.T) {
 	}
 }
 func TestFeatureListFileNames(t *testing.T) {
+	defer CloseAll()
+
 	dir := createTestRepo(t)
 	for rel, content := range map[string]string{
 		"sub/helper.go":        "package sub\nfunc SubHelper() {}\n",

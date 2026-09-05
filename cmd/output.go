@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -146,9 +147,11 @@ func flexResolve(dbPath, arg string) (*ResolveResult, error) {
 
 	// Step 3: filter by file hint.
 	if file != "" && len(results) > 1 {
+		file = filepath.ToSlash(file)
 		var filtered []index.SymbolResult
 		for _, r := range results {
-			if strings.HasSuffix(r.RelPath, file) || strings.Contains(r.RelPath, file) {
+			relPath := filepath.ToSlash(r.RelPath)
+			if strings.HasSuffix(relPath, file) || strings.Contains(relPath, file) {
 				filtered = append(filtered, r)
 			}
 		}
