@@ -21,11 +21,6 @@ Thumbs.db
 /vendor/
 /coverage.txt
 
-# Docs
-docs/node_modules/
-docs/.vitepress/dist/
-docs/.vitepress/cache/
-
 # Benchmark corpus
 bench/.corpus/
 
