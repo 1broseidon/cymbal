@@ -133,8 +133,28 @@ the call graph. Getting this right is most of the tool.
 
 ## Commands
 
-Nineteen commands. `--json`, `--db` and `--no-federate` are global; everything
-else is per-command.
+Nineteen commands. Four flags are global; everything else is per-command.
+
+| Flag | Meaning |
+| --- | --- |
+| `-d, --db <path>` | override the database path (default: auto-resolved per repo) |
+| `--json` | structured output instead of frontmatter + content |
+| `--no-federate` | restrict to a single database, no cross-worktree federation |
+| `-v, --version` | print version and exit |
+
+Passive update notices are suppressed automatically under `--json`. Set
+`CYMBAL_NO_UPDATE_NOTIFIER=1` to disable them entirely.
+
+### Graph output
+
+`trace`, `impact`, `importers` and `impls` accept `--graph` when you want a
+relationship map rather than call-site detail. The default format is Mermaid on
+a TTY and JSON when piped; `--graph-format mermaid|dot|json` forces one.
+`--graph-limit <n>` caps dense graphs by degree, and `impact --graph` defaults
+to depth 1 unless you pass `--depth` yourself.
+
+Stay on the normal text or JSON output when you need exact source lines or call
+sites you intend to edit against.
 
 #### investigate — Kind-adaptive context for what a symbol is
 
@@ -349,8 +369,33 @@ cymbal v0.15.0
 
 ## For agents
 
-Cymbal was built to be called by something that isn't a person. Three properties
+Cymbal was built to be called by something that isn't a person. Four properties
 matter for that.
+
+### Frontmatter, not JSON
+
+The default output is YAML frontmatter followed by a content body — metadata an
+agent can parse, then source it can read. JSON quotes every field name and
+escapes every string; on the same `refs` result the frontmatter form runs about
+a third fewer tokens, which compounds across dozens of calls in one task.
+
+```console
+---
+symbol: handleAuth
+total: 3
+groups: 2
+---
+
+cmd/server/main.go (1 site):
+  > handleAuth(w, r)
+
+internal/api/router.go (2 sites):
+  > mux.HandleFunc("/auth", handleAuth)
+  > handleAuth(w, r)
+```
+
+Identical call sites in the same file are grouped, so the agent sees the pattern
+without paying for the repetition.
 
 ### --json everywhere
 
@@ -370,9 +415,17 @@ $ cymbal outline svc.go -s --names | cymbal investigate --stdin
 
 ### Hooks that hold the line
 
-Agents drift back to raw `grep` as their context fills. `cymbal hook install`
-wires a nudge into the agent's own hook points so a grep-shaped call gets a
-cymbal equivalent suggested in its place.
+Agents drift back to raw `grep` as their context fills. Prompting alone erodes;
+two agent-agnostic subcommands wire into whatever hook point a runtime offers.
+
+| Command | What it does |
+| --- | --- |
+| `cymbal hook nudge` | Inspects a would-be shell command and suggests the cymbal equivalent when it looks like a code search. Never blocks, silent when it has nothing to say |
+| `cymbal hook remind` | Prints a reminder block to inject at session start |
+
+Claude Code and OpenCode have first-class installers. Cursor, Windsurf, aider,
+Cline, Continue, Zed and the OpenAI Agents SDK wire the two subcommands in by
+hand — [HOOKS.md](HOOKS.md) has the snippet for each.
 
 | Instead of | Use |
 | --- | --- |
