@@ -37,8 +37,15 @@ Use it when you need:
 
 ## Documentation
 
+**[MANUAL.md](MANUAL.md) is the complete manual in one file** — install, every
+command with its flags, agent wiring, and the supported languages. It is what
+[cymbal.sh](https://cymbal.sh) renders, so the published manual and the one in
+your clone are the same document. If you are an agent that just cloned this
+repo, read that file.
+
 | For | Start here |
 |---|---|
+| Everyone, offline or online | [MANUAL.md](MANUAL.md) · [cymbal.sh](https://cymbal.sh) |
 | Operators / CLI users | [Quick Start](#quick-start) · [Commands at a Glance](#commands-at-a-glance) · [docs/reference/commands.md](docs/reference/commands.md) |
 | AI agents / integrations | [AI Agents](#ai-agents) · [docs/AGENT_HOOKS.md](docs/AGENT_HOOKS.md) · [docs/guide/agent-native.md](docs/guide/agent-native.md) |
 | Go library consumers | [Use as a Library](#use-as-a-library) · [docs/guide/library.md](docs/guide/library.md) |

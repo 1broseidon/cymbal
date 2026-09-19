@@ -9,6 +9,7 @@
     "prebuild": "node scripts/fetch-stars.mjs"
   },
   "devDependencies": {
+    "marked": "^18.0.13",
     "wrangler": "^4.42.0"
   }
 }
