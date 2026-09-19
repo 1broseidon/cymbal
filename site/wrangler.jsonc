@@ -2,6 +2,11 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "cymbal-sh",
   "compatibility_date": "2026-09-15",
+  "account_id": "983f6b579fae3db28c7777b0307c5f58",
+
+  /* The apex is a Workers Custom Domain, so Cloudflare owns the DNS record and
+   * the certificate — there is no origin behind this and no Pages project. */
+  "routes": [{ "pattern": "cymbal.sh", "custom_domain": true }],
 
   "assets": {
     "directory": "./dist",
