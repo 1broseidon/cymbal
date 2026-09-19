@@ -1,0 +1,14 @@
+{
+  "name": "cymbal-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs && wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "prebuild": "node scripts/fetch-stars.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.42.0"
+  }
+}

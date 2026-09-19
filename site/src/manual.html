@@ -1,0 +1,552 @@
+<section id="what">
+  <p class="eyebrow">What it is</p>
+  <h2>Overview</h2>
+  <p>
+    Cymbal indexes a repository once, then answers structural questions about it
+    from that index. Not "which files contain this string" — <em>what is this
+    symbol, who calls it, what does it call, and what breaks if it changes.</em>
+  </p>
+  <p>
+    The index is SQLite, per repo, built by tree-sitter parsers. Indexing is a
+    one-time cost measured in milliseconds for most repos; every query after that
+    reads the database rather than the filesystem. There is no daemon, no server,
+    and no model in the loop — every answer is derived from the index.
+  </p>
+  <div class="callout">
+    <p>
+      For people, it replaces a chain of <code class="inline">grep</code>,
+      <code class="inline">find</code> and jump-to-definition. For agents, it
+      collapses what would be a dozen file reads into a single call with
+      <code class="inline">--json</code> and documented exit codes.
+    </p>
+  </div>
+</section>
+
+<section id="install">
+  <p class="eyebrow">Install</p>
+  <h2>Installation methods</h2>
+  <p>
+    Homebrew is the shortest path on macOS and Linux. Everything else is listed
+    in full below.
+  </p>
+
+  <div class="discs">
+    <details open>
+      <summary>Homebrew <span class="sm">macOS and Linux</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> brew install 1broseidon/tap/cymbal</code></pre>
+      </div>
+    </details>
+
+    <details>
+      <summary>Arch Linux <span class="sm">AUR, community-maintained</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> yay -S cymbal</code></pre>
+        <p class="note">
+          Without an AUR helper, build from
+          <a href="https://aur.archlinux.org/packages/cymbal">aur.archlinux.org/packages/cymbal</a>.
+        </p>
+      </div>
+    </details>
+
+    <details>
+      <summary>Windows <span class="sm">PowerShell</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">&gt;</span> irm https://raw.githubusercontent.com/1broseidon/cymbal/main/install.ps1 | iex</code></pre>
+        <p class="note">
+          To uninstall, run <code class="inline">uninstall.ps1</code> the same way.
+          It keeps your indexes by default; pass <code class="inline">-Purge</code>
+          to also delete everything under
+          <code class="inline">%LOCALAPPDATA%\cymbal\repos\</code>.
+        </p>
+      </div>
+    </details>
+
+    <details>
+      <summary>Go <span class="sm">requires CGO for tree-sitter and SQLite</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> CGO_CFLAGS=<span class="key">"-DSQLITE_ENABLE_FTS5"</span> go install github.com/1broseidon/cymbal@latest</code></pre>
+        <p class="note">
+          The FTS5 flag is not optional — text search depends on it.
+        </p>
+      </div>
+    </details>
+
+    <details>
+      <summary>Docker <span class="sm">no Go toolchain, no CGO setup</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> docker pull ghcr.io/1broseidon/cymbal:latest
+
+<span class="dim"># Mount a repo and run cymbal inside the container</span>
+<span class="p">$</span> docker run --rm -v <span class="key">"$(pwd)"</span>:/workspace ghcr.io/1broseidon/cymbal index .
+
+<span class="dim"># Worth aliasing if you use this flow regularly</span>
+<span class="p">$</span> alias cymbal=<span class="key">'docker run --rm -v "$(pwd)":/workspace ghcr.io/1broseidon/cymbal'</span></code></pre>
+        <p class="note">
+          The index lands at <code class="inline">/workspace/.cymbal/index.db</code>
+          inside the mounted repo. Add <code class="inline">.cymbal/</code> to your
+          <code class="inline">.gitignore</code>.
+        </p>
+      </div>
+    </details>
+
+    <details>
+      <summary>Binaries <span class="sm">direct download</span></summary>
+      <div class="disc-body">
+        <p class="note">
+          Prebuilt binaries for each platform are attached to every
+          <a href="https://github.com/1broseidon/cymbal/releases">release</a>.
+        </p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<section id="quickstart">
+  <p class="eyebrow">Quickstart</p>
+  <h2>First commands</h2>
+  <p>
+    Index once, then ask. Indexing a subdirectory updates that subtree in place —
+    files outside it are neither reparsed nor pruned.
+  </p>
+  <pre><code><span class="p">$</span> cymbal index .
+<span class="dim">indexed 105 files · 1921 symbols</span>
+
+<span class="dim"># "I've never seen this repo — where do I start?"</span>
+<span class="p">$</span> cymbal structure
+
+<span class="dim"># Everything about one symbol, shaped to what it is</span>
+<span class="p">$</span> cymbal investigate OpenStore
+
+<span class="dim"># What breaks if I change this?</span>
+<span class="p">$</span> cymbal impact <span class="key">handleRegister</span> -D 3</code></pre>
+  <p>
+    Queries refresh the index automatically, so you rarely re-run
+    <code class="inline">index</code> by hand. Pass
+    <code class="inline">-f</code> to force a full re-index.
+  </p>
+</section>
+
+<section id="choosing">
+  <p class="eyebrow">Choosing a command</p>
+  <h2>Which direction are you asking about?</h2>
+  <p>
+    Three commands cover most questions, and they differ only in which way they
+    walk the call graph. Getting this right is most of the tool.
+  </p>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>The question</th><th>Use</th><th>Direction</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Tell me about X</td>
+          <td class="cmd">investigate</td>
+          <td class="no">adapts to the symbol's kind</td>
+        </tr>
+        <tr>
+          <td>What does X depend on?</td>
+          <td class="cmd">trace</td>
+          <td class="no">downward — X's callees</td>
+        </tr>
+        <tr>
+          <td>What depends on X?</td>
+          <td class="cmd">impact</td>
+          <td class="no">upward — X's callers</td>
+        </tr>
+        <tr>
+          <td>Just show me the code</td>
+          <td class="cmd">show</td>
+          <td class="no">no graph walk</td>
+        </tr>
+        <tr>
+          <td>Source, types, callers and imports at once</td>
+          <td class="cmd">context</td>
+          <td class="no">one bundled read</td>
+        </tr>
+        <tr>
+          <td>What did I just break?</td>
+          <td class="cmd">changed</td>
+          <td class="no">git diff → symbols → impact</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout">
+    <p>
+      <code class="inline">investigate</code> is the one to reach for when you
+      don't know which of the others you want. It looks at the symbol's kind and
+      returns the right shape: functions get source plus callers plus shallow
+      impact; types get source plus members plus references.
+    </p>
+  </div>
+</section>
+
+<section id="commands">
+  <p class="eyebrow">Commands</p>
+  <h2>Command reference</h2>
+  <p>
+    Nineteen commands. <code class="inline">--json</code>,
+    <code class="inline">--db</code> and <code class="inline">--no-federate</code>
+    are global; everything else is per-command. Expand a row for its flags.
+  </p>
+
+  <div class="discs">
+    <details>
+      <summary>investigate <span class="sm">Kind-adaptive — the right context for what a symbol is</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> cymbal investigate OpenStore
+<span class="p">$</span> cymbal investigate config.go:Config   <span class="dim"># file hint</span>
+<span class="p">$</span> cymbal investigate auth.Middleware     <span class="dim"># package hint</span>
+<span class="p">$</span> cymbal investigate Foo Bar Baz         <span class="dim"># batch</span></code></pre>
+        <div class="scroll">
+          <table>
+            <tbody>
+              <tr><td class="cmd">--resolve-scope</td><td class="no">same | family | all — cross-language name resolution (default family)</td></tr>
+              <tr><td class="cmd">--stdin</td><td class="no">read newline-separated names from stdin</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>search <span class="sm">Symbols by default, text with --text</span></summary>
+      <div class="disc-body">
+        <p class="note">Ranked exact &gt; prefix &gt; fuzzy. Trailing path operands act as <code class="inline">--path</code> filters, so grep-shaped calls work as written.</p>
+        <pre><code><span class="p">$</span> cymbal search ParseFile
+<span class="p">$</span> cymbal search --text TODO cmd internal/foo.go
+<span class="p">$</span> cymbal search Foo Bar        <span class="dim"># independent queries</span></code></pre>
+        <div class="scroll">
+          <table>
+            <tbody>
+              <tr><td class="cmd">-t, --text</td><td class="no">full-text grep across file contents</td></tr>
+              <tr><td class="cmd">-e, --exact</td><td class="no">exact name match only</td></tr>
+              <tr><td class="cmd">-i, --ignore-case</td><td class="no">case-insensitive exact (implies --exact; not with --text)</td></tr>
+              <tr><td class="cmd">-k, --kind</td><td class="no">filter by symbol kind — function, class, method…</td></tr>
+              <tr><td class="cmd">-l, --lang</td><td class="no">filter by language</td></tr>
+              <tr><td class="cmd">-n, --limit</td><td class="no">max results (default 20)</td></tr>
+              <tr><td class="cmd">--path / --exclude</td><td class="no">glob filters, repeatable</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>show <span class="sm">Read source by symbol name or file path</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> cymbal show ParseFile
+<span class="p">$</span> cymbal show App.handleSave                  <span class="dim"># nested, qualified</span>
+<span class="p">$</span> cymbal show store.go:SearchSymbols          <span class="dim"># narrowed by file hint</span>
+<span class="p">$</span> cymbal show internal/index/store.go:80-120  <span class="dim"># line range</span>
+<span class="p">$</span> cymbal outline big.go -s --names | cymbal show --stdin</code></pre>
+        <div class="scroll">
+          <table>
+            <tbody>
+              <tr><td class="cmd">--all</td><td class="no">show every matching definition</td></tr>
+              <tr><td class="cmd">-C, --context</td><td class="no">lines of context around the target</td></tr>
+              <tr><td class="cmd">--stdin</td><td class="no">batch from stdin; JSON returns a map keyed by name</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>impact <span class="sm">Transitive callers — what breaks if this changes</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> cymbal impact handleRegister
+<span class="p">$</span> cymbal impact Save Load Delete   <span class="dim"># union of callers</span>
+<span class="p">$</span> cymbal impact Save -D 3 --graph  <span class="dim"># mermaid on a TTY</span></code></pre>
+        <div class="scroll">
+          <table>
+            <tbody>
+              <tr><td class="cmd">-D, --depth</td><td class="no">max call-chain depth, capped at 5 (default 2)</td></tr>
+              <tr><td class="cmd">-C, --context</td><td class="no">lines around each call site (default 1)</td></tr>
+              <tr><td class="cmd">--graph</td><td class="no">render as a graph — mermaid on TTY, json when piped</td></tr>
+              <tr><td class="cmd">--graph-format</td><td class="no">mermaid | dot | json</td></tr>
+              <tr><td class="cmd">--graph-limit</td><td class="no">cap at top-N nodes by degree</td></tr>
+              <tr><td class="cmd">--no-tests</td><td class="no">exclude callers in test files</td></tr>
+              <tr><td class="cmd">--include-unresolved</td><td class="no">keep external calls as dashed ext: nodes</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">Multi-symbol runs dedupe callers and attach a <code class="inline">hit_symbols</code> list recording which requested symbol brought each one in.</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>trace <span class="sm">Downward call graph — what does this call?</span></summary>
+      <div class="disc-body">
+        <p class="note">Follows invocation edges only by default. Callees that don't resolve to an indexed symbol — stdlib, third-party, builtins — are filtered out unless you ask for them.</p>
+        <pre><code><span class="p">$</span> cymbal trace handleRequest
+<span class="p">$</span> cymbal trace pkg/file.go:Name --include-unresolved</code></pre>
+        <div class="scroll">
+          <table>
+            <tbody>
+              <tr><td class="cmd">--kinds</td><td class="no">broaden beyond call edges, e.g. type mentions</td></tr>
+              <tr><td class="cmd">--resolve-scope</td><td class="no">same | family | all (default family)</td></tr>
+              <tr><td class="cmd">--include-unresolved</td><td class="no">keep unresolved callees</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>context <span class="sm">Source, referenced types, callers and imports in one call</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> cymbal context OpenStore
+<span class="p">$</span> cymbal context ParseFile --callers 10</code></pre>
+      </div>
+    </details>
+
+    <details>
+      <summary>impls <span class="sm">What implements, conforms to, or extends a name</span></summary>
+      <div class="disc-body">
+        <p class="note">Covers Swift protocol conformance, Go interface embedding, Java/C#/Kotlin/TypeScript implements clauses, Scala with-chains, Rust trait impls, Dart mixins, Python base classes, Ruby include/extend, PHP implements and C++ base classes.</p>
+        <pre><code><span class="p">$</span> cymbal impls Reader
+<span class="p">$</span> cymbal impls Reader Writer Closer
+<span class="p">$</span> cymbal impls Plugin --lang go
+<span class="p">$</span> cymbal impls --of TimerActivityIntent   <span class="dim"># inverse direction</span></code></pre>
+        <p class="note">Best-effort, based on AST name matching. External framework targets come back with <code class="inline">resolved=false</code>.</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>changed <span class="sm">Diff-scoped impact — what your current edits touch</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> cymbal changed              <span class="dim"># unstaged, working tree vs index</span>
+<span class="p">$</span> cymbal changed --staged     <span class="dim"># staged, index vs HEAD</span>
+<span class="p">$</span> cymbal changed --base main  <span class="dim"># working tree vs a ref</span></code></pre>
+        <p class="note">Changed symbols are attributed by parsing the diffed blobs on both sides, so whole-symbol deletions are named rather than mis-attributed to a neighbour. Deleted symbols are listed but have no impact — they no longer exist.</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>diff <span class="sm">Git diff scoped to one symbol's line range</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> cymbal diff ParseFile          <span class="dim"># vs HEAD</span>
+<span class="p">$</span> cymbal diff ParseFile main     <span class="dim"># vs a branch</span>
+<span class="p">$</span> cymbal diff --stat ParseFile   <span class="dim"># diffstat only</span></code></pre>
+      </div>
+    </details>
+
+    <details>
+      <summary>refs <span class="sm">Reference sites, best-effort</span></summary>
+      <div class="disc-body">
+        <div class="scroll">
+          <table>
+            <tbody>
+              <tr><td class="cmd">--importers</td><td class="no">files importing the defining file</td></tr>
+              <tr><td class="cmd">--impact</td><td class="no">shorthand for --importers --depth 2</td></tr>
+              <tr><td class="cmd">--file</td><td class="no">restrict to files including a path fragment</td></tr>
+              <tr><td class="cmd">-D, --depth</td><td class="no">import chain depth, max 3</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>outline <span class="sm">Symbols defined in a file</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> cymbal outline internal/index/store.go -s
+<span class="p">$</span> cymbal outline big.go --names | cymbal investigate --stdin</code></pre>
+        <div class="scroll">
+          <table>
+            <tbody>
+              <tr><td class="cmd">-s, --signatures</td><td class="no">show full parameter signatures</td></tr>
+              <tr><td class="cmd">--names</td><td class="no">one name per line, pipe-friendly</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>structure <span class="sm">Entry points, hotspots, central packages</span></summary>
+      <div class="disc-body">
+        <p class="note">Entry points, most-referenced symbols, most-imported files, largest packages — all derived from the index. No AI, no guessing.</p>
+        <pre><code><span class="p">$</span> cymbal structure -n 20</code></pre>
+      </div>
+    </details>
+
+    <details>
+      <summary>ls <span class="sm">File tree, inventory, repos, or stats</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> cymbal ls --stats           <span class="dim"># languages, file and symbol counts</span>
+<span class="p">$</span> cymbal ls --names --lang go
+<span class="p">$</span> cymbal ls --repos</code></pre>
+        <div class="scroll">
+          <table>
+            <tbody>
+              <tr><td class="cmd">--names</td><td class="no">flat list of indexed paths</td></tr>
+              <tr><td class="cmd">--null</td><td class="no">NUL-terminate for xargs -0</td></tr>
+              <tr><td class="cmd">-D, --depth</td><td class="no">max tree depth</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>importers <span class="sm">Reverse import lookup</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> cymbal importers internal/index/store.go -D 2</code></pre>
+      </div>
+    </details>
+
+    <details>
+      <summary>index <span class="sm">Build or refresh the index</span></summary>
+      <div class="disc-body">
+        <div class="scroll">
+          <table>
+            <tbody>
+              <tr><td class="cmd">-f, --force</td><td class="no">re-index every file</td></tr>
+              <tr><td class="cmd">-w, --workers</td><td class="no">parallel workers (0 = NumCPU)</td></tr>
+              <tr><td class="cmd">--exclude</td><td class="no">skip paths matching a glob, repeatable</td></tr>
+              <tr><td class="cmd">--include-generated</td><td class="no">index generated files skipped by default</td></tr>
+              <tr><td class="cmd">--include-large-files</td><td class="no">index large sources skipped by default</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>hook <span class="sm">Keep an agent using cymbal instead of grep</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> cymbal hook install claude-code
+<span class="p">$</span> cymbal hook install opencode</code></pre>
+        <p class="note">Subcommands: <code class="inline">install</code>, <code class="inline">uninstall</code>, <code class="inline">nudge</code>, <code class="inline">remind</code>, <code class="inline">notify</code>. The agent-agnostic three can be wired into any harness with hook points.</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>version <span class="sm">Version, commit, build date</span></summary>
+      <div class="disc-body">
+        <pre><code><span class="p">$</span> cymbal version
+<span class="key">cymbal v0.15.0</span>
+  <span class="dim">commit:</span> ac79440
+  <span class="dim">go:</span>     go1.26.7 linux/amd64</code></pre>
+      </div>
+    </details>
+  </div>
+</section>
+
+<section id="agents">
+  <p class="eyebrow">For agents</p>
+  <h2>Wiring cymbal into a coding agent</h2>
+  <p>
+    Cymbal was built to be called by something that isn't a person. Three
+    properties matter for that.
+  </p>
+
+  <h3>--json everywhere</h3>
+  <p>
+    Every command takes the global <code class="inline">--json</code> flag and
+    returns structured output. Batch commands key their result map by the name
+    you asked for, so a single call can dispatch several lookups.
+  </p>
+
+  <h3>Batching over round-trips</h3>
+  <p>
+    Most query commands accept multiple symbols, and
+    <code class="inline">--stdin</code> reads newline-separated names. One call
+    beats five.
+  </p>
+  <pre><code><span class="p">$</span> cymbal show Foo Bar Baz
+<span class="p">$</span> cymbal outline svc.go -s --names | cymbal investigate --stdin</code></pre>
+
+  <h3>Hooks that hold the line</h3>
+  <p>
+    Agents drift back to raw <code class="inline">grep</code> as their context
+    fills. <code class="inline">cymbal hook install</code> wires a nudge into the
+    agent's own hook points so a grep-shaped call gets a cymbal equivalent
+    suggested in its place.
+  </p>
+
+  <div class="pair">
+    <div class="row">
+      <span class="tag bad">Slow</span>
+      <p class="txt">Read three files to find out what calls <code class="inline">handleAuth</code>.</p>
+    </div>
+    <div class="row">
+      <span class="tag good">Fast</span>
+      <p class="txt"><code class="inline">cymbal impact handleAuth --json</code> — one call, with call sites.</p>
+    </div>
+  </div>
+  <div class="pair">
+    <div class="row">
+      <span class="tag bad">Slow</span>
+      <p class="txt"><code class="inline">grep -rn "func ParseFile"</code>, then open the file, then scroll.</p>
+    </div>
+    <div class="row">
+      <span class="tag good">Fast</span>
+      <p class="txt"><code class="inline">cymbal show ParseFile</code> — the definition, nothing else.</p>
+    </div>
+  </div>
+</section>
+
+<section id="languages">
+  <p class="eyebrow">Languages</p>
+  <h2>What cymbal can read</h2>
+  <p>
+    Thirty-nine languages are registered, in two tiers. Twenty-two ship a
+    tree-sitter grammar and are parsed into symbols; the rest are recognised for
+    the file inventory and text search but produce no symbol graph.
+  </p>
+
+  <h4>Parsed to symbols — 22</h4>
+  <p class="note">
+    go · python · javascript · typescript · tsx · rust · ruby · java · c · cpp ·
+    csharp · dart · swift · kotlin · lua · php · bash · scala · yaml · elixir ·
+    hcl · protobuf
+  </p>
+
+  <h4>Recognised only — 17</h4>
+  <p class="note">
+    apex · zig · toml · json · markdown · sql · erlang · haskell · ocaml · r ·
+    perl · vue · svelte · make · dockerfile · groovy · cmake
+  </p>
+
+  <div class="callout">
+    <p>
+      Name resolution is scoped to a language <em>family</em> by default — JVM
+      groups java/kotlin/scala, JS groups javascript/typescript/tsx, C groups
+      c/cpp. Use <code class="inline">--resolve-scope same</code> for exact-language
+      only, or <code class="inline">all</code> to resolve across everything.
+    </p>
+  </div>
+</section>
+
+<section id="notes">
+  <p class="eyebrow">Notes</p>
+  <h2>Worth knowing</h2>
+
+  <h3>References are name-scoped</h3>
+  <p>
+    Cymbal resolves references by name against the AST, not by full semantic
+    analysis. When a name has several definitions, counts may span them — that is
+    reported as <code class="inline">definition_count</code> rather than hidden.
+    Treat <code class="inline">refs</code> and <code class="inline">impls</code>
+    as high-quality leads, not proofs.
+  </p>
+
+  <h3>The index follows the working tree</h3>
+  <p>
+    <code class="inline">changed</code> answers "what is affected now", so its
+    impact data comes from the working-tree index. Arbitrary commit ranges whose
+    new side isn't the working tree aren't supported.
+  </p>
+
+  <h3>Federation across worktrees</h3>
+  <p>
+    Symbols federate across worktrees of the same repo by default, so a query in
+    one worktree can resolve into another. Pass
+    <code class="inline">--no-federate</code> to restrict to a single database.
+  </p>
+</section>
