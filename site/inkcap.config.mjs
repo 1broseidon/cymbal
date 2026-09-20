@@ -1,10 +1,16 @@
-/* Everything that differs between ketch.run, cymbal.sh and brainfile.md. */
+/* Everything inkcap needs to print this site. The rest of the build is
+ * github.com/1broseidon/inkcap, shared with the other chain.sh manuals. */
 export default {
   name: 'cymbal',
   url: 'https://cymbal.sh',
   repo: '1broseidon/cymbal',
   tagline: 'code navigation for coding agents',
   built: 'Built with tree-sitter and SQLite',
+  accent: {
+    light: { accent: '#34558C', soft: '#E3E9F3' },
+    dark: { accent: '#8AAEE0', soft: '#1A2436' },
+    terminal: { prompt: '#7E9FD4', key: '#A8C2EA' },
+  },
   /* cymbal.sh is a Cloudflare Worker, so retired URLs redirect server-side.
    * The VitePress site that used to live at chain.sh/cymbal/ is gone, but its
    * URLs are in the wild and chain.sh forwards /cymbal/* here. Everything that

@@ -3,13 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs",
-    "dev": "node build.mjs && wrangler dev",
+    "build": "inkcap build",
+    "dev": "inkcap build && wrangler dev",
     "deploy": "npm run build && wrangler deploy",
-    "prebuild": "node scripts/fetch-stars.mjs"
+    "prebuild": "inkcap stars"
   },
   "devDependencies": {
-    "marked": "^18.0.13",
+    "inkcap": "^0.1.0",
     "wrangler": "^4.42.0"
   }
 }
