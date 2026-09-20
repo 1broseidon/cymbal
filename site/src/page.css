@@ -1,10 +1,11 @@
-/* cymbal design system — the ketch house style.
+/* The chain.sh house style, shared by ketch.run, cymbal.sh and brainfile.md.
  *
- * Tokens, type and components are ketch.run's, deliberately: these are sibling
- * tools and should read as one family. The single divergence is --accent, which
- * shifts from ketch's teal to a deep indigo so the two sites are tellable apart
- * at a glance. To make them identical, set --accent/--accent-soft to ketch's
- * #0B6A72 / #DFEDEE (light) and #5FBAC2 / #14282B (dark).
+ * Tokens, type and components are identical on the three sites, so they read
+ * as one family. The single divergence is the accent block just below: ketch
+ * is teal (#0B6A72 / #DFEDEE light, #5FBAC2 / #14282B dark), cymbal indigo
+ * (#34558C / #E3E9F3, #8AAEE0 / #1A2436) and brainfile violet
+ * (#5B47A6 / #E9E5F5, #A796E3 / #1E1A31), each with its own terminal tints.
+ * Fix anything else here, then copy the file across.
  */
 
 :root {
@@ -129,8 +130,10 @@ a:hover { text-decoration-thickness: 2px; }
   font-size: 0.8125rem;
 }
 
+.masthead a.mark { text-decoration: none; }
 .masthead .mark { font-weight: 600; letter-spacing: 0.02em; color: var(--text); }
-.masthead .ver { color: var(--muted); font-variant-numeric: tabular-nums; }
+.masthead .ver { color: var(--muted); font-variant-numeric: tabular-nums; text-decoration: none; }
+.masthead a.ver:hover { color: var(--accent); }
 .masthead nav { margin-left: auto; display: flex; gap: 1.25rem; }
 .masthead nav a { color: var(--muted); text-decoration: none; }
 .masthead nav a:hover { color: var(--accent); }

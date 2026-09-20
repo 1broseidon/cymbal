@@ -2,11 +2,12 @@
  * Never fails the build: on any error the committed count stands. */
 
 import { readFile, writeFile } from 'node:fs/promises'
+import SITE from '../site.config.mjs'
 
 const OUT = new URL('../src/stars.json', import.meta.url)
 
 try {
-  const res = await fetch('https://api.github.com/repos/1broseidon/cymbal', {
+  const res = await fetch(`https://api.github.com/repos/${SITE.repo}`, {
     headers: {
       accept: 'application/vnd.github+json',
       ...(process.env.GITHUB_TOKEN
@@ -21,8 +22,8 @@ try {
   if (typeof repo.stargazers_count !== 'number') throw new Error('no star count')
 
   const current = JSON.parse(await readFile(OUT, 'utf8').catch(() => '{}'))
-  await writeFile(OUT, `${JSON.stringify({ ...current, cymbal: repo.stargazers_count }, null, 2)}\n`)
-  console.log(`stars: refreshed cymbal=${repo.stargazers_count}`)
+  await writeFile(OUT, `${JSON.stringify({ ...current, [SITE.name]: repo.stargazers_count }, null, 2)}\n`)
+  console.log(`stars: refreshed ${SITE.name}=${repo.stargazers_count}`)
 } catch (err) {
   console.warn(`stars: keeping committed count (${err.message})`)
 }

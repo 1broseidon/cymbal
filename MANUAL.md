@@ -7,6 +7,21 @@ and what breaks if it changes.
 For people, it replaces a chain of `grep` and jump-to-definition. For agents, it
 turns a dozen file reads into one call with `--json`.
 
+```console title="Install"
+$ brew install 1broseidon/tap/cymbal
+```
+
+```console title="Or hand it to your agent"
+Install cymbal and index this repo for me.
+1. Run: brew install 1broseidon/tap/cymbal
+2. Run `cymbal index .` at the repo root.
+3. Run `cymbal structure` and summarise the entry points for me.
+4. Run `cymbal hook install claude-code` so you keep using it.
+From here on, prefer `cymbal search` over grep for symbol lookup,
+`cymbal show <sym>` over reading a whole file, and
+`cymbal impact <sym>` before changing anything shared.
+```
+
 ## Overview
 
 Cymbal indexes a repository once, then answers structural questions about it
@@ -24,24 +39,8 @@ and no model in the loop — every answer is derived from the index.
 
 ## Install
 
-Homebrew is the shortest path on macOS and Linux.
-
-```console title="Install"
-$ brew install 1broseidon/tap/cymbal
-```
-
-If you are pointing a coding agent at a fresh repo, hand it this instead.
-
-```console title="Or hand it to your agent"
-Install cymbal and index this repo for me.
-1. Run: brew install 1broseidon/tap/cymbal
-2. Run `cymbal index .` at the repo root.
-3. Run `cymbal structure` and summarise the entry points for me.
-4. Run `cymbal hook install claude-code` so you keep using it.
-From here on, prefer `cymbal search` over grep for symbol lookup,
-`cymbal show <sym>` over reading a whole file, and
-`cymbal impact <sym>` before changing anything shared.
-```
+Homebrew is the shortest path on macOS and Linux; the tap is
+`1broseidon/tap/cymbal`. The other routes are below.
 
 #### Arch Linux — AUR, community-maintained
 
@@ -89,6 +88,15 @@ The index lands at `/workspace/.cymbal/index.db` inside the mounted repo. Add
 
 Prebuilt binaries for each platform are attached to every
 [release](https://github.com/1broseidon/cymbal/releases).
+
+#### chain — the rest of the toolkit
+
+cymbal is one of the [chain.sh](https://chain.sh) tools. One command installs
+the set:
+
+```console
+$ curl -fsSL https://chain.sh/bootstrap.sh | sh
+```
 
 ## Quickstart
 
@@ -367,6 +375,28 @@ cymbal v0.15.0
   go:     go1.26.7 linux/amd64
 ```
 
+## Languages
+
+Thirty-nine languages are registered, in two tiers. Twenty-two ship a
+tree-sitter grammar and are parsed into symbols; the rest are recognised for the
+file inventory and text search but produce no symbol graph.
+
+### Parsed to symbols — 22
+
+go · python · javascript · typescript · tsx · rust · ruby · java · c · cpp ·
+csharp · dart · swift · kotlin · lua · php · bash · scala · yaml · elixir · hcl ·
+protobuf
+
+### Recognised only — 17
+
+apex · zig · toml · json · markdown · sql · erlang · haskell · ocaml · r · perl ·
+vue · svelte · make · dockerfile · groovy · cmake
+
+> Name resolution is scoped to a language family by default — JVM groups
+> java/kotlin/scala, JS groups javascript/typescript/tsx, C groups c/cpp. Use
+> `--resolve-scope same` for exact-language only, or `all` to resolve across
+> everything.
+
 ## For agents
 
 Cymbal was built to be called by something that isn't a person. Four properties
@@ -432,27 +462,11 @@ hand — [HOOKS.md](HOOKS.md) has the snippet for each.
 | Reading three files to find what calls `handleAuth` | `cymbal impact handleAuth --json` — one call, with call sites |
 | `grep -rn "func ParseFile"`, then opening the file, then scrolling | `cymbal show ParseFile` — the definition, nothing else |
 
-## Languages
+### Bootstrap files
 
-Thirty-nine languages are registered, in two tiers. Twenty-two ship a
-tree-sitter grammar and are parsed into symbols; the rest are recognised for the
-file inventory and text search but produce no symbol graph.
-
-### Parsed to symbols — 22
-
-go · python · javascript · typescript · tsx · rust · ruby · java · c · cpp ·
-csharp · dart · swift · kotlin · lua · php · bash · scala · yaml · elixir · hcl ·
-protobuf
-
-### Recognised only — 17
-
-apex · zig · toml · json · markdown · sql · erlang · haskell · ocaml · r · perl ·
-vue · svelte · make · dockerfile · groovy · cmake
-
-> Name resolution is scoped to a language family by default — JVM groups
-> java/kotlin/scala, JS groups javascript/typescript/tsx, C groups c/cpp. Use
-> `--resolve-scope same` for exact-language only, or `all` to resolve across
-> everything.
+Two files on this domain are written for agents rather than people:
+[/llms.txt](/llms.txt) is the short index and [/llms-full.txt](/llms-full.txt)
+is this manual as plain Markdown.
 
 ## Notes
 
