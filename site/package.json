@@ -4,12 +4,9 @@
   "type": "module",
   "scripts": {
     "build": "inkcap build",
-    "dev": "inkcap build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy",
     "prebuild": "inkcap stars"
   },
   "devDependencies": {
-    "inkcap": "^0.1.0",
-    "wrangler": "^4.42.0"
+    "inkcap": "^0.1.0"
   }
 }
