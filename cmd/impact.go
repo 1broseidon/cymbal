@@ -26,7 +26,9 @@ Examples:
 	Args: cobra.MinimumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		plan := resolveDBs(cmd)
-		ensureFresh(plan.Primary)
+		if err := ensureFresh(plan.Primary); err != nil {
+			return err
+		}
 		jsonOut := getJSONFlag(cmd)
 		depth, _ := cmd.Flags().GetInt("depth")
 		limit, _ := cmd.Flags().GetInt("limit")
@@ -77,8 +79,8 @@ Examples:
 		defsByName, defCount, ambiguous, defErr := collectDefinitions(names, dbForName)
 		effDepth, effLimit := index.ClampImpactBounds(depth, limit)
 
+		enriched := enrichImpact(merged, ctx)
 		if jsonOut {
-			enriched := enrichImpact(merged, ctx)
 			// One object shape for any symbol count. Each result carries
 			// hit_symbols attribution (which requested symbols brought the
 			// caller in); for a single symbol that's just that symbol.
@@ -132,24 +134,17 @@ Examples:
 		var content strings.Builder
 		for d := 1; d <= maxDepth; d++ {
 			var refs []refLine
-			for _, r := range merged {
+			for _, r := range enriched {
 				if r.Depth != d {
 					continue
 				}
-				ctxLines, ctxStart := readSourceContext(r.File, r.Line, ctx)
-				label := strings.TrimSpace(readSourceLine(r.File, r.Line))
+				ref := r.sourceSnippet.refLine(r.RelPath, r.Line)
 				if len(names) > 1 {
-					if hits := sourceMap[impactKey(r)]; len(hits) > 0 {
-						label = fmt.Sprintf("%s  [%s]", label, strings.Join(hits, ","))
+					if hits := sourceMap[impactKey(r.ImpactResult)]; len(hits) > 0 {
+						ref.text = fmt.Sprintf("%s  [%s]", ref.text, strings.Join(hits, ","))
 					}
 				}
-				refs = append(refs, refLine{
-					relPath:      r.RelPath,
-					line:         r.Line,
-					text:         label,
-					contextLines: ctxLines,
-					contextStart: ctxStart,
-				})
+				refs = append(refs, ref)
 			}
 			if len(refs) == 0 {
 				continue

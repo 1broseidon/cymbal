@@ -48,7 +48,9 @@ Examples:
 	Args: cobra.MinimumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		plan := resolveDBs(cmd)
-		ensureFresh(plan.Primary)
+		if err := ensureFresh(plan.Primary); err != nil {
+			return err
+		}
 		jsonOut := getJSONFlag(cmd)
 		depth, _ := cmd.Flags().GetInt("depth")
 		// Report the depth the BFS actually traverses, not the raw flag —

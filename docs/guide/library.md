@@ -86,12 +86,15 @@ Each repo gets its own database, keyed by a SHA-256 hash of the repo root path.
 ### Keep the index fresh
 
 ```go
-refreshed := index.EnsureFresh(dbPath)
+refreshed, err := index.EnsureFreshWithError(dbPath)
+if err != nil {
+    return err
+}
 ```
 
-Call this before queries. It runs an incremental reindex, re-parsing only files that changed since the last index. Returns the number of files refreshed (0 if nothing changed). Errors are swallowed — a stale read is better than a failed query.
+Call this before queries. It runs an incremental reindex, re-parsing only files that changed since the last index. It returns the number of files refreshed (0 if nothing changed) and reports failures separately. On a partial refresh, the count includes successful changes and the error describes the incomplete refresh.
 
-If the database doesn't exist yet, `EnsureFresh` auto-indexes from the current working directory's git root.
+If the database doesn't exist yet, it auto-indexes from the current working directory's git root. The older `index.EnsureFresh(dbPath) int` API remains available for callers that deliberately accept stale results; it returns 0 on failure.
 
 ---
 
@@ -240,6 +243,18 @@ for _, s := range syms {
 results, err := index.TextSearch(dbPath, "TODO", "go", 50)
 // Pass "" for lang to search all languages
 ```
+
+`TextSearch` matches a literal substring. For the CLI's line-oriented Go regex behavior and path constraints:
+
+```go
+results, err := index.TextSearchWithOptions(dbPath, `TODO|FIXME`, "go", 50,
+    index.TextSearchOptions{
+        Regexp: true,
+        Paths: index.PathFilter{Include: []string{"src/**"}, Exclude: []string{"**/*_test.go"}},
+    })
+```
+
+Both variants search indexed files in path/line order. Filters apply before the result limit. Symbol search accepts the same filter in `index.SearchQuery.Paths`; reference lookup accepts it through `index.FindReferencesWithPaths`.
 
 ### List indexed repos
 

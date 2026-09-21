@@ -1,21 +1,14 @@
 package cmd
 
 import (
-	"bufio"
-	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/1broseidon/cymbal/index"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
-
-const rgSearchTimeout = 10 * time.Second
 
 var searchCmd = &cobra.Command{
 	Use:   "search <query> [path ...]",
@@ -27,11 +20,15 @@ Trailing path operands are accepted as --path filters, so grep-shaped calls like
 "cymbal search --text TODO cmd internal/foo.go" work as expected.
 
 In symbol mode, pass multiple queries to search them independently. In text mode,
-multiple query words are joined into one literal/regex pattern.`,
+multiple query words are joined into one Go regular expression. Text search is
+line-oriented and uses the indexed file inventory, ordered by path and line.
+Index exclusions and --lang/--path/--exclude apply before --limit.`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		plan := resolveDBs(cmd)
-		ensureFresh(plan.Primary)
+		if err := ensureFresh(plan.Primary); err != nil {
+			return err
+		}
 		jsonOut := getJSONFlag(cmd)
 		kind, _ := cmd.Flags().GetString("kind")
 		limit, _ := cmd.Flags().GetInt("limit")
@@ -43,7 +40,6 @@ multiple query words are joined into one literal/regex pattern.`,
 		excludes, _ := cmd.Flags().GetStringArray("exclude")
 		queries, pathOperands := splitSearchArgs(args)
 		includes = append(includes, pathOperands...)
-		hasFilters := len(includes) > 0 || len(excludes) > 0
 
 		effectiveExact, err := normalizeSearchMode(exact, ignoreCase, textMode)
 		if err != nil {
@@ -80,7 +76,7 @@ multiple query words are joined into one literal/regex pattern.`,
 			missingPerQuery[query] = 0
 		}
 		for _, entry := range plan.Federated {
-			entryResults, entryMissing, err := searchSymbolQueries(entry.Path, queries, kind, lang, effectiveExact, ignoreCase, limit, hasFilters, includes, excludes)
+			entryResults, entryMissing, err := searchSymbolQueries(entry.Path, queries, kind, lang, effectiveExact, ignoreCase, limit, includes, excludes)
 			if err != nil {
 				// One DB failing (e.g. corrupt sibling) shouldn't sink the
 				// whole query — log to stderr and move on.
@@ -217,8 +213,7 @@ func normalizeSearchPathOperand(arg string) string {
 	return rel
 }
 
-func searchSymbolQueries(dbPath string, queries []string, kind, lang string, exact, ignoreCase bool, limit int, hasFilters bool, includes, excludes []string) ([]index.SymbolResult, []string, error) {
-	perQueryLimit := widenPathFilterLimit(limit, hasFilters)
+func searchSymbolQueries(dbPath string, queries []string, kind, lang string, exact, ignoreCase bool, limit int, includes, excludes []string) ([]index.SymbolResult, []string, error) {
 	seen := make(map[string]struct{})
 	results := make([]index.SymbolResult, 0, len(queries))
 	var missing []string
@@ -229,12 +224,12 @@ func searchSymbolQueries(dbPath string, queries []string, kind, lang string, exa
 			Language:   lang,
 			Exact:      exact,
 			IgnoreCase: ignoreCase,
-			Limit:      perQueryLimit,
+			Limit:      limit,
+			Paths:      index.PathFilter{Include: includes, Exclude: excludes},
 		})
 		if err != nil {
 			return nil, nil, err
 		}
-		queryResults = filterByPath(queryResults, func(r index.SymbolResult) string { return r.RelPath }, includes, excludes)
 		if limit > 0 && len(queryResults) > limit {
 			queryResults = queryResults[:limit]
 		}
@@ -269,123 +264,6 @@ func normalizeSearchMode(exact, ignoreCase, textMode bool) (bool, error) {
 	return exact, nil
 }
 
-func searchText(dbPath, query, lang string, limit int, jsonOut bool, includes, excludes []string) error {
-	if rgPath, err := exec.LookPath("rg"); err == nil {
-		return searchTextRg(rgPath, dbPath, query, lang, limit, jsonOut, includes, excludes)
-	}
-	return searchTextGo(dbPath, query, lang, limit, jsonOut, includes, excludes)
-}
-
-// searchTextRg delegates text search to ripgrep for speed.
-func searchTextRg(rgPath, dbPath, query, lang string, limit int, jsonOut bool, includes, excludes []string) error {
-	repoRoot := index.RepoRootFromDB(dbPath)
-	if repoRoot == "" {
-		return searchTextGo(dbPath, query, lang, limit, jsonOut, includes, excludes)
-	}
-
-	args := []string{"--no-heading", "-n", "--color=never"}
-	if lang != "" {
-		if rgLang := langToRgType(lang); rgLang != "" {
-			args = append(args, "--type="+rgLang)
-		}
-	}
-	fetchLimit := limit
-	args = append(args, "--", query, ".")
-
-	ctx, cancel := context.WithTimeout(context.Background(), rgSearchTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, rgPath, args...)
-	cmd.Dir = repoRoot
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return searchTextGo(dbPath, query, lang, limit, jsonOut, includes, excludes)
-	}
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return searchTextGo(dbPath, query, lang, limit, jsonOut, includes, excludes)
-	}
-
-	var (
-		results  []index.TextResult
-		limitHit bool
-	)
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) < 3 {
-			continue
-		}
-		lineNum, err := strconv.Atoi(parts[1])
-		if err != nil {
-			continue
-		}
-		relPath := normalizeRelPath(parts[0])
-		if !allowPath(relPath, includes, excludes) {
-			continue
-		}
-		results = append(results, index.TextResult{
-			RelPath: relPath,
-			Line:    lineNum,
-			Snippet: strings.TrimSpace(parts[2]),
-		})
-		if fetchLimit > 0 && len(results) >= fetchLimit {
-			limitHit = true
-			cancel()
-			break
-		}
-	}
-	scanErr := scanner.Err()
-	waitErr := cmd.Wait()
-	if limitHit {
-		scanErr = nil
-		waitErr = nil
-	}
-
-	if ctx.Err() == context.DeadlineExceeded && len(results) == 0 {
-		return searchTextGo(dbPath, query, lang, limit, jsonOut, includes, excludes)
-	}
-	if scanErr != nil {
-		return searchTextGo(dbPath, query, lang, limit, jsonOut, includes, excludes)
-	}
-	if waitErr != nil && !limitHit {
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
-			if exitErr.ExitCode() == 1 {
-				if len(results) == 0 {
-					return fmt.Errorf("no results found for '%s'", query)
-				}
-			} else {
-				return searchTextGo(dbPath, query, lang, limit, jsonOut, includes, excludes)
-			}
-		} else {
-			return searchTextGo(dbPath, query, lang, limit, jsonOut, includes, excludes)
-		}
-	}
-	if len(results) == 0 {
-		return fmt.Errorf("no results found for '%s'", query)
-	}
-	return renderTextResults(query, results, jsonOut)
-}
-
-// searchTextGo is the pure-Go fallback using the indexed file list.
-func searchTextGo(dbPath, query, lang string, limit int, jsonOut bool, includes, excludes []string) error {
-	results, err := index.TextSearch(dbPath, query, lang, widenPathFilterLimit(limit, len(includes) > 0 || len(excludes) > 0))
-	if err != nil {
-		return err
-	}
-	results = filterByPath(results, func(r index.TextResult) string { return r.RelPath }, includes, excludes)
-	if limit > 0 && len(results) > limit {
-		results = results[:limit]
-	}
-	if len(results) == 0 {
-		return fmt.Errorf("no results found for '%s'", query)
-	}
-	return renderTextResults(query, results, jsonOut)
-}
-
 func renderTextResults(query string, results []index.TextResult, jsonOut bool) error {
 	var content strings.Builder
 	for _, r := range results {
@@ -400,28 +278,4 @@ func renderTextResults(query string, results []index.TextResult, jsonOut bool) e
 		},
 		content.String(),
 	)
-}
-
-// langToRgType maps cymbal language names to rg --type values.
-func langToRgType(lang string) string {
-	switch strings.ToLower(lang) {
-	case "go":
-		return "go"
-	case "python":
-		return "py"
-	case "typescript", "tsx":
-		return "ts"
-	case "javascript", "jsx":
-		return "js"
-	case "rust":
-		return "rust"
-	case "java":
-		return "java"
-	case "c":
-		return "c"
-	case "cpp", "c++":
-		return "cpp"
-	default:
-		return ""
-	}
 }

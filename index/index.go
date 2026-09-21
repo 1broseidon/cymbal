@@ -3,10 +3,10 @@ package index
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -58,6 +58,7 @@ type SearchQuery struct {
 	Exact      bool
 	IgnoreCase bool
 	Limit      int
+	Paths      PathFilter
 }
 
 // TextResult holds a text search match.
@@ -394,9 +395,9 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 	}
 
 	// Load all stored mtime_ns + size in one query for fast skip checks.
-	fileChecks, _ := store.AllFileChecks()
-	if fileChecks == nil {
-		fileChecks = make(map[string]FileCheck)
+	fileChecks, err := store.AllFileChecks()
+	if err != nil {
+		return nil, fmt.Errorf("reading file freshness: %w", err)
 	}
 
 	// Phase 0: prune stale files (deleted/renamed since last index).
@@ -407,9 +408,13 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 	}
 	var staleRemoved int
 	if opts.Scope == "" {
-		staleRemoved, _ = store.DeleteStalePaths(currentPaths)
+		staleRemoved, err = store.DeleteStalePaths(currentPaths)
 	} else {
-		staleRemoved, _ = store.DeleteStalePathsUnder(walkPath, currentPaths)
+		staleRemoved, err = store.DeleteStalePathsUnder(walkPath, currentPaths)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("pruning stale files: %w", err)
 	}
 
 	// (parseResult is defined at package level)
@@ -546,37 +551,47 @@ func Structure(dbPath string, limit int) (*StructureResult, error) {
 	return store.Structure(limit)
 }
 
-// EnsureFresh performs a silent, incremental reindex before a query.
-// It opens the DB, reads the stored repo root, and runs the standard
-// incremental index pass (mtime+size check, parse only dirty files,
-// prune stale). Returns the number of files refreshed, or 0 if
-// everything was already current. Errors are intentionally swallowed —
-// a stale read is better than a failed query.
-//
-// If the DB does not exist yet, EnsureFresh auto-indexes from the
-// current working directory's git root (issue #3).
+// EnsureFresh performs an incremental reindex and returns the change count.
+// It preserves the legacy best-effort API by returning zero on failure.
+// Call EnsureFreshWithError when a query requires verified freshness.
 func EnsureFresh(dbPath string) int {
-	store, err := OpenStore(dbPath)
+	count, err := EnsureFreshWithError(dbPath)
 	if err != nil {
 		return 0
 	}
+	return count
+}
 
-	repoRoot, err := store.GetMeta("repo_root")
-	opts := loadIndexOptions(store)
-	store.Close()
-	if err != nil || repoRoot == "" {
+// EnsureFreshWithError refreshes an index and distinguishes failures from no changes.
+// An uninitialized database is indexed from the current working directory's git root.
+// The returned count includes successfully refreshed files even on partial failure.
+func EnsureFreshWithError(dbPath string) (int, error) {
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		return 0, err
+	}
+	repoRoot, rootErr := store.GetMeta("repo_root")
+	opts, optsErr := loadIndexOptions(store)
+	closeErr := store.Close()
+	if err := errors.Join(rootErr, optsErr, closeErr); err != nil {
+		return 0, err
+	}
+	if repoRoot == "" {
 		repoRoot = autoDetectRoot()
 		if repoRoot == "" {
-			return 0
+			return 0, fmt.Errorf("cannot locate a repository to initialize the index; run cymbal index <path>")
 		}
 		fmt.Fprintf(os.Stderr, "Building index for %s ...\n", repoRoot)
 	}
-
 	stats, err := Index(repoRoot, dbPath, opts)
 	if err != nil {
-		return 0
+		return 0, err
 	}
-	return stats.FilesIndexed + stats.StaleRemoved
+	count := stats.FilesIndexed + stats.StaleRemoved
+	if stats.Errors > 0 {
+		return count, fmt.Errorf("incomplete index refresh: %d parse/read errors and %d write errors", stats.ParseErrors, stats.WriteErrors)
+	}
+	return count, nil
 }
 
 const (
@@ -599,18 +614,35 @@ func storeIndexOptions(store *Store, opts Options) error {
 	return store.SetMeta(metaIndexIncludeLargeFiles, strconv.FormatBool(opts.IncludeLargeFiles))
 }
 
-func loadIndexOptions(store *Store) Options {
+func loadIndexOptions(store *Store) (Options, error) {
 	var opts Options
-	if raw, err := store.GetMeta(metaIndexExclude); err == nil && raw != "" {
-		_ = json.Unmarshal([]byte(raw), &opts.Exclude)
+	raw, err := store.GetMeta(metaIndexExclude)
+	if err != nil {
+		return opts, err
 	}
-	if raw, err := store.GetMeta(metaIndexIncludeGenerated); err == nil && raw != "" {
-		opts.IncludeGenerated, _ = strconv.ParseBool(raw)
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &opts.Exclude); err != nil {
+			return opts, fmt.Errorf("reading index exclusions: %w", err)
+		}
 	}
-	if raw, err := store.GetMeta(metaIndexIncludeLargeFiles); err == nil && raw != "" {
-		opts.IncludeLargeFiles, _ = strconv.ParseBool(raw)
+	opts.IncludeGenerated, err = loadIndexBool(store, metaIndexIncludeGenerated)
+	if err != nil {
+		return opts, err
 	}
-	return opts
+	opts.IncludeLargeFiles, err = loadIndexBool(store, metaIndexIncludeLargeFiles)
+	return opts, err
+}
+
+func loadIndexBool(store *Store, key string) (bool, error) {
+	raw, err := store.GetMeta(key)
+	if err != nil || raw == "" {
+		return false, err
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("reading %s: %w", key, err)
+	}
+	return value, nil
 }
 
 // autoDetectRoot resolves the git root from cwd for auto-indexing.
@@ -740,7 +772,7 @@ func SearchSymbols(dbPath string, q SearchQuery) ([]SymbolResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return store.SearchSymbols(q.Text, q.Kind, q.Language, q.Exact, q.IgnoreCase, q.Limit)
+	return store.searchSymbols(q.Text, q.Kind, q.Language, q.Exact, q.IgnoreCase, q.Limit, q.Paths)
 }
 
 // ListFileNames returns the repo-relative paths of indexed files, sorted,
@@ -776,124 +808,6 @@ func RepoStats(dbPath string) (*RepoStatsResult, error) {
 	return store.RepoStats()
 }
 
-// TextSearch greps indexed file contents on disk.
-func TextSearch(dbPath, query, lang string, limit int) ([]TextResult, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	store, err := openCached(dbPath)
-	if err != nil {
-		return nil, err
-	}
-
-	files, err := store.AllFiles(lang)
-	if err != nil {
-		return nil, err
-	}
-
-	queryBytes := []byte(query)
-	workerCount := runtime.NumCPU()
-	if workerCount < 1 {
-		workerCount = 1
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	workCh := make(chan FileInfo, workerCount*2)
-	var (
-		mu      sync.Mutex
-		results []TextResult
-		found   atomic.Int64
-		wg      sync.WaitGroup
-	)
-
-	worker := func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case f, ok := <-workCh:
-				if !ok {
-					return
-				}
-
-				file, err := os.Open(f.Path)
-				if err != nil {
-					continue
-				}
-
-				scanner := newLargeLineScanner(file)
-				lineNum := 0
-				for scanner.Scan() {
-					select {
-					case <-ctx.Done():
-						file.Close()
-						return
-					default:
-					}
-
-					lineNum++
-					line := scanner.Bytes()
-					if !bytes.Contains(line, queryBytes) {
-						continue
-					}
-
-					n := found.Add(1)
-					if n > int64(limit) {
-						cancel()
-						file.Close()
-						return
-					}
-
-					snippet := string(line)
-					if len(snippet) > 200 {
-						snippet = snippet[:200]
-					}
-
-					mu.Lock()
-					results = append(results, TextResult{
-						File:    f.Path,
-						RelPath: f.RelPath,
-						Line:    lineNum,
-						Snippet: snippet,
-					})
-					mu.Unlock()
-
-					if n == int64(limit) {
-						cancel()
-						file.Close()
-						return
-					}
-				}
-				file.Close()
-			}
-		}
-	}
-
-	for range workerCount {
-		wg.Add(1)
-		go worker()
-	}
-
-feed:
-	for _, f := range files {
-		select {
-		case <-ctx.Done():
-			break feed
-		case workCh <- f:
-		}
-	}
-	close(workCh)
-	wg.Wait()
-
-	if len(results) > limit {
-		results = results[:limit]
-	}
-	return results, nil
-}
-
 func newLargeLineScanner(r io.Reader) *bufio.Scanner {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
@@ -902,6 +816,11 @@ func newLargeLineScanner(r io.Reader) *bufio.Scanner {
 
 // FindReferences finds files that reference a symbol name.
 func FindReferences(dbPath, name string, limit int) ([]RefResult, error) {
+	return FindReferencesWithPaths(dbPath, name, limit, PathFilter{})
+}
+
+// FindReferencesWithPaths applies path constraints before the result limit.
+func FindReferencesWithPaths(dbPath, name string, limit int, paths PathFilter) ([]RefResult, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -909,7 +828,7 @@ func FindReferences(dbPath, name string, limit int) ([]RefResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return store.FindReferences(name, limit)
+	return store.findReferences(name, nil, limit, paths)
 }
 
 // FindImporters finds files that import the file containing a symbol.

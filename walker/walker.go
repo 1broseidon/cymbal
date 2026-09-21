@@ -134,7 +134,7 @@ func WalkWithOptions(root string, workers int, langFilter func(string) bool, opt
 	// Walk the tree, sending file paths to workers.
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip errors
+			return err
 		}
 		if d.Type()&os.ModeSymlink != 0 {
 			return nil
@@ -162,7 +162,7 @@ func WalkWithOptions(root string, workers int, langFilter func(string) bool, opt
 
 		info, err := d.Info()
 		if err != nil {
-			return nil
+			return err
 		}
 		if shouldExcludeFile(rel, info, opts) {
 			addExcludedFile(&stats, info)

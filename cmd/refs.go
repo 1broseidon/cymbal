@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -26,7 +27,9 @@ Note: references are best-effort based on AST name matching, not semantic analys
 	Args: cobra.MinimumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		plan := resolveDBs(cmd)
-		ensureFresh(plan.Primary)
+		if err := ensureFresh(plan.Primary); err != nil {
+			return err
+		}
 		jsonOut := getJSONFlag(cmd)
 		importers, _ := cmd.Flags().GetBool("importers")
 		impact, _ := cmd.Flags().GetBool("impact")
@@ -52,6 +55,7 @@ Note: references are best-effort based on AST name matching, not semantic analys
 			return err
 		}
 
+		var failures []error
 		for i, name := range names {
 			if i > 0 {
 				fmt.Println()
@@ -66,10 +70,10 @@ Note: references are best-effort based on AST name matching, not semantic analys
 				err = refsSymbol(entry.Path, name, limit, ctx, jsonOut, includes, excludes, entry.Label())
 			}
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+				failures = append(failures, fmt.Errorf("%s: %w", name, err))
 			}
 		}
-		return nil
+		return errors.Join(failures...)
 	},
 }
 
@@ -87,13 +91,11 @@ func init() {
 }
 
 func refsSymbol(dbPath, name string, limit, ctx int, jsonOut bool, includes, excludes []string, worktreeLabel string) error {
-	fetchLimit := widenPathFilterLimit(limit, len(includes) > 0 || len(excludes) > 0)
-	results, err := index.FindReferences(dbPath, name, fetchLimit)
+	results, err := index.FindReferencesWithPaths(dbPath, name, limit, index.PathFilter{Include: includes, Exclude: excludes})
 	if err != nil {
 		return err
 	}
 
-	results = filterByPath(results, func(r index.RefResult) string { return r.RelPath }, includes, excludes)
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
 	}
@@ -103,17 +105,13 @@ func refsSymbol(dbPath, name string, limit, ctx int, jsonOut bool, includes, exc
 	}
 
 	enriched := enrichRefs(results, ctx)
+	if jsonOut {
+		return writeJSON(enriched)
+	}
 
 	var refs []refLine
-	for _, r := range results {
-		ctxLines, ctxStart := readSourceContext(r.File, r.Line, ctx)
-		refs = append(refs, refLine{
-			relPath:      r.RelPath,
-			line:         r.Line,
-			text:         strings.TrimSpace(readSourceLine(r.File, r.Line)),
-			contextLines: ctxLines,
-			contextStart: ctxStart,
-		})
+	for _, r := range enriched {
+		refs = append(refs, r.sourceSnippet.refLine(r.RelPath, r.Line))
 	}
 	lines, groups := dedupRefLines(refs)
 
@@ -133,12 +131,8 @@ func refsSymbol(dbPath, name string, limit, ctx int, jsonOut bool, includes, exc
 	if worktreeLabel != "" {
 		meta = append(meta, kv{"worktree", worktreeLabel})
 	}
-	return renderJSONOrFrontmatter(
-		jsonOut,
-		enriched,
-		meta,
-		content.String(),
-	)
+	frontmatter(meta, content.String())
+	return nil
 }
 
 func refsImporters(dbPath, name string, depth, limit int, jsonOut bool, includes, excludes []string, worktreeLabel string) error {

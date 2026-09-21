@@ -24,7 +24,9 @@ Designed to answer "I've never seen this repo — where do I start?"`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbPath := getDBPath(cmd)
-		ensureFresh(dbPath)
+		if err := ensureFresh(dbPath); err != nil {
+			return err
+		}
 		jsonOut := getJSONFlag(cmd)
 		limit, _ := cmd.Flags().GetInt("limit")
 

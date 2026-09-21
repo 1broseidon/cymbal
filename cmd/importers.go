@@ -14,7 +14,9 @@ var importersCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target := args[0]
 		dbPath := getDBPath(cmd)
-		ensureFresh(dbPath)
+		if err := ensureFresh(dbPath); err != nil {
+			return err
+		}
 		jsonOut := getJSONFlag(cmd)
 		depth, _ := cmd.Flags().GetInt("depth")
 		limit, _ := cmd.Flags().GetInt("limit")

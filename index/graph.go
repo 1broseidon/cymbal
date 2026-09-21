@@ -217,12 +217,8 @@ func (s *Store) BuildGraph(q GraphQuery) (*GraphResult, error) {
 		return emptyGraphResult(), nil
 	}
 
-	metas, err := s.symbolMetas()
-	if err != nil {
-		return nil, err
-	}
-
-	builder := newGraphBuilder(q, metas)
+	var traceRows []TraceResult
+	var impactRows []ImpactResult
 	edgesTruncated := false
 	if graphDirectionIncludesDown(q.Direction) {
 		// Always collect unresolved callees so GraphResult.Unresolved
@@ -240,7 +236,7 @@ func (s *Store) BuildGraph(q GraphQuery) (*GraphResult, error) {
 			return nil, err
 		}
 		edgesTruncated = edgesTruncated || truncated
-		builder.addTraceRows(rows)
+		traceRows = rows
 	}
 
 	if graphDirectionIncludesUp(q.Direction) {
@@ -257,8 +253,15 @@ func (s *Store) BuildGraph(q GraphQuery) (*GraphResult, error) {
 			return nil, err
 		}
 		edgesTruncated = edgesTruncated || truncated
-		builder.addImpactRows(rows)
+		impactRows = rows
 	}
+	metas, err := s.symbolMetas(graphSymbolNames(q.Symbol, traceRows, impactRows))
+	if err != nil {
+		return nil, err
+	}
+	builder := newGraphBuilder(q, metas)
+	builder.addTraceRows(traceRows)
+	builder.addImpactRows(impactRows)
 	builder.addRoot()
 
 	result := builder.result()
@@ -648,7 +651,39 @@ func contractTestNodes(g *GraphResult, rootID string, cl *Classifier) *GraphResu
 	}
 }
 
-func (s *Store) symbolMetas() (map[string][]graphSymbolMeta, error) {
+func graphSymbolNames(root string, trace []TraceResult, impact []ImpactResult) []string {
+	names := map[string]bool{root: true}
+	for _, row := range trace {
+		names[row.Caller] = true
+		names[row.Callee] = true
+	}
+	for _, row := range impact {
+		names[row.Caller] = true
+		names[row.Symbol] = true
+	}
+	out := make([]string, 0, len(names))
+	for name := range names {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (s *Store) symbolMetas(names []string) (map[string][]graphSymbolMeta, error) {
+	out := map[string][]graphSymbolMeta{}
+	// Stay below SQLite's variable limit even on builds configured for 999
+	// parameters. A name belongs to one batch, preserving definition order.
+	const batchSize = 500
+	for start := 0; start < len(names); start += batchSize {
+		batch := names[start:min(start+batchSize, len(names))]
+		if err := s.loadSymbolMetas(batch, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) loadSymbolMetas(names []string, out map[string][]graphSymbolMeta) error {
 	// All depths, not just top-level: methods and other nested symbols are
 	// legitimate call-graph nodes, and trace/impact resolve against every
 	// depth — restricting metadata to depth 0 made the graph mislabel real
@@ -656,40 +691,45 @@ func (s *Store) symbolMetas() (map[string][]graphSymbolMeta, error) {
 	// then language/path/line) makes classifyMeta's selection stable: the
 	// first visible matching definition wins, and ambiguity annotations list
 	// the definitions in this order.
+	args := make([]any, len(names))
+	for i, name := range names {
+		args[i] = name
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
 	rows, err := s.db.Query(`
 		SELECT s.name, f.rel_path, s.language, s.start_line
 		FROM symbols s
 		JOIN files f ON s.file_id = f.id
+		WHERE s.name IN (`+placeholders+`)
 		ORDER BY s.depth, s.language, f.rel_path, s.start_line
-	`)
+	`, args...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
 
-	out := map[string][]graphSymbolMeta{}
+	type definitionKey struct {
+		name string
+		graphSymbolMeta
+	}
+	seen := make(map[definitionKey]bool)
 	for rows.Next() {
 		var name, relPath, language string
 		var startLine int
 		if err := rows.Scan(&name, &relPath, &language, &startLine); err != nil {
-			continue
+			return err
 		}
 		meta := graphSymbolMeta{path: filepath.ToSlash(relPath), language: language, startLine: startLine}
 		// Keep distinct definitions per name (used for ambiguity annotation)
 		// so callee resolution can match by language; drop exact duplicates
 		// such as the same symbol indexed across sibling worktrees.
-		dup := false
-		for _, m := range out[name] {
-			if m.language == meta.language && m.path == meta.path && m.startLine == meta.startLine {
-				dup = true
-				break
-			}
-		}
-		if !dup {
+		key := definitionKey{name, meta}
+		if !seen[key] {
+			seen[key] = true
 			out[name] = append(out[name], meta)
 		}
 	}
-	return out, rows.Err()
+	return rows.Err()
 }
 
 // GraphNodeIDFor returns the stable graph-node ID for a symbol name.

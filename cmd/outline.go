@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,7 +17,9 @@ var outlineCmd = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbPath := getDBPath(cmd)
-		ensureFresh(dbPath)
+		if err := ensureFresh(dbPath); err != nil {
+			return err
+		}
 		jsonOut := getJSONFlag(cmd)
 		sigs, _ := cmd.Flags().GetBool("signatures")
 		namesOnly, _ := cmd.Flags().GetBool("names")
@@ -29,11 +32,12 @@ var outlineCmd = &cobra.Command{
 			return outlineNames(dbPath, args)
 		}
 
+		var failures []error
 		multi := len(args) > 1
 		for i, target := range args {
 			symbols, err := outlineSymbols(dbPath, target)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s: %v\n", target, err)
+				failures = append(failures, fmt.Errorf("%s: %w", target, err))
 				continue
 			}
 			if len(symbols) == 0 {
@@ -57,7 +61,7 @@ var outlineCmd = &cobra.Command{
 				return err
 			}
 		}
-		return nil
+		return errors.Join(failures...)
 	},
 }
 
@@ -70,12 +74,13 @@ func outlineSymbols(dbPath, target string) ([]index.SymbolResult, error) {
 }
 
 func outlineNames(dbPath string, targets []string) error {
+	var failures []error
 	var out strings.Builder
 	seen := make(map[string]struct{})
 	for _, target := range targets {
 		symbols, err := outlineSymbols(dbPath, target)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", target, err)
+			failures = append(failures, fmt.Errorf("%s: %w", target, err))
 			continue
 		}
 		if len(symbols) == 0 {
@@ -95,20 +100,22 @@ func outlineNames(dbPath string, targets []string) error {
 		}
 	}
 	fmt.Print(out.String())
-	return nil
+	return errors.Join(failures...)
 }
 
 func outlineMultiJSON(dbPath string, targets []string) error {
+	var failures []error
 	out := make(map[string]any, len(targets))
 	for _, target := range targets {
 		symbols, err := outlineSymbols(dbPath, target)
 		if err != nil {
 			out[target] = map[string]any{"error": err.Error()}
+			failures = append(failures, fmt.Errorf("%s: %w", target, err))
 			continue
 		}
 		out[target] = symbols
 	}
-	return writeJSON(out)
+	return errors.Join(append(failures, writeJSON(out))...)
 }
 
 func outlineContent(symbols []index.SymbolResult, sigs bool) string {

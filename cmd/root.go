@@ -242,9 +242,12 @@ func getJSONFlag(cmd *cobra.Command) bool {
 	return v
 }
 
-// ensureFresh runs a silent, JIT incremental reindex so queries always
-// reflect the current working tree. This is cheap: 1-2ms when nothing
-// changed, a few ms per dirty file when something did.
-func ensureFresh(dbPath string) {
-	index.EnsureFresh(dbPath)
+// ensureFresh verifies the index against the current working tree before queries.
+// A refresh failure is an operational error, not a successful unchanged index.
+func ensureFresh(dbPath string) error {
+	_, err := index.EnsureFreshWithError(dbPath)
+	if err != nil {
+		return fmt.Errorf("refreshing index: %w", err)
+	}
+	return nil
 }

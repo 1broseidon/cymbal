@@ -43,7 +43,9 @@ Examples:
 	Args: cobra.MinimumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		plan := resolveDBs(cmd)
-		ensureFresh(plan.Primary)
+		if err := ensureFresh(plan.Primary); err != nil {
+			return err
+		}
 		jsonOut := getJSONFlag(cmd)
 		ctx, _ := cmd.Flags().GetInt("context")
 		showAll, _ := cmd.Flags().GetBool("all")

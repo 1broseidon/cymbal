@@ -4,6 +4,24 @@ All notable changes to cymbal are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Reference, impact, investigate, and context rendering batch requested source ranges by file. Text and JSON share loaded snippets, and JSON reference output skips text formatting.
+- Impact traversal loads enclosing-symbol intervals once per referenced file instead of querying each call site, preserving innermost caller selection, deduplication, and traversal through hidden test callers.
+- Graph metadata queries fetch only root and traversed names in bounded batches. All matching definitions and languages remain available for ambiguity and unresolved diagnostics; exact duplicate definitions use set-based suppression.
+
+### Fixed
+
+- Symbol search and reference lookup apply path filters before result limits, so a definition or call site outside the former overfetch window remains discoverable.
+- Trace and graph traversal retain real one- and two-character callees such as `Do`; call-reference kinds distinguish calls from ordinary variable uses.
+- Text search uses the same line-oriented Go regular expressions, indexed file inventory, path/language filters, snippet format, and path/line ordering with or without ripgrep. Invalid patterns and file-read failures now surface as errors. Ripgrep accelerates literal queries; regex syntax uses the native scanner. Text search no longer includes files outside the index solely because ripgrep is installed.
+- Opening `--db ./custom.db` preserves the existing parent directory's permissions. Newly created cache directories and database files remain private.
+- Query commands return a nonzero exit if the index cannot be refreshed. Discovery failures no longer permit stale-file pruning from an incomplete file inventory. `outline`, `refs`, and `investigate` preserve successful batch output while reporting operational failures through the exit status; ordinary no-match behavior is unchanged.
+
+### Added
+
+- `index.EnsureFreshWithError` exposes refresh errors separately from the change count; the existing `EnsureFresh` API keeps its best-effort behavior. `SearchQuery.Paths`, `FindReferencesWithPaths`, and `TextSearchWithOptions` expose path-aware retrieval and optional regex text matching to library callers. `TextSearch` continues to accept a literal substring.
+
 ## [0.15.0] - 2026-09-05
 
 This release includes the changes merged after v0.14.0 in PRs #66–#76. Integrators using `investigate --json` should update their result traversal as described under **Changed**.
