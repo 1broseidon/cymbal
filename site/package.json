@@ -1,0 +1,12 @@
+{
+  "name": "cymbal-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "inkcap build",
+    "prebuild": "inkcap stars"
+  },
+  "devDependencies": {
+    "inkcap": "^0.1.0"
+  }
+}

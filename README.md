@@ -37,13 +37,19 @@ Use it when you need:
 
 ## Documentation
 
+**[MANUAL.md](MANUAL.md) is the complete manual in one file** — install, every
+command with its flags, agent wiring, and the supported languages. It is what
+[cymbal.sh](https://cymbal.sh) renders, so the published manual and the one in
+your clone are the same document. If you are an agent that just cloned this
+repo, read that file.
+
 | For | Start here |
 |---|---|
+| Everyone, offline or online | [MANUAL.md](MANUAL.md) · [cymbal.sh](https://cymbal.sh) |
 | Operators / CLI users | [Quick Start](#quick-start) · [Commands at a Glance](#commands-at-a-glance) · [docs/reference/commands.md](docs/reference/commands.md) |
-| AI agents / integrations | [AI Agents](#ai-agents) · [docs/AGENT_HOOKS.md](docs/AGENT_HOOKS.md) · [docs/guide/agent-native.md](docs/guide/agent-native.md) |
+| AI agents / integrations | [AI Agents](#ai-agents) · [HOOKS.md](HOOKS.md) |
 | Go library consumers | [Use as a Library](#use-as-a-library) · [docs/guide/library.md](docs/guide/library.md) |
 | Contributors / evaluators | [How It Works](#how-it-works) · [Benchmarks](#benchmarks) · [CHANGELOG.md](CHANGELOG.md) |
-| Full docs site | [docs/index.md](docs/index.md) · [docs/guide/getting-started.md](docs/guide/getting-started.md) |
 
 ## Install
 
@@ -312,10 +318,10 @@ Cymbal is designed to be an agent's code navigation layer, but the README only
 summarizes the integration story. The full install snippets and hook wiring
 live in the dedicated docs:
 
-- [docs/AGENT_HOOKS.md](docs/AGENT_HOOKS.md) — OpenCode and Claude Code install,
-  `nudge`, `remind`, and snippets for other agent runtimes
-- [docs/guide/agent-native.md](docs/guide/agent-native.md) — frontmatter output
-  format and why it is cheaper than JSON by default
+- [HOOKS.md](HOOKS.md) — OpenCode and Claude Code install, `nudge`, `remind`,
+  and snippets for other agent runtimes
+- [MANUAL.md](MANUAL.md#for-agents) — frontmatter output format and why it is
+  cheaper than JSON by default
 
 If you are writing agent instructions, the short policy is:
 

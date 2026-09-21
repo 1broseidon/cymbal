@@ -1063,7 +1063,7 @@ func TestLookupHookAdapterUnknownAgentMentionsDocs(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported agent")
 	}
-	if !strings.Contains(err.Error(), "docs/AGENT_HOOKS.md") {
+	if !strings.Contains(err.Error(), "HOOKS.md") {
 		t.Errorf("unknown-agent error should point users at the docs; got %q", err)
 	}
 }

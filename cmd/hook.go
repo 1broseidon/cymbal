@@ -41,7 +41,7 @@ import (
 //                        wire the above into ~/.claude/settings.json.
 //
 // Other agents (Cursor, Windsurf, aider, Cline, Continue, Zed, etc.) can
-// consume the same subcommands — see docs/AGENT_HOOKS.md for copy-paste
+// consume the same subcommands — see HOOKS.md for copy-paste
 // snippets per agent. Auto-installers for those are intentionally out of
 // scope so we don't maintain config adapters for every agent in the world.
 
@@ -143,7 +143,7 @@ Supported agents:
 	                (or --scope project for .opencode/plugins/cymbal-opencode.js)
 
 For other agents (Cursor, Windsurf, aider, Cline, Continue, Zed, ...), see
-docs/AGENT_HOOKS.md for copy-paste snippets that wire 'cymbal hook nudge'
+HOOKS.md for copy-paste snippets that wire 'cymbal hook nudge'
 and 'cymbal hook remind' into each agent's native hook point.
 
 Use --dry-run to see the changes without writing. Use --scope=project to
@@ -1043,7 +1043,7 @@ func lookupHookAdapter(name string) (hookAdapter, error) {
 		return hookAdapter{install: installOpenCode, uninstall: uninstallOpenCode}, nil
 	}
 	return hookAdapter{}, fmt.Errorf("unknown agent %q (supported: claude-code, opencode). "+
-		"For other agents see docs/AGENT_HOOKS.md — 'cymbal hook nudge' and "+
+		"For other agents see HOOKS.md — 'cymbal hook nudge' and "+
 		"'cymbal hook remind' can be wired by hand into any agent's hook point.", name)
 }
 
