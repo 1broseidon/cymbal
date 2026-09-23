@@ -56,8 +56,8 @@ subtasks:
     completed: true
   - id: task-18-9
     title: CHANGELOG entry for the exit-code and output changes
-    completed: false
-updatedAt: "2026-09-23T18:58:26.191Z"
+    completed: true
+updatedAt: "2026-09-23T18:58:26.523Z"
 ---
 
 ## Description
