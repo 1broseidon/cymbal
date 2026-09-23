@@ -163,6 +163,12 @@ jobs:
             exit 1
           fi
 
+          sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' dist/release_notes.md
+          cat >> dist/release_notes.md <<'EOF'
+
+          **Install:** `brew install 1broseidon/tap/cymbal`, `yay -S cymbal`, `docker pull ghcr.io/1broseidon/cymbal:latest`, or the PowerShell and Go installs in the [README](https://github.com/1broseidon/cymbal#install). Full details in the [CHANGELOG](https://github.com/1broseidon/cymbal/blob/main/CHANGELOG.md).
+          EOF
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
