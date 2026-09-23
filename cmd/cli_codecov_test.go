@@ -342,26 +342,28 @@ func TestCodecovCLIImplsRunEModes(t *testing.T) {
 	stdout, stderr, err := captureProcessOutput(t, func() error {
 		return implsCmd.RunE(multiCmd, []string{"Service", "MissingInterface"})
 	})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, errSymbolNotFound) {
+		t.Fatalf("expected symbol not found for MissingInterface, got %v", err)
 	}
 	if stderr != "" {
 		t.Fatalf("unexpected stderr: %s", stderr)
 	}
 	requireOutputContains(t, stdout, "implementors (incoming)")
 	requireOutputContains(t, stdout, "UserService")
-	requireOutputContains(t, stdout, "No implementors found for 'MissingInterface'.")
+	if strings.Contains(stdout, "MissingInterface") {
+		t.Fatalf("the answer includes the missing name: %q", stdout)
+	}
 
 	jsonCmd := newImplsTestCommand(dbPath)
 	setTestFlag(t, jsonCmd, "json", "true")
 	stdout, _, err = captureProcessOutput(t, func() error {
 		return implsCmd.RunE(jsonCmd, []string{"Service", "MissingInterface"})
 	})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, errSymbolNotFound) {
+		t.Fatalf("expected symbol not found for MissingInterface, got %v", err)
 	}
 	requireOutputContains(t, stdout, `"Service":`)
-	requireOutputContains(t, stdout, `"MissingInterface":`)
+	requireOutputContains(t, stdout, `"error": "symbol not found: MissingInterface"`)
 
 	ofCmd := newImplsTestCommand(dbPath)
 	setTestFlag(t, ofCmd, "of", "UserService")

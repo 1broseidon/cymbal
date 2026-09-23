@@ -1,8 +1,8 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/1broseidon/cymbal/index"
@@ -23,7 +23,7 @@ base classes. Results are best-effort based on AST name matching — external
 
 Multi-symbol: pass more than one name (or pipe via --stdin) to get the answer
 for all of them in one turn. JSON mode returns a map keyed by the requested
-name.
+name; a name that fails keeps its key, with an "error" field.
 
 The inverse direction is also supported: use --of to list what a specific type
 itself implements. --of is always single-symbol.
@@ -57,6 +57,10 @@ Examples:
 			entry, _ := findSymbolEntry(plan, name)
 			return entry.Path, entry.Label()
 		}
+		dbForName := func(name string) string {
+			dbPath, _ := entryFor(name)
+			return dbPath
+		}
 
 		// --of is inherently singular; positional args are disallowed with it.
 		if inverse != "" {
@@ -64,6 +68,11 @@ Examples:
 				return fmt.Errorf("pass either positional symbols or --of <type>, not both")
 			}
 			dbPath, label := entryFor(inverse)
+			// A type that implements nothing still gets a zero-edge answer;
+			// only a name the index has never seen fails.
+			if err := requireIndexed(dbPath, inverse); err != nil {
+				return nameFailure(inverse, err)
+			}
 			if graphRequested(cmd) {
 				results, err := fetchImpls(dbPath, inverse, inverse, 999999, langFilter, includes, excludes, resolvedOnly, unresolvedOnly)
 				if err != nil {
@@ -85,13 +94,16 @@ Examples:
 		}
 
 		if graphRequested(cmd) {
+			known, failures := keepIndexed(names, dbForName)
+			if len(known) == 0 {
+				return errors.Join(failures...)
+			}
 			format := selectGraphFormatFromVerb(cmd)
 			includeUnresolved, _ := cmd.Flags().GetBool("include-unresolved")
 			var graphs []*index.GraphResult
 			var roots []string
-			for _, n := range names {
-				dbPath, _ := entryFor(n)
-				results, err := fetchImpls(dbPath, n, "", 999999, langFilter, includes, excludes, resolvedOnly, unresolvedOnly)
+			for _, n := range known {
+				results, err := fetchImpls(dbForName(n), n, "", 999999, langFilter, includes, excludes, resolvedOnly, unresolvedOnly)
 				if err != nil {
 					return fmt.Errorf("graph %q: %w", n, err)
 				}
@@ -101,17 +113,24 @@ Examples:
 			merged := mergeGraphResults(graphs...)
 			userLimit, _ := cmd.Flags().GetInt("graph-limit")
 			merged = applyGraphLimit(merged, userLimit, format, graphRootIDSet(roots...))
-			return renderGraph(format, merged)
+			return errors.Join(append(failures, renderGraph(format, merged))...)
 		}
 
-		// JSON multi-mode: one map keyed by requested name.
+		// JSON multi-mode: one map keyed by requested name. A name that fails,
+		// including one the index has never seen, keeps its key with the error.
 		if jsonOut && len(names) > 1 {
 			out := make(map[string]any, len(names))
+			var failures []error
 			for _, n := range names {
 				dbPath, label := entryFor(n)
-				rows, ferr := fetchImpls(dbPath, n, "", limit, langFilter, includes, excludes, resolvedOnly, unresolvedOnly)
+				ferr := requireIndexed(dbPath, n)
+				var rows []index.ImplementorResult
+				if ferr == nil {
+					rows, ferr = fetchImpls(dbPath, n, "", limit, langFilter, includes, excludes, resolvedOnly, unresolvedOnly)
+				}
 				if ferr != nil {
 					out[n] = map[string]any{"error": ferr.Error()}
+					failures = append(failures, nameFailure(n, ferr))
 					continue
 				}
 				payload := map[string]any{
@@ -125,41 +144,24 @@ Examples:
 				}
 				out[n] = payload
 			}
-			return writeJSON(out)
+			return errors.Join(append(failures, writeJSON(out))...)
 		}
 
+		// A name nothing implements still gets a zero-count answer; only a
+		// name the index has never seen fails.
 		multi := len(names) > 1
-		for i, n := range names {
+		known, failures := keepIndexed(names, dbForName)
+		for i, n := range known {
 			dbPath, label := entryFor(n)
 			if multi {
 				multiSymbolBanner(n, i == 0)
 				multiSymbolHeader(n)
-				rows, ferr := fetchImpls(dbPath, n, "", limit, langFilter, includes, excludes, resolvedOnly, unresolvedOnly)
-				if ferr != nil {
-					fmt.Printf("error: %v\n", ferr)
-					continue
-				}
-				if len(rows) == 0 {
-					fmt.Printf("No implementors found for '%s'.\n", n)
-					continue
-				}
-				meta := []kv{
-					{"symbol", n},
-					{"direction", "implementors (incoming)"},
-					{"implementor_count", fmt.Sprintf("%d", len(rows))},
-				}
-				if label != "" {
-					meta = append(meta, kv{"worktree", label})
-				}
-				_ = renderJSONOrFrontmatter(false, rows, meta, formatImplementorResults(rows, false))
-				continue
 			}
 			if err := runImplsOne(dbPath, n, "", jsonOut, limit, langFilter, includes, excludes, resolvedOnly, unresolvedOnly, label); err != nil {
-				fmt.Fprintf(os.Stderr, "%s: %v\n", n, err)
-				continue
+				failures = append(failures, nameFailure(n, err))
 			}
 		}
-		return nil
+		return errors.Join(failures...)
 	},
 }
 
@@ -204,22 +206,18 @@ func fetchImpls(dbPath, name, inverse string, limit int, langFilter string, incl
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
 	}
+	if results == nil {
+		results = []index.ImplementorResult{} // an empty list in JSON, not null
+	}
 	return results, nil
 }
 
 // runImplsOne renders a single-symbol impls result (either incoming or --of).
+// An empty result is still an answer, with a zero count.
 func runImplsOne(dbPath, name, inverse string, jsonOut bool, limit int, langFilter string, includes, excludes []string, resolvedOnly, unresolvedOnly bool, worktreeLabel string) error {
 	results, err := fetchImpls(dbPath, name, inverse, limit, langFilter, includes, excludes, resolvedOnly, unresolvedOnly)
 	if err != nil {
 		return err
-	}
-	if len(results) == 0 {
-		if inverse != "" {
-			fmt.Fprintf(os.Stderr, "No implements edges found for '%s'.\n", inverse)
-		} else {
-			fmt.Fprintf(os.Stderr, "No implementors found for '%s'.\n", name)
-		}
-		return nil
 	}
 
 	var meta []kv
