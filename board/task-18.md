@@ -32,7 +32,7 @@ createdAt: "2026-09-23T18:00:25.638Z"
 subtasks:
   - id: task-18-1
     title: Empty results exit 0 with a zero-count result in impact, trace, refs and investigate
-    completed: false
+    completed: true
   - id: task-18-2
     title: Names the index does not know exit 1 with symbol not found, batches included
     completed: false
@@ -57,7 +57,7 @@ subtasks:
   - id: task-18-9
     title: CHANGELOG entry for the exit-code and output changes
     completed: false
-updatedAt: "2026-09-23T18:24:23.901Z"
+updatedAt: "2026-09-23T18:58:23.876Z"
 ---
 
 ## Description
