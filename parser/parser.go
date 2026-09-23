@@ -2698,13 +2698,14 @@ func typeNameText(node *sitter.Node, src []byte) string {
 	}
 	// Qualified-name-shaped nodes: we want the *final* segment, not the first.
 	// Python "attribute" (foo.Bar), TS "nested_identifier" / "nested_type_identifier",
-	// Java "scoped_type_identifier", C# "qualified_name", Ruby "scope_resolution",
-	// etc. Tree-sitter grammars expose the final segment as a named field when
-	// available; fall back to the last identifier-like child.
+	// Java "scoped_type_identifier", C# and PHP "qualified_name", Ruby
+	// "scope_resolution", Kotlin "user_type" (a.b.C is one user_type with three
+	// identifiers), etc. Tree-sitter grammars expose the final segment as a
+	// named field when available; fall back to the last identifier-like child.
 	switch node.Kind() {
 	case "attribute", "nested_identifier", "nested_type_identifier",
 		"scoped_type_identifier", "qualified_name", "qualified_type",
-		"scope_resolution":
+		"scope_resolution", "user_type":
 		if f := node.ChildByFieldName("attribute"); f != nil {
 			if t := typeNameText(f, src); t != "" {
 				return t
@@ -2719,7 +2720,7 @@ func typeNameText(node *sitter.Node, src []byte) string {
 		for i := int(node.ChildCount()) - 1; i >= 0; i-- {
 			c := node.Child(uint(i))
 			switch c.Kind() {
-			case "type_identifier", "identifier", "constant":
+			case "type_identifier", "identifier", "constant", "name": // name: PHP
 				return c.Utf8Text(src)
 			}
 		}
@@ -2879,12 +2880,10 @@ func (e *symbolExtractor) extractImplementsJava(node *sitter.Node) []symbols.Ref
 	var out []symbols.Ref
 
 	if sc := node.ChildByFieldName("superclass"); sc != nil {
-		// superclass is "extends X" — walk for type_identifier children.
-		if id := findChildByType(sc, "type_identifier"); id != nil {
-			if ref, ok := e.implementsRef(id, line); ok {
-				out = append(out, ref)
-			}
-		}
+		// superclass is "extends X", where X may be generic (Base<T>) or
+		// qualified (a.b.Base), as in the interface list below.
+		out = append(out, e.collectImplementsFromClause(sc, line,
+			"type_identifier", "generic_type", "scoped_type_identifier")...)
 	}
 	for i := 0; i < int(node.ChildCount()); i++ {
 		c := node.Child(uint(i))
@@ -2989,7 +2988,8 @@ func (e *symbolExtractor) extractImplementsScala(node *sitter.Node) []symbols.Re
 			for j := 0; j < int(c.ChildCount()); j++ {
 				gc := c.Child(uint(j))
 				switch gc.Kind() {
-				case "type_identifier", "generic_type":
+				// stable_type_identifier is a qualified type: a.b.Mix.
+				case "type_identifier", "generic_type", "stable_type_identifier":
 					if ref, ok := e.implementsRef(gc, line); ok {
 						out = append(out, ref)
 					}
@@ -3086,21 +3086,40 @@ func (e *symbolExtractor) extractImplementsDart(node *sitter.Node) []symbols.Ref
 		c := node.Child(uint(i))
 		switch c.Kind() {
 		case "superclass", "interfaces", "mixins":
-			for j := 0; j < int(c.ChildCount()); j++ {
-				gc := c.Child(uint(j))
-				switch gc.Kind() {
-				case "type_identifier", "type_name":
-					if ref, ok := e.implementsRef(gc, line); ok {
-						out = append(out, ref)
-					}
-				case "type_list":
-					for k := 0; k < int(gc.ChildCount()); k++ {
-						if ref, ok := e.implementsRef(gc.Child(uint(k)), line); ok {
-							out = append(out, ref)
-						}
-					}
+			out = append(out, e.dartClauseRefs(c, line)...)
+		}
+	}
+	return out
+}
+
+// dartClauseRefs returns one implements edge per type in a Dart superclass,
+// interfaces or mixins clause. The grammar writes a qualified type as sibling
+// type_identifiers joined by "." tokens, so a segment after a "." replaces the
+// one before it: a.Iface is Iface. A with clause after extends is a mixins node
+// inside the superclass clause.
+func (e *symbolExtractor) dartClauseRefs(clause *sitter.Node, line int) []symbols.Ref {
+	var out []symbols.Ref
+	for j := 0; j < int(clause.ChildCount()); j++ {
+		gc := clause.Child(uint(j))
+		switch gc.Kind() {
+		case "type_identifier", "type_name":
+			ref, ok := e.implementsRef(gc, line)
+			if !ok {
+				continue
+			}
+			if j > 0 && clause.Child(uint(j-1)).Kind() == "." && len(out) > 0 {
+				out[len(out)-1] = ref
+			} else {
+				out = append(out, ref)
+			}
+		case "type_list":
+			for k := 0; k < int(gc.ChildCount()); k++ {
+				if ref, ok := e.implementsRef(gc.Child(uint(k)), line); ok {
+					out = append(out, ref)
 				}
 			}
+		case "mixins":
+			out = append(out, e.dartClauseRefs(gc, line)...)
 		}
 	}
 	return out

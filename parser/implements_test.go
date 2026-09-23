@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"slices"
+	"sort"
 	"testing"
 
 	"github.com/1broseidon/cymbal/lang"
@@ -287,5 +289,43 @@ class APIRouter(routing.Router):
 	}
 	if hasTarget(targets, "routing") {
 		t.Errorf("implements target should not be the module prefix 'routing'; got %v", targets)
+	}
+}
+
+// Generic and qualified supertypes must store the bare, last-segment type name
+// and nothing else, since impls matches by exact name: a.b.Base<T> is Base.
+// The first five languages used to drop the edge or store another segment;
+// the rest are guards.
+func TestImplementsGenericAndQualifiedSupertypes(t *testing.T) {
+	for _, tc := range []struct {
+		language, path, src string
+		want                []string // sorted
+	}{
+		{"java", "H.java", "class H extends Base<String> {}\nclass I extends a.b.Base<String> implements a.b.Iface<X>, J<Y> {}\nclass B extends com.acme.Base {}\n",
+			[]string{"Base", "Base", "Base", "Iface", "J"}},
+		{"kotlin", "E.kt", "class E : kotlinx.coroutines.Job\nclass L : a.b.Base<String>(), c.D\nclass K : Base<String>(), Thing\n",
+			[]string{"Base", "Base", "D", "Job", "Thing"}},
+		{"scala", "S.scala", "class S1 extends Base[Int]\nclass S2 extends a.b.Base[Int] with a.b.Mix with M[Int]\n",
+			[]string{"Base", "Base", "M", "Mix"}},
+		{"dart", "d.dart", "class D1 extends a.Base<int> with a.Mx, N implements a.Iface, J<int> {}\n",
+			[]string{"Base", "Iface", "J", "Mx", "N"}},
+		{"php", "p.php", "<?php\nclass P1 extends \\A\\B\\Base implements \\A\\B\\Iface, C {}\nclass P2 extends \\Base implements Foo\\Bar {}\n",
+			[]string{"Bar", "Base", "Base", "C", "Iface"}},
+		{"go", "s.go", "package p\n\nimport \"io\"\n\ntype S interface {\n\tio.Reader\n}\n", []string{"Reader"}},
+		{"cpp", "c.cpp", "class C2 : public a::b::Base<int> {};\n", []string{"Base"}},
+		{"python", "r.py", "class R(Base[int], a.b.Mixin):\n    pass\n", []string{"Base", "Mixin"}},
+		{"typescript", "t.ts", "class T extends Base<string> implements a.b.Iface<number> {}\n", []string{"Base", "Iface"}},
+		{"swift", "w.swift", "class W: Mod.Proto {}\n", []string{"Proto"}},
+		{"csharp", "x.cs", "class X : Base<int>, A.B.IFace<int> {}\n", []string{"Base", "IFace"}},
+		{"ruby", "y.rb", "class Y < A::B::Base\n  include A::Mixin\nend\n", []string{"Base", "Mixin"}},
+		{"rust", "g.rs", "struct G;\nimpl std::fmt::Display for G {}\n", []string{"Display"}},
+	} {
+		t.Run(tc.language, func(t *testing.T) {
+			got := implementsTargets(parseOrFail(t, []byte(tc.src), tc.path, tc.language).Refs)
+			sort.Strings(got)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("implements targets = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

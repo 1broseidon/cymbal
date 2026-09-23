@@ -86,6 +86,43 @@ func TestIndexStoresNoFileHash(t *testing.T) {
 	}
 }
 
+// An index written at format 1 has the implements edges of the parser at the
+// time, which dropped a generic Java superclass. The next refresh reparses the
+// unchanged file and picks up the edge.
+func TestIndexFormat2RefreshesImplementsEdges(t *testing.T) {
+	repo, db := t.TempDir(), filepath.Join(t.TempDir(), "index.db")
+	// Registered after TempDir so it runs first: Windows cannot remove an open index.db.
+	t.Cleanup(CloseAll)
+	if err := os.WriteFile(filepath.Join(repo, "H.java"), []byte("class H extends Base<String> {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Index(repo, db, Options{Workers: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{`DELETE FROM refs WHERE kind = 'implements'`, `UPDATE meta SET value = '1' WHERE key = 'index_format'`} {
+		if _, err := store.db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := Index(repo, db, Options{Workers: 1})
+	if err != nil || stats.FilesIndexed != 1 {
+		t.Fatalf("refresh of a format 1 index: %+v, %v; want the file reparsed", stats, err)
+	}
+	impls, err := FindImplementors(db, "Base", 10)
+	if err != nil || len(impls) != 1 || impls[0].Implementer != "H" {
+		t.Fatalf("implementors of Base after the refresh: %+v, %v", impls, err)
+	}
+}
+
 func TestIndexFormatUpgradeReparsesUnchangedFilesOnce(t *testing.T) {
 	repo, db := freshnessFixture(t)
 	t.Cleanup(CloseAll)
