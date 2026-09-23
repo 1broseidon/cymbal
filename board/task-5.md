@@ -37,3 +37,4 @@ The real constraint is on the Go side: smacker/go-tree-sitter (which cymbal uses
 
 ### Recommendation:
 Option 1 (wazero) is the cleanest path. It keeps cymbal as a single binary, adds no C dependencies, and aligns with the WASM sandbox security model in the spec. The bridge layer between wazero's WASM execution and cymbal's symbol model is the main engineering work.
+- 2026-09-23T14:18:00.905Z: [claude] Closed as won't-implement (2026-09-23 consolidation). No progress since 2026-04-06. The project went the other way: official tree-sitter/go-tree-sitter bindings plus vendored grammars in internal/tsgrammars (dart, elixir, swift), so new languages land in core, consistent with the language-breadth decision. The official Go bindings cannot load WASM grammars, so a plugin path would need a wazero runtime and a parse-tree bridge, with no user demand yet. Reopen with brainfile restore if an external contributor needs an out-of-tree language.
