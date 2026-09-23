@@ -54,7 +54,10 @@ subtasks:
   - id: task-18-8
     title: Defer coverage-package discovery to test-coverage with a single go list
     completed: false
-updatedAt: "2026-09-23T18:00:33.967Z"
+  - id: task-18-9
+    title: CHANGELOG entry for the exit-code and output changes
+    completed: false
+updatedAt: "2026-09-23T18:00:34.226Z"
 ---
 
 ## Description
