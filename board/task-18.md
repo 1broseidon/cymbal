@@ -39,7 +39,10 @@ subtasks:
   - id: task-18-3
     title: Share investigate result construction and use one type-kind list for the source cap
     completed: false
-updatedAt: "2026-09-23T18:00:32.674Z"
+  - id: task-18-4
+    title: Remove the unreachable JSON branch, the three unused helpers and the processed closure
+    completed: false
+updatedAt: "2026-09-23T18:00:32.933Z"
 ---
 
 ## Description
