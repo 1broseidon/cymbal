@@ -53,3 +53,6 @@ Completion criteria:
 - Existing tests pass and the walker comparison still demonstrates parity.
 
 Source: September 9, 2026 efficiency audit of ac794409a7fa1148e3cdf155991fbb662c3d9487. Full report: /home/george/.codex/visualizations/2026/09/05/01a07147-dfce-7913-b64a-a4535bdd0cc0/cymbal-efficiency-audit-2026-09-09.md
+
+## Log
+- 2026-09-23T15:27:58.141Z: [claude] Subtask task-13-4's premise changed: #81 (merged in #83) gives the walker's worker pool real work, a stat plus a 256-byte #! read for each extensionless file. Removing the worker dispatch would move those reads back into the serial WalkDir callback. Re-measure before doing it, or drop the subtask. Subtask task-13-3: task-15 (PR #84) leaves the per-file hash alone and adds its own per-symbol hash, so the per-file hash policy question is still open.
