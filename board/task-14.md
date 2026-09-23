@@ -9,6 +9,7 @@ tags:
   - testing
   - ci
   - build
+  - superseded
 relatedFiles:
   - cmd/hook_assets/opencode/cymbal-opencode.test.mjs
   - cmd/hook_assets/opencode/cymbal-opencode.js
@@ -28,6 +29,7 @@ subtasks:
     title: Defer and consolidate coverage-package discovery
     completed: false
 createdAt: "2026-09-10T03:52:30.006Z"
+updatedAt: "2026-09-23T18:00:50.770Z"
 ---
 
 ## Description
