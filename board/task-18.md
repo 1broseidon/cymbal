@@ -1,8 +1,8 @@
 ---
 id: task-18
 title: "Cleanup: empty-result contract, dead code, OpenCode tests, make startup"
-column: todo
-position: 3
+column: in-progress
+position: 0
 priority: medium
 tags:
   - cleanup
@@ -57,7 +57,7 @@ subtasks:
   - id: task-18-9
     title: CHANGELOG entry for the exit-code and output changes
     completed: false
-updatedAt: "2026-09-23T18:00:34.226Z"
+updatedAt: "2026-09-23T18:24:23.901Z"
 ---
 
 ## Description
