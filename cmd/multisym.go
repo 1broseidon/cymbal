@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -58,8 +59,10 @@ func formatSymbolLanguages(m map[string][]string) string {
 //
 //   * Single-symbol callers see no behavior change.
 //   * Multi-symbol mode is triggered when len(args) > 1 OR --stdin is set.
-//   * Each symbol is resolved independently. A not-found on one symbol warns
-//     and continues; exit 0 as long as at least one succeeds.
+//   * Each symbol is resolved independently, and a not-found on one does not
+//     stop the rest. show and impls exit 0 as long as one succeeds; impact and
+//     trace, like refs and investigate, report a name the index has never
+//     seen through the exit status (see keepIndexed).
 //   * User's argument order is preserved — we never sort alphabetically.
 //   * --limit applies per symbol, never as a total cap across symbols.
 //   * For commands that return shared edges (impact/trace), rows are deduped
@@ -108,6 +111,53 @@ func collectSymbols(cmd *cobra.Command, args []string) ([]string, error) {
 		return nil, fmt.Errorf("no symbol names provided (positional args or --stdin)")
 	}
 	return out, nil
+}
+
+// errSymbolNotFound marks a requested name the index has never seen, so a typo
+// exits nonzero instead of looking like an empty answer.
+var errSymbolNotFound = errors.New("symbol not found")
+
+// requireIndexed returns errSymbolNotFound unless the index has a definition of
+// name or any reference to it, such as a call to an external function. A name
+// it knows is answered even when the answer is empty.
+func requireIndexed(dbPath, name string) error {
+	langs, err := index.SymbolLanguages(dbPath, name)
+	if err != nil || len(langs) > 0 {
+		return err
+	}
+	refs, err := index.FindReferencesWithPaths(dbPath, name, 1, index.PathFilter{})
+	if err != nil {
+		return err
+	}
+	if len(refs) == 0 {
+		return fmt.Errorf("%w: %s", errSymbolNotFound, name)
+	}
+	return nil
+}
+
+// keepIndexed returns the names requireIndexed accepts, in order, and a failure
+// for each of the rest. dbForName routes a name to the database its query runs
+// against.
+func keepIndexed(names []string, dbForName func(string) string) ([]string, []error) {
+	known := make([]string, 0, len(names))
+	var failures []error
+	for _, name := range names {
+		if err := requireIndexed(dbForName(name), name); err != nil {
+			failures = append(failures, nameFailure(name, err))
+			continue
+		}
+		known = append(known, name)
+	}
+	return known, failures
+}
+
+// nameFailure labels a batch failure with its name. A not-found error already
+// carries the name.
+func nameFailure(name string, err error) error {
+	if errors.Is(err, errSymbolNotFound) {
+		return err
+	}
+	return fmt.Errorf("%s: %w", name, err)
 }
 
 // multiSymbolBanner prints a "═══ <symbol> ═══" separator before each section

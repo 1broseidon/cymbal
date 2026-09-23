@@ -166,28 +166,6 @@ func TestTruncateResultByDegreeKeepsRootAndAddsSentinel(t *testing.T) {
 	}
 }
 
-func captureStderr(t *testing.T, fn func()) string {
-	t.Helper()
-	old := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe stderr: %v", err)
-	}
-	os.Stderr = w
-	defer func() { os.Stderr = old }()
-
-	outC := make(chan string, 1)
-	go func() {
-		var buf bytes.Buffer
-		_, _ = io.Copy(&buf, r)
-		outC <- buf.String()
-	}()
-
-	fn()
-	_ = w.Close()
-	return <-outC
-}
-
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stdout

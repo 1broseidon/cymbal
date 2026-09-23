@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/1broseidon/cymbal/index"
@@ -60,7 +59,7 @@ Examples:
 				entry, _ := findSymbolEntry(plan, name)
 				data, err := investigateOne(entry.Path, name, scope)
 				if err != nil {
-					failures = append(failures, fmt.Errorf("%s: %w", name, err))
+					failures = append(failures, nameFailure(name, err))
 				}
 				data["symbol"] = name
 				if label := entry.Label(); label != "" {
@@ -81,30 +80,34 @@ Examples:
 				fmt.Println()
 			}
 			entry, _ := findSymbolEntry(plan, name)
-			if err := investigateOnePrint(entry.Path, name, false, entry.Label(), scope); err != nil {
-				if errors.Is(err, errInvestigateNotFound) {
-					fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
-				} else {
-					failures = append(failures, fmt.Errorf("%s: %w", name, err))
-				}
+			if err := investigateOnePrint(entry.Path, name, entry.Label(), scope); err != nil {
+				failures = append(failures, nameFailure(name, err))
 			}
 		}
 		return errors.Join(failures...)
 	},
 }
 
-var errInvestigateNotFound = errors.New("symbol not found")
-
-func investigateOne(dbPath, name string, scope index.ResolveScope) (map[string]any, error) {
+// investigateName resolves name to its best match and investigates it, for
+// both the JSON and text output. Investigate needs a definition, so a name
+// without one is errSymbolNotFound, as in show and context.
+func investigateName(dbPath, name string, scope index.ResolveScope) (*ResolveResult, *index.InvestigateResult, error) {
 	res, err := flexResolve(dbPath, name)
 	if err != nil {
-		return map[string]any{"symbol": name, "error": err.Error()}, err
+		return nil, nil, err
 	}
 	if len(res.Results) == 0 {
-		return map[string]any{"symbol": name, "error": "not found"}, nil
+		return nil, nil, fmt.Errorf("%w: %s", errSymbolNotFound, name)
 	}
-	sym := res.Results[0]
-	result, err := index.InvestigateResolved(dbPath, sym, index.InvestigateOpts{Scope: scope})
+	result, err := index.InvestigateResolved(dbPath, res.Results[0], index.InvestigateOpts{Scope: scope})
+	if err != nil {
+		return nil, nil, err
+	}
+	return res, result, nil
+}
+
+func investigateOne(dbPath, name string, scope index.ResolveScope) (map[string]any, error) {
+	res, result, err := investigateName(dbPath, name, scope)
 	if err != nil {
 		return map[string]any{"symbol": name, "error": err.Error()}, err
 	}
@@ -118,34 +121,12 @@ func investigateOne(dbPath, name string, scope index.ResolveScope) (map[string]a
 	return data, nil
 }
 
-func investigateOnePrint(dbPath, name string, jsonOut bool, worktreeLabel string, scope index.ResolveScope) error {
-	res, err := flexResolve(dbPath, name)
+func investigateOnePrint(dbPath, name, worktreeLabel string, scope index.ResolveScope) error {
+	res, result, err := investigateName(dbPath, name, scope)
 	if err != nil {
 		return err
 	}
-	if len(res.Results) == 0 {
-		return fmt.Errorf("%w: %s", errInvestigateNotFound, name)
-	}
-
 	sym := res.Results[0]
-	result, err := index.InvestigateResolved(dbPath, sym, index.InvestigateOpts{Scope: scope})
-	if err != nil {
-		return err
-	}
-
-	if jsonOut {
-		data := map[string]any{"result": result, "resolve_scope": string(index.NormalizeScope(scope))}
-		if res.TotalFound > 1 {
-			data["matches"] = res.TotalFound
-		}
-		if res.Fuzzy {
-			data["fuzzy"] = true
-		}
-		if worktreeLabel != "" {
-			data["worktree"] = worktreeLabel
-		}
-		return writeJSON(data)
-	}
 
 	var content strings.Builder
 

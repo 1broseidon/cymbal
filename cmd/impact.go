@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -45,6 +46,16 @@ Examples:
 		if err != nil {
 			return err
 		}
+		dbForName := func(name string) string {
+			entry, _ := findSymbolEntry(plan, name)
+			return entry.Path
+		}
+		// A name with no callers still gets a full, zero-count answer; only a
+		// name the index has never seen fails.
+		names, failures := keepIndexed(names, dbForName)
+		if len(names) == 0 {
+			return errors.Join(failures...)
+		}
 
 		if graphRequested(cmd) {
 			// Graph rendering uses a single DB — the seed locator picks
@@ -52,7 +63,8 @@ Examples:
 			// graphs across worktrees would be visually confusing and would
 			// violate non-goal #1 (no cross-worktree graph traversal).
 			entry, _ := findSymbolEntry(plan, names[0])
-			return renderAsGraph(cmd, entry.Path, names, index.GraphDirectionUp, 1)
+			err := renderAsGraph(cmd, entry.Path, names, index.GraphDirectionUp, 1)
+			return errors.Join(append(failures, err)...)
 		}
 
 		// Per-symbol seed-only federation: each name routes to whichever
@@ -62,19 +74,9 @@ Examples:
 		if err != nil {
 			return err
 		}
-		if len(merged) == 0 {
-			if len(names) == 1 {
-				return fmt.Errorf("no callers found for '%s'", names[0])
-			}
-			return fmt.Errorf("no callers found for any of: %s", strings.Join(names, ", "))
-		}
 
 		ambig := ambiguousSymbolLanguages(plan, names)
 		prodN, testN, unknownN := classifyImpact(classifier, merged)
-		dbForName := func(name string) string {
-			entry, _ := findSymbolEntry(plan, name)
-			return entry.Path
-		}
 		refs, refErr := aggregateReferences(names, scope, classifier, dbForName)
 		defsByName, defCount, ambiguous, defErr := collectDefinitions(names, dbForName)
 		effDepth, effLimit := index.ClampImpactBounds(depth, limit)
@@ -120,7 +122,7 @@ Examples:
 			if len(ambig) > 0 {
 				payload["symbol_languages"] = ambig
 			}
-			return writeJSON(payload)
+			return errors.Join(append(failures, writeJSON(payload))...)
 		}
 
 		// Group by depth.
@@ -197,7 +199,7 @@ Examples:
 			meta = append(meta, kv{"worktree", wt})
 		}
 		frontmatter(meta, content.String())
-		return nil
+		return errors.Join(failures...)
 	},
 }
 
