@@ -29,3 +29,6 @@ Why it is worth it on its own: an agent (or a script) can record `file:Name` + b
 Coordinate with task-13's hash subtask ("Resolve ineffective internal hash computation with an explicit policy"): file hashes are computed but never compared; the per-symbol hash should follow the same policy decision.
 
 Done when: `cymbal show Foo --json` includes body_hash; editing a different function in the same file leaves Foo's hash unchanged; editing Foo's body changes it; whitespace-only line-ending changes do not.
+
+## Log
+- 2026-09-23T15:27:57.873Z: [claude] PR #84 open (branch feat/symbol-body-hash). body_hash = first 16 hex of sha256 over whole lines start..end, CRLF and trailing whitespace normalized; emitted in search/show/outline/context/investigate/structure JSON. New meta index_format=1 forces a one-time full reparse of older indexes. Stdlib bench: no measurable index-time change, DB +4.6%.
