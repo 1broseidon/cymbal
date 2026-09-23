@@ -102,7 +102,6 @@ func OpenStore(dbPath string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating db directory: %w", err)
 	}
-	_ = os.Chmod(dir, 0o700)
 
 	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_synchronous=NORMAL&_busy_timeout=5000&_foreign_keys=ON")
 	if err != nil {
@@ -844,12 +843,56 @@ func (s *Store) SearchSymbolsCI(name string, limit int) ([]SymbolResult, error) 
 // case-insensitive (FTS5 tokenization is already case-insensitive for the
 // non-exact path, so ignoreCase is a no-op there).
 func (s *Store) SearchSymbols(query, kind, lang string, exact, ignoreCase bool, limit int) ([]SymbolResult, error) {
-	var rows *sql.Rows
-	var err error
+	return s.searchSymbols(query, kind, lang, exact, ignoreCase, limit, PathFilter{})
+}
 
+func (s *Store) searchSymbols(query, kind, lang string, exact, ignoreCase bool, limit int, paths PathFilter) ([]SymbolResult, error) {
 	// Over-fetch so the ranking window covers enough candidates before truncating.
 	fetch := rankFetchWindow(limit, exact)
+	// A bounded candidate window can hide every path-matching result. Stream
+	// all candidates when filtering, retaining only accepted rows for ranking.
+	if paths.active() {
+		fetch = -1
+	}
 
+	rows, err := s.searchSymbolRows(query, kind, lang, exact, ignoreCase, fetch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []SymbolResult
+	for rows.Next() {
+		var r SymbolResult
+		if err := rows.Scan(&r.Name, &r.Kind, &r.File, &r.RelPath, &r.StartLine, &r.EndLine, &r.Parent, &r.Depth, &r.Signature, &r.Language); err != nil {
+			return nil, err
+		}
+		if paths.Matches(r.RelPath) {
+			results = append(results, r)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// For exact queries all results share the same name — canonical ranking is
+	// safe. For FTS queries the SQL tier order (exact-name > prefix > fuzzy)
+	// must be preserved across different symbol names; apply canonical ranking
+	// only within each tier so test/playground results don't float above source
+	// results at the same tier.
+	if exact {
+		RankSymbols(results)
+	} else {
+		rankWithinFTSTiers(results, query)
+	}
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+	return results, nil
+}
+
+func (s *Store) searchSymbolRows(query, kind, lang string, exact, ignoreCase bool, fetch int) (*sql.Rows, error) {
+	var rows *sql.Rows
+	var err error
 	if exact {
 		nameClause := "s.name = ?"
 		if ignoreCase {
@@ -867,7 +910,7 @@ func (s *Store) SearchSymbols(query, kind, lang string, exact, ignoreCase bool, 
 			q += " AND s.language = ?"
 			args = append(args, lang)
 		}
-		// fetch==0 means no LIMIT (fetch all rows so ranking sees full set).
+		// A non-positive fetch means no LIMIT, so ranking sees the full set.
 		if fetch > 0 {
 			q += " ORDER BY s.name LIMIT ?"
 			args = append(args, fetch)
@@ -900,36 +943,7 @@ func (s *Store) SearchSymbols(query, kind, lang string, exact, ignoreCase bool, 
 		args = append(args, query, query, fetch)
 		rows, err = s.db.Query(q, args...)
 	}
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var results []SymbolResult
-	for rows.Next() {
-		var r SymbolResult
-		if err := rows.Scan(&r.Name, &r.Kind, &r.File, &r.RelPath, &r.StartLine, &r.EndLine, &r.Parent, &r.Depth, &r.Signature, &r.Language); err != nil {
-			return nil, err
-		}
-		results = append(results, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	// For exact queries all results share the same name — canonical ranking is
-	// safe. For FTS queries the SQL tier order (exact-name > prefix > fuzzy)
-	// must be preserved across different symbol names; apply canonical ranking
-	// only within each tier so test/playground results don't float above source
-	// results at the same tier.
-	if exact {
-		RankSymbols(results)
-	} else {
-		rankWithinFTSTiers(results, query)
-	}
-	if limit > 0 && len(results) > limit {
-		results = results[:limit]
-	}
-	return results, nil
+	return rows, err
 }
 
 // rankWithinFTSTiers preserves SQL tier order (exact-name > prefix > fuzzy)
@@ -1103,30 +1117,38 @@ func (s *Store) FindReferencesScoped(name, language string, limit int, kinds ...
 // FindReferencesInLangs is FindReferences restricted to a set of languages.
 // A nil/empty langs set applies no restriction (equivalent to FindReferences).
 func (s *Store) FindReferencesInLangs(name string, langs []string, limit int, kinds ...string) ([]RefResult, error) {
-	if len(langs) == 0 {
-		return s.FindReferences(name, limit, kinds...)
-	}
-	langPh := strings.Repeat("?,", len(langs))
-	langPh = langPh[:len(langPh)-1]
-	args := []interface{}{name}
-	for _, l := range langs {
-		args = append(args, l)
-	}
-	query := `
-		SELECT f.path, f.rel_path, r.line, r.name
-		FROM refs r JOIN files f ON r.file_id = f.id
-		WHERE r.name = ? AND r.language IN (` + langPh + `)`
-	if len(kinds) > 0 {
-		kindPh := strings.Repeat("?,", len(kinds))
-		kindPh = kindPh[:len(kindPh)-1]
-		query += " AND r.kind IN (" + kindPh + ")"
-		for _, k := range kinds {
-			args = append(args, k)
+	return s.findReferences(name, langs, limit, PathFilter{}, kinds...)
+}
+
+// FindReferences finds references of any kind, or just the supplied kinds.
+func (s *Store) FindReferences(name string, limit int, kinds ...string) ([]RefResult, error) {
+	return s.findReferences(name, nil, limit, PathFilter{}, kinds...)
+}
+
+func (s *Store) findReferences(name string, langs []string, limit int, paths PathFilter, kinds ...string) ([]RefResult, error) {
+	query := `SELECT f.path, f.rel_path, r.line, r.name
+  FROM refs r JOIN files f ON r.file_id = f.id WHERE r.name = ?`
+	args := []any{name}
+	for _, filter := range []struct {
+		column string
+		values []string
+	}{
+		{"r.language", langs}, {"r.kind", kinds},
+	} {
+		if len(filter.values) == 0 {
+			continue
+		}
+		query += " AND " + filter.column + " IN (" + strings.TrimSuffix(strings.Repeat("?,", len(filter.values)), ",") + ")"
+		for _, value := range filter.values {
+			args = append(args, value)
 		}
 	}
+	fetch := limit
+	if paths.active() {
+		fetch = -1
+	}
 	query += " ORDER BY f.rel_path, r.line LIMIT ?"
-	args = append(args, limit)
-
+	args = append(args, fetch)
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -1138,63 +1160,16 @@ func (s *Store) FindReferencesInLangs(name string, langs []string, limit int, ki
 		if err := rows.Scan(&r.File, &r.RelPath, &r.Line, &r.Name); err != nil {
 			return nil, err
 		}
-		results = append(results, r)
-	}
-	return results, rows.Err()
-}
-
-// FindReferences finds files that reference a symbol name.
-// By default this surfaces any ref kind (call, use, implements); pass
-// explicit kinds to restrict (e.g. "call" to skip type-mentions).
-func (s *Store) FindReferences(name string, limit int, kinds ...string) ([]RefResult, error) {
-	if len(kinds) == 0 {
-		rows, err := s.db.Query(`
-			SELECT f.path, f.rel_path, r.line, r.name
-			FROM refs r JOIN files f ON r.file_id = f.id
-			WHERE r.name = ?
-			ORDER BY f.rel_path, r.line
-			LIMIT ?
-		`, name, limit)
-		if err != nil {
-			return nil, err
+		if !paths.Matches(r.RelPath) {
+			continue
 		}
-		defer rows.Close()
-		var results []RefResult
-		for rows.Next() {
-			var r RefResult
-			if err := rows.Scan(&r.File, &r.RelPath, &r.Line, &r.Name); err != nil {
-				return nil, err
-			}
-			results = append(results, r)
-		}
-		return results, rows.Err()
-	}
-	kindPlaceholders := strings.Repeat("?,", len(kinds))
-	kindPlaceholders = kindPlaceholders[:len(kindPlaceholders)-1]
-	args := []interface{}{name}
-	for _, k := range kinds {
-		args = append(args, k)
-	}
-	args = append(args, limit)
-	rows, err := s.db.Query(`
-		SELECT f.path, f.rel_path, r.line, r.name
-		FROM refs r JOIN files f ON r.file_id = f.id
-		WHERE r.name = ? AND r.kind IN (`+kindPlaceholders+`)
-		ORDER BY f.rel_path, r.line
-		LIMIT ?
-	`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var results []RefResult
-	for rows.Next() {
-		var r RefResult
-		if err := rows.Scan(&r.File, &r.RelPath, &r.Line, &r.Name); err != nil {
-			return nil, err
+		if limit == 0 {
+			break
 		}
 		results = append(results, r)
+		if limit > 0 && len(results) >= limit {
+			break
+		}
 	}
 	return results, rows.Err()
 }
@@ -1742,10 +1717,6 @@ func (s *Store) findTraceWithOptions(symbolName string, depth, limit int, opts T
 				if tr.Callee == loc.name {
 					continue
 				}
-				// Skip very short names (loop vars, single-char generics).
-				if len(tr.Callee) <= 2 {
-					continue
-				}
 				key := loc.name + "→" + tr.Callee
 				if seen[key] {
 					continue
@@ -1903,6 +1874,9 @@ func (s *Store) findImpactInLangs(symbolName string, langs []string, depth, limi
 	// later depth (reached via a different file) returns the same ref rows,
 	// all already dropped by seen — pure wasted SQL on hot symbols.
 	queried := map[string]bool{symbolName: true}
+	// Per-traversal cache: references at every depth reuse the same file
+	// intervals, but a later query sees any newly indexed definitions.
+	enclosing := make(map[int64]enclosingRanges)
 	var results []ImpactResult
 	currentSymbols := []string{symbolName}
 
@@ -1914,21 +1888,31 @@ func (s *Store) findImpactInLangs(symbolName string, langs []string, depth, limi
 				args = append(args, l)
 			}
 			rows, err := s.db.Query(`
-				SELECT f.path, f.rel_path, r.line, r.name
+				SELECT f.id, f.path, f.rel_path, r.line
 				FROM refs r JOIN files f ON r.file_id = f.id
 				WHERE r.name = ?`+langFilter, args...)
 			if err != nil {
 				continue
 			}
 			for rows.Next() {
-				var filePath, relPath, refName string
+				var fileID int64
+				var filePath, relPath string
 				var line int
-				if err := rows.Scan(&filePath, &relPath, &line, &refName); err != nil {
+				if err := rows.Scan(&fileID, &filePath, &relPath, &line); err != nil {
 					continue
 				}
 
-				caller, err := s.EnclosingSymbol(filePath, line)
-				if err != nil || caller == "" || caller == sym {
+				ranges, ok := enclosing[fileID]
+				if !ok {
+					ranges, err = s.enclosingSymbols(fileID)
+					if err != nil {
+						rows.Close()
+						return nil, false, err
+					}
+					enclosing[fileID] = ranges
+				}
+				caller := ranges.at(line)
+				if caller == "" || caller == sym {
 					continue
 				}
 

@@ -13,6 +13,8 @@ Path/language heuristics recognize some special filenames such as `Dockerfile`, 
 
 Passive update notices are suppressed automatically for `--json` output. Set `CYMBAL_NO_UPDATE_NOTIFIER=1` to disable passive update notices entirely.
 
+Query commands refresh the index before reading it and exit nonzero if that refresh fails. `outline`, `refs`, and `investigate` retain successful results when another batch item has an operational error, but the command exits nonzero. Their ordinary no-match behavior is unchanged: empty outlines/references and unresolved investigate names are nonfatal. `search` exits nonzero when it has no matches. JSON payload shapes are unchanged; batch consumers should inspect the payload as well as the exit status.
+
 ---
 
 ## Graph Output
@@ -172,6 +174,8 @@ Trailing path operands are accepted as `--path` filters, which matches common
 `rg` usage: `cymbal search --text <pattern> cmd internal/foo.go`.
 In symbol mode, multiple query arguments are searched independently:
 `cymbal search Foo Bar Baz`.
+
+Text mode accepts a line-oriented Go regular expression, for example `Alpha|Beta` or `(?i)todo`. It searches the indexed file inventory using the same matching rules with or without ripgrep. Generated, large, and explicitly excluded files remain absent unless enabled when indexing. `.gitignore` does not independently change text-search eligibility: an indexed file is eligible even if Git ignores it. Results are ordered by relative path and line, and language/path filters apply before the result limit. Invalid regex patterns and file-read failures produce nonzero exits.
 
 | Flag | Description |
 |------|-------------|

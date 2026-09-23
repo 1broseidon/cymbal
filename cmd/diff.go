@@ -33,7 +33,9 @@ Examples:
 			base = args[1]
 		}
 		dbPath := getDBPath(cmd)
-		ensureFresh(dbPath)
+		if err := ensureFresh(dbPath); err != nil {
+			return err
+		}
 		jsonOut := getJSONFlag(cmd)
 		stat, _ := cmd.Flags().GetBool("stat")
 

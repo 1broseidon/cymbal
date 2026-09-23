@@ -64,7 +64,9 @@ func lsNamesCheckFlags(nulSep, jsonOut bool) error {
 // result is success (empty output; --json emits [], never null).
 func lsNames(cmd *cobra.Command, args []string, jsonOut bool) error {
 	dbPath := getDBPath(cmd)
-	ensureFresh(dbPath)
+	if err := ensureFresh(dbPath); err != nil {
+		return err
+	}
 
 	language, _ := cmd.Flags().GetString("lang")
 	nulSep, _ := cmd.Flags().GetBool("null")
@@ -121,7 +123,9 @@ func lsRepos(jsonOut bool) error {
 
 func lsStats(cmd *cobra.Command, jsonOut bool) error {
 	dbPath := getDBPath(cmd)
-	ensureFresh(dbPath)
+	if err := ensureFresh(dbPath); err != nil {
+		return err
+	}
 
 	stats, err := index.RepoStats(dbPath)
 	if err != nil {

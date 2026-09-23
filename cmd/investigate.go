@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -34,7 +35,9 @@ Examples:
 	Args: cobra.MinimumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		plan := resolveDBs(cmd)
-		ensureFresh(plan.Primary)
+		if err := ensureFresh(plan.Primary); err != nil {
+			return err
+		}
 		jsonOut := getJSONFlag(cmd)
 		scope, err := resolveScopeOrError(cmd)
 		if err != nil {
@@ -46,6 +49,7 @@ Examples:
 			return err
 		}
 
+		var failures []error
 		if jsonOut {
 			// One object shape for any symbol count (matching trace/impact):
 			// an envelope with the requested symbols and one entry per symbol,
@@ -54,18 +58,22 @@ Examples:
 			results := make([]map[string]any, 0, len(names))
 			for _, name := range names {
 				entry, _ := findSymbolEntry(plan, name)
-				data := investigateOne(entry.Path, name, scope)
+				data, err := investigateOne(entry.Path, name, scope)
+				if err != nil {
+					failures = append(failures, fmt.Errorf("%s: %w", name, err))
+				}
 				data["symbol"] = name
 				if label := entry.Label(); label != "" {
 					data["worktree"] = label
 				}
 				results = append(results, data)
 			}
-			return writeJSON(map[string]any{
+			err := writeJSON(map[string]any{
 				"symbols":       names,
 				"resolve_scope": string(index.NormalizeScope(scope)),
 				"results":       results,
 			})
+			return errors.Join(append(failures, err)...)
 		}
 
 		for i, name := range names {
@@ -74,25 +82,31 @@ Examples:
 			}
 			entry, _ := findSymbolEntry(plan, name)
 			if err := investigateOnePrint(entry.Path, name, false, entry.Label(), scope); err != nil {
-				fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+				if errors.Is(err, errInvestigateNotFound) {
+					fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+				} else {
+					failures = append(failures, fmt.Errorf("%s: %w", name, err))
+				}
 			}
 		}
-		return nil
+		return errors.Join(failures...)
 	},
 }
 
-func investigateOne(dbPath, name string, scope index.ResolveScope) map[string]any {
+var errInvestigateNotFound = errors.New("symbol not found")
+
+func investigateOne(dbPath, name string, scope index.ResolveScope) (map[string]any, error) {
 	res, err := flexResolve(dbPath, name)
 	if err != nil {
-		return map[string]any{"symbol": name, "error": err.Error()}
+		return map[string]any{"symbol": name, "error": err.Error()}, err
 	}
 	if len(res.Results) == 0 {
-		return map[string]any{"symbol": name, "error": "not found"}
+		return map[string]any{"symbol": name, "error": "not found"}, nil
 	}
 	sym := res.Results[0]
 	result, err := index.InvestigateResolved(dbPath, sym, index.InvestigateOpts{Scope: scope})
 	if err != nil {
-		return map[string]any{"symbol": name, "error": err.Error()}
+		return map[string]any{"symbol": name, "error": err.Error()}, err
 	}
 	data := map[string]any{"result": result, "resolve_scope": string(index.NormalizeScope(scope))}
 	if res.TotalFound > 1 {
@@ -101,7 +115,7 @@ func investigateOne(dbPath, name string, scope index.ResolveScope) map[string]an
 	if res.Fuzzy {
 		data["fuzzy"] = true
 	}
-	return data
+	return data, nil
 }
 
 func investigateOnePrint(dbPath, name string, jsonOut bool, worktreeLabel string, scope index.ResolveScope) error {
@@ -110,7 +124,7 @@ func investigateOnePrint(dbPath, name string, jsonOut bool, worktreeLabel string
 		return err
 	}
 	if len(res.Results) == 0 {
-		return fmt.Errorf("symbol not found: %s", name)
+		return fmt.Errorf("%w: %s", errInvestigateNotFound, name)
 	}
 
 	sym := res.Results[0]
@@ -158,12 +172,8 @@ func investigateOnePrint(dbPath, name string, jsonOut bool, worktreeLabel string
 
 	if len(result.Refs) > 0 {
 		var refs []refLine
-		for _, r := range result.Refs {
-			refs = append(refs, refLine{
-				relPath: r.RelPath,
-				line:    r.Line,
-				text:    strings.TrimSpace(readSourceLine(r.File, r.Line)),
-			})
+		for _, r := range enrichRefs(result.Refs, 0) {
+			refs = append(refs, r.sourceSnippet.refLine(r.RelPath, r.Line))
 		}
 		lines, _ := dedupRefLines(refs)
 		label := "References"

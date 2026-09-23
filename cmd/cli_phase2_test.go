@@ -181,7 +181,7 @@ func requireOutputContains(t *testing.T, got, want string) {
 func TestPhase2CommandOutputsForSymbolWorkflows(t *testing.T) {
 	_, dbPath := newPhase2Repo(t)
 
-	searchResults, missing, err := searchSymbolQueries(dbPath, []string{"Execute", "UserService"}, "", "", true, false, 20, false, nil, nil)
+	searchResults, missing, err := searchSymbolQueries(dbPath, []string{"Execute", "UserService"}, "", "", true, false, 20, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,9 +390,6 @@ func TestPhase3CommandSearchShowInvestigateAndImporters(t *testing.T) {
 	}); err == nil {
 		t.Fatal("expected text search miss to error")
 	}
-	if langToRgType("typescript") != "ts" || langToRgType("unknown") != "" {
-		t.Fatal("unexpected ripgrep language mapping")
-	}
 
 	stdout, _, err = captureProcessOutput(t, func() error {
 		return showFile(dbPath, filepath.Join(repo, "main.go")+":16-19", 0, false)
@@ -435,7 +432,10 @@ func TestPhase3CommandSearchShowInvestigateAndImporters(t *testing.T) {
 		t.Fatal("repoRootForPath should resolve indexed repo root")
 	}
 
-	investigated := investigateOne(dbPath, "execute", index.ResolveScopeFamily)
+	investigated, investigateErr := investigateOne(dbPath, "execute", index.ResolveScopeFamily)
+	if investigateErr != nil {
+		t.Fatal(investigateErr)
+	}
 	if investigated["fuzzy"] != true {
 		t.Fatalf("expected fuzzy investigate for lowercase execute: %+v", investigated)
 	}
@@ -621,7 +621,7 @@ func TestPhase3CommandOutputFiltersUpdateAndVersion(t *testing.T) {
 		t.Fatalf("parseKindsFlag = %+v", got)
 	}
 
-	symbols, _, err := searchSymbolQueries(dbPath, []string{"Execute", "helper"}, "", "", true, false, 20, false, nil, nil)
+	symbols, _, err := searchSymbolQueries(dbPath, []string{"Execute", "helper"}, "", "", true, false, 20, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -644,9 +644,10 @@ func TestPhase3CommandOutputFiltersUpdateAndVersion(t *testing.T) {
 	if len(enriched) == 0 || len(enriched[0].Context) == 0 {
 		t.Fatalf("enrichImpact missing context: %+v", enriched)
 	}
-	lines, start := readSourceContext(filepath.Join(repo, "main.go"), 1, 2)
+	snippet := readSourceSnippets([]sourceLocation{{filepath.Join(repo, "main.go"), 1}}, 2)[0]
+	lines, start := snippet.Context, snippet.startLine
 	if start != 1 || len(lines) < 2 {
-		t.Fatalf("readSourceContext at file start = start %d lines %+v", start, lines)
+		t.Fatalf("source context at file start = start %d lines %+v", start, lines)
 	}
 
 	resolved, err := flexResolve(dbPath, "execute")

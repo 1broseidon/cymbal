@@ -26,3 +26,13 @@ bench/.corpus/
 
 # Local planning scratchpad
 plans/
+
+# Local agent and scratch state, never part of a commit
+.worktrees/
+.claude/
+.codex/
+.familiar/
+.recoil/
+.review/
+.tmp-smoke/
+.brainfile/

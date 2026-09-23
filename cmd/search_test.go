@@ -180,7 +180,7 @@ func Other() {}
 	results, missing, err := searchSymbolQueries(
 		dbPath,
 		[]string{"PatchMulti", "MultiEdit", "EditTool", "PatchTool", "MissingTool"},
-		"", "", false, false, 20, false, nil, nil,
+		"", "", false, false, 20, nil, nil,
 	)
 	if err != nil {
 		t.Fatal(err)

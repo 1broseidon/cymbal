@@ -20,7 +20,9 @@ Examples:
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbPath := getDBPath(cmd)
-		ensureFresh(dbPath)
+		if err := ensureFresh(dbPath); err != nil {
+			return err
+		}
 		jsonOut := getJSONFlag(cmd)
 		callers, _ := cmd.Flags().GetInt("callers")
 
@@ -64,12 +66,8 @@ Examples:
 			// Callers section.
 			if len(result.Callers) > 0 {
 				var refs []refLine
-				for _, r := range result.Callers {
-					refs = append(refs, refLine{
-						relPath: r.RelPath,
-						line:    r.Line,
-						text:    strings.TrimSpace(readSourceLine(r.File, r.Line)),
-					})
+				for _, r := range enrichRefs(result.Callers, 0) {
+					refs = append(refs, r.sourceSnippet.refLine(r.RelPath, r.Line))
 				}
 				lines, _ := dedupRefLines(refs)
 				fmt.Fprintf(&content, "\n# Callers (%d)\n", len(lines))

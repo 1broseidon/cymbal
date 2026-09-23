@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -263,74 +262,22 @@ func dedupRefLines(refs []refLine) ([]string, int) {
 	return out, len(order)
 }
 
-// readSourceLine reads a single line from a file on disk.
-// Returns the trimmed-right content or "" on error.
-func readSourceLine(path string, lineNum int) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	cur := 0
-	for scanner.Scan() {
-		cur++
-		if cur == lineNum {
-			return scanner.Text()
-		}
-	}
-	return ""
-}
-
-// readSourceContext reads lines [lineNum-ctx, lineNum+ctx] from a file.
-// Returns the lines (trimmed right) and the 1-based start line number.
-// Handles edge cases at file boundaries gracefully.
-func readSourceContext(path string, lineNum, ctx int) ([]string, int) {
-	if ctx <= 0 {
-		text := readSourceLine(path, lineNum)
-		return []string{strings.TrimRight(text, " \t")}, lineNum
-	}
-
-	startLine := max(lineNum-ctx, 1)
-	endLine := lineNum + ctx
-
-	f, err := os.Open(path)
-	if err != nil {
-		return []string{""}, lineNum
-	}
-	defer f.Close()
-
-	var lines []string
-	scanner := bufio.NewScanner(f)
-	cur := 0
-	for scanner.Scan() {
-		cur++
-		if cur > endLine {
-			break
-		}
-		if cur >= startLine {
-			lines = append(lines, strings.TrimRight(scanner.Text(), " \t"))
-		}
-	}
-	if len(lines) == 0 {
-		return []string{""}, lineNum
-	}
-	return lines, startLine
-}
-
 // enrichedRef wraps a RefResult with surrounding context lines for JSON output.
 type enrichedRef struct {
 	index.RefResult
-	Context []string `json:"context,omitempty"`
+	sourceSnippet
 }
 
 // enrichRefs adds source context lines to each ref result.
 func enrichRefs(results []index.RefResult, ctx int) []enrichedRef {
+	locations := make([]sourceLocation, len(results))
+	for i, r := range results {
+		locations[i] = sourceLocation{r.File, r.Line}
+	}
+	snippets := readSourceSnippets(locations, ctx)
 	out := make([]enrichedRef, len(results))
 	for i, r := range results {
-		ctxLines, _ := readSourceContext(r.File, r.Line, ctx)
-		out[i] = enrichedRef{RefResult: r, Context: ctxLines}
+		out[i] = enrichedRef{RefResult: r, sourceSnippet: snippets[i]}
 	}
 	return out
 }
@@ -338,15 +285,19 @@ func enrichRefs(results []index.RefResult, ctx int) []enrichedRef {
 // enrichedImpact wraps an ImpactResult with surrounding context lines for JSON output.
 type enrichedImpact struct {
 	index.ImpactResult
-	Context []string `json:"context,omitempty"`
+	sourceSnippet
 }
 
 // enrichImpact adds source context lines to each impact result.
 func enrichImpact(results []index.ImpactResult, ctx int) []enrichedImpact {
+	locations := make([]sourceLocation, len(results))
+	for i, r := range results {
+		locations[i] = sourceLocation{r.File, r.Line}
+	}
+	snippets := readSourceSnippets(locations, ctx)
 	out := make([]enrichedImpact, len(results))
 	for i, r := range results {
-		ctxLines, _ := readSourceContext(r.File, r.Line, ctx)
-		out[i] = enrichedImpact{ImpactResult: r, Context: ctxLines}
+		out[i] = enrichedImpact{ImpactResult: r, sourceSnippet: snippets[i]}
 	}
 	return out
 }
