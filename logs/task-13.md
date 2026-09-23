@@ -1,8 +1,6 @@
 ---
 id: task-13
 title: Consolidate builders and retire dead code
-column: todo
-position: 5
 priority: medium
 tags:
   - audit
@@ -32,7 +30,8 @@ subtasks:
     title: Replace walker metadata dispatch with direct append and verify parity
     completed: false
 createdAt: "2026-09-10T03:52:29.797Z"
-updatedAt: "2026-09-23T18:00:49.986Z"
+updatedAt: "2026-09-23T18:00:50.249Z"
+completedAt: "2026-09-23T18:00:50.249Z"
 ---
 
 ## Description
