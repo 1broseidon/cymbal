@@ -1,8 +1,6 @@
 ---
 id: task-16
 title: "impact: no callers is a result, not an error"
-column: todo
-position: 5
 priority: medium
 tags:
   - bug
@@ -15,7 +13,8 @@ relatedFiles:
   - main.go
   - cmd/output.go
 createdAt: "2026-09-23T03:04:19.327Z"
-updatedAt: "2026-09-23T18:00:51.555Z"
+updatedAt: "2026-09-23T18:00:51.818Z"
+completedAt: "2026-09-23T18:00:51.818Z"
 ---
 
 ## Description
