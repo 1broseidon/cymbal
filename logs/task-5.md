@@ -1,8 +1,6 @@
 ---
 id: task-5
 title: Plugin system for external language packs
-column: todo
-position: 1
 priority: high
 tags:
   - design
@@ -19,7 +17,8 @@ description: |-
   ### Principle
 
   Core languages must either already exist in the official tree-sitter Go bindings or add zero new dependency surface. Everything else is a plugin.
-updatedAt: "2026-09-23T14:18:01.182Z"
+updatedAt: "2026-09-23T14:18:01.447Z"
+completedAt: "2026-09-23T14:18:01.447Z"
 ---
 
 ## Log
