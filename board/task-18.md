@@ -48,7 +48,10 @@ subtasks:
   - id: task-18-6
     title: Retire the parseUpdateNotice tests and test the helpers through CymbalPlugin
     completed: false
-updatedAt: "2026-09-23T18:00:33.442Z"
+  - id: task-18-7
+    title: Run the OpenCode suite with node --test in CI
+    completed: false
+updatedAt: "2026-09-23T18:00:33.702Z"
 ---
 
 ## Description
