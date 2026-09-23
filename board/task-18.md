@@ -45,7 +45,10 @@ subtasks:
   - id: task-18-5
     title: Stop computing the per-file hash in Index and fix the FileHash and worker comments
     completed: false
-updatedAt: "2026-09-23T18:00:33.192Z"
+  - id: task-18-6
+    title: Retire the parseUpdateNotice tests and test the helpers through CymbalPlugin
+    completed: false
+updatedAt: "2026-09-23T18:00:33.442Z"
 ---
 
 ## Description
