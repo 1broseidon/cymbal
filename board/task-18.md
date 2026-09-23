@@ -50,14 +50,14 @@ subtasks:
     completed: true
   - id: task-18-7
     title: Run the OpenCode suite with node --test in CI
-    completed: false
+    completed: true
   - id: task-18-8
     title: Defer coverage-package discovery to test-coverage with a single go list
     completed: false
   - id: task-18-9
     title: CHANGELOG entry for the exit-code and output changes
     completed: false
-updatedAt: "2026-09-23T18:58:25.542Z"
+updatedAt: "2026-09-23T18:58:25.865Z"
 ---
 
 ## Description
