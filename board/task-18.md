@@ -36,7 +36,10 @@ subtasks:
   - id: task-18-2
     title: Names the index does not know exit 1 with symbol not found, batches included
     completed: false
-updatedAt: "2026-09-23T18:00:32.412Z"
+  - id: task-18-3
+    title: Share investigate result construction and use one type-kind list for the source cap
+    completed: false
+updatedAt: "2026-09-23T18:00:32.674Z"
 ---
 
 ## Description
