@@ -9,6 +9,7 @@ tags:
   - maintainability
   - duplication
   - dead-code
+  - superseded
 relatedFiles:
   - index/index.go
   - index/store.go
@@ -31,6 +32,7 @@ subtasks:
     title: Replace walker metadata dispatch with direct append and verify parity
     completed: false
 createdAt: "2026-09-10T03:52:29.797Z"
+updatedAt: "2026-09-23T18:00:49.986Z"
 ---
 
 ## Description
