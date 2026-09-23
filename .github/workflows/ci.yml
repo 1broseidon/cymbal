@@ -73,6 +73,28 @@ jobs:
           codecov_yml_path: codecov.yml
           fail_ci_if_error: true
 
+  # The release build runs the tests on these platforms too; running them here
+  # catches a platform-only failure before a tag is cut.
+  test-platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go test ./...
+
   security:
     runs-on: ubuntu-latest
     steps:

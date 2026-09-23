@@ -10,8 +10,9 @@ import (
 )
 
 func TestIndexBodyHashAcrossEdits(t *testing.T) {
-	t.Cleanup(CloseAll)
 	repo, db := t.TempDir(), filepath.Join(t.TempDir(), "index.db")
+	// Registered after TempDir so it runs first: Windows cannot remove an open index.db.
+	t.Cleanup(CloseAll)
 	path := filepath.Join(repo, "main.go")
 	mtime := time.Now().Add(-time.Hour)
 	// write reindexes after each edit; a distinct mtime guarantees the edit is seen.
@@ -58,8 +59,8 @@ func TestIndexBodyHashAcrossEdits(t *testing.T) {
 }
 
 func TestIndexFormatUpgradeReparsesUnchangedFilesOnce(t *testing.T) {
-	t.Cleanup(CloseAll)
 	repo, db := freshnessFixture(t)
+	t.Cleanup(CloseAll)
 	sub := filepath.Join(repo, "sub")
 	if err := os.Mkdir(sub, 0o700); err != nil {
 		t.Fatal(err)
