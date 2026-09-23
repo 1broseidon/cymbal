@@ -35,7 +35,7 @@ subtasks:
     completed: true
   - id: task-18-2
     title: Names the index does not know exit 1 with symbol not found, batches included
-    completed: false
+    completed: true
   - id: task-18-3
     title: Share investigate result construction and use one type-kind list for the source cap
     completed: false
@@ -57,7 +57,7 @@ subtasks:
   - id: task-18-9
     title: CHANGELOG entry for the exit-code and output changes
     completed: false
-updatedAt: "2026-09-23T18:58:23.876Z"
+updatedAt: "2026-09-23T18:58:24.224Z"
 ---
 
 ## Description
