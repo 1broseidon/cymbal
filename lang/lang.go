@@ -15,6 +15,8 @@
 package lang
 
 import (
+	"bytes"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -32,6 +34,12 @@ type Language struct {
 
 	// Filenames lists special filenames without extension (e.g. "Makefile").
 	Filenames []string
+
+	// Interpreters lists program names that identify this language in a `#!`
+	// line (e.g. "bash", "python"), for extensionless scripts such as
+	// commands installed on PATH. A trailing version is ignored on lookup, so
+	// "python" also covers "python3" and "python3.12".
+	Interpreters []string
 
 	// TreeSitter is the tree-sitter grammar for this language.
 	// Nil means the language is recognized for file classification / CLI
@@ -58,6 +66,7 @@ type Registry struct {
 	byName   map[string]*Language
 	byExt    map[string]*Language
 	byFile   map[string]*Language
+	byInterp map[string]*Language
 	byFamily map[string][]string // family key -> member language names (sorted)
 }
 
@@ -68,6 +77,7 @@ func NewRegistry(langs ...Language) *Registry {
 		byName:   make(map[string]*Language, len(langs)),
 		byExt:    make(map[string]*Language, len(langs)*3),
 		byFile:   make(map[string]*Language, 8),
+		byInterp: make(map[string]*Language, 16),
 		byFamily: make(map[string][]string, 4),
 	}
 	for i := range langs {
@@ -96,6 +106,12 @@ func NewRegistry(langs ...Language) *Registry {
 				panic("lang: duplicate filename: " + fn)
 			}
 			r.byFile[fn] = l
+		}
+		for _, in := range l.Interpreters {
+			if _, dup := r.byInterp[in]; dup {
+				panic("lang: duplicate interpreter: " + in)
+			}
+			r.byInterp[in] = l
 		}
 	}
 	for fam := range r.byFamily {
@@ -136,6 +152,77 @@ func (r *Registry) ForFile(path string) *Language {
 		return l
 	}
 	return nil
+}
+
+// ShebangMaxBytes is how much of the start of a file ForShebang needs to see.
+const ShebangMaxBytes = 256
+
+// ForShebang returns the language named by the `#!` line at the start of head,
+// or nil if there is none or its interpreter is unrecognized. It is the
+// fallback for files ForFile cannot classify by name: scripts installed as
+// commands conventionally have no extension, so the `#!` line is the only
+// record of their language.
+func (r *Registry) ForShebang(head []byte) *Language {
+	name := shebangInterpreter(head)
+	if name == "" {
+		return nil
+	}
+	if l, ok := r.byInterp[name]; ok {
+		return l
+	}
+	if base := strings.TrimRight(name, "0123456789."); base != name && !unversioned[name] {
+		return r.byInterp[base]
+	}
+	return nil
+}
+
+// unversioned are interpreter names whose trailing digits are not a version of
+// the name before them: perl6 is Raku, a different language from Perl.
+var unversioned = map[string]bool{"perl6": true}
+
+// envArgFlags are the env(1) options whose value is a separate word, so the
+// word after them is not the interpreter.
+var envArgFlags = map[string]bool{
+	"-u": true, "--unset": true,
+	"-C": true, "--chdir": true,
+	"-a": true, "--argv0": true,
+	"-f": true, "--file": true,
+	"-P": true,
+}
+
+// shebangInterpreter returns the base name of the program a `#!` line runs,
+// looking through `/usr/bin/env [options] [NAME=value...] prog`.
+func shebangInterpreter(head []byte) string {
+	if !bytes.HasPrefix(head, []byte("#!")) {
+		return ""
+	}
+	line := head[2:]
+	if i := bytes.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	fields := strings.Fields(string(line))
+	if len(fields) == 0 {
+		return ""
+	}
+	prog := path.Base(fields[0])
+	if prog != "env" {
+		return prog
+	}
+	for i := 1; i < len(fields); i++ {
+		f := fields[i]
+		switch {
+		case envArgFlags[f]:
+			i++
+		case strings.HasPrefix(f, "-S") && len(f) > 2:
+			return path.Base(f[2:]) // -Sprog: env splits the rest itself
+		case strings.HasPrefix(f, "--split-string="):
+			return path.Base(strings.TrimPrefix(f, "--split-string="))
+		case strings.HasPrefix(f, "-"), strings.Contains(f, "="):
+		default:
+			return path.Base(f)
+		}
+	}
+	return ""
 }
 
 // LangForFile returns the language name for a file path, or "" if unrecognized.
