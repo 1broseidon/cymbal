@@ -13,7 +13,7 @@ Path/language heuristics recognize some special filenames such as `Dockerfile`, 
 
 Passive update notices are suppressed automatically for `--json` output. Set `CYMBAL_NO_UPDATE_NOTIFIER=1` to disable passive update notices entirely.
 
-Query commands refresh the index before reading it and exit nonzero if that refresh fails. For a name the index knows, `impact`, `trace`, `refs` and `investigate` exit 0 even when the answer is empty, with their usual output and a zero count, such as `total_callers: 0` or an empty `results` list in JSON. A name the index has never seen exits nonzero with `symbol not found: <name>`, as in `show` and `context`. A name that is only referenced, like a call to an external `Println`, is known to `impact`, `trace` and `refs`; `investigate` needs a definition. In a batch, these four print the names that resolved and exit nonzero for the rest, and `outline` keeps the files that worked when another fails, so batch consumers should check the exit status as well as the payload. An empty outline is not an error, and `search` exits nonzero when it has no matches.
+Query commands refresh the index before reading it and exit nonzero if that refresh fails. For a name the index knows, `impact`, `trace`, `refs`, `impls` and `investigate` exit 0 even when the answer is empty, with their usual output and a zero count, such as `total_callers: 0` or an empty `results` list in JSON. A name the index has never seen exits nonzero with `symbol not found: <name>`, as in `show` and `context`. A name that is only referenced, like a call to an external `Println` or an interface such as `io.Reader` named in an `implements` clause or an embedding, is known to `impact`, `trace`, `refs` and `impls`; `investigate` needs a definition. Those four match bare names, so ask for `Reader`, not `io.Reader`. In a batch, all five print the names that resolved and exit nonzero for the rest (`impls --json` and `investigate --json` still list a missing name, with its error), and `outline` keeps the files that worked when another fails, so batch consumers should check the exit status as well as the payload. An empty outline is not an error, and `search` exits nonzero when it has no matches.
 
 Symbol objects in JSON output (`search`, `show`, `outline`, `context`, `investigate`, `structure`) include `body_hash`: the first 16 hex characters of the SHA-256 of the symbol's source lines, `start_line` to `end_line`, with line endings and trailing whitespace removed. It changes when those lines change, and not when the symbol only moves or other code in the file changes, so a script can store `file:Name` with its `body_hash` and later check whether that symbol changed. Symbols with identical source share a hash. An index built by an earlier release reparses every file once on its next refresh to fill it in.
 
@@ -335,7 +335,7 @@ cymbal impls <symbol> [flags]
 | `--graph-limit <n>` | Cap the graph size by degree (0 for no cap) |
 
 ```sh
-cymbal impls io.Reader
+cymbal impls Reader
 cymbal impls --of MyStruct --graph --include-unresolved
 ```
 

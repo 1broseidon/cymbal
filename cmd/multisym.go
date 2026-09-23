@@ -60,8 +60,8 @@ func formatSymbolLanguages(m map[string][]string) string {
 //   * Single-symbol callers see no behavior change.
 //   * Multi-symbol mode is triggered when len(args) > 1 OR --stdin is set.
 //   * Each symbol is resolved independently, and a not-found on one does not
-//     stop the rest. show and impls exit 0 as long as one succeeds; impact and
-//     trace, like refs and investigate, report a name the index has never
+//     stop the rest. show exits 0 as long as one succeeds; impact, trace and
+//     impls, like refs and investigate, report a name the index has never
 //     seen through the exit status (see keepIndexed).
 //   * User's argument order is preserved — we never sort alphabetically.
 //   * --limit applies per symbol, never as a total cap across symbols.
