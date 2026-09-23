@@ -33,7 +33,10 @@ subtasks:
   - id: task-18-1
     title: Empty results exit 0 with a zero-count result in impact, trace, refs and investigate
     completed: false
-updatedAt: "2026-09-23T18:00:32.154Z"
+  - id: task-18-2
+    title: Names the index does not know exit 1 with symbol not found, batches included
+    completed: false
+updatedAt: "2026-09-23T18:00:32.412Z"
 ---
 
 ## Description
