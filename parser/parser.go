@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"regexp"
@@ -44,7 +45,13 @@ func ParseBytes(src []byte, filePath, l string) (*symbols.ParseResult, error) {
 }
 
 // ParseSource parses source bytes and extracts symbols, imports, and refs.
+// Source is parsed only up to its first NUL byte. Text source has none, and a
+// file that does (a self-extracting installer's payload, say) would otherwise
+// cost seconds or minutes, and over 100 MB, in tree-sitter for no useful symbols.
 func ParseSource(src []byte, filePath, lang string, tsLang *sitter.Language) (*symbols.ParseResult, error) {
+	if i := bytes.IndexByte(src, 0); i >= 0 {
+		src = src[:i]
+	}
 	p := sitter.NewParser()
 	defer p.Close()
 
