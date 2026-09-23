@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/1broseidon/cymbal/index"
@@ -63,6 +62,11 @@ Note: references are best-effort based on AST name matching, not semantic analys
 			// Seed-only federation: route each name to whichever DB owns
 			// it; refs/importers stay within that DB (non-goal #1).
 			entry, _ := findSymbolEntry(plan, name)
+			// A known name with no references still prints a zero count.
+			if err := requireIndexed(entry.Path, name); err != nil {
+				failures = append(failures, nameFailure(name, err))
+				continue
+			}
 			var err error
 			if importers {
 				err = refsImporters(entry.Path, name, depth, limit, jsonOut, includes, excludes, entry.Label())
@@ -70,7 +74,7 @@ Note: references are best-effort based on AST name matching, not semantic analys
 				err = refsSymbol(entry.Path, name, limit, ctx, jsonOut, includes, excludes, entry.Label())
 			}
 			if err != nil {
-				failures = append(failures, fmt.Errorf("%s: %w", name, err))
+				failures = append(failures, nameFailure(name, err))
 			}
 		}
 		return errors.Join(failures...)
@@ -98,10 +102,6 @@ func refsSymbol(dbPath, name string, limit, ctx int, jsonOut bool, includes, exc
 
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
-	}
-	if len(results) == 0 {
-		fmt.Fprintf(os.Stderr, "No references found for '%s'.\n", name)
-		return nil
 	}
 
 	enriched := enrichRefs(results, ctx)
@@ -146,9 +146,8 @@ func refsImporters(dbPath, name string, depth, limit int, jsonOut bool, includes
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
 	}
-	if len(results) == 0 {
-		fmt.Fprintf(os.Stderr, "No importers found for '%s'.\n", name)
-		return nil
+	if results == nil {
+		results = []index.ImporterResult{} // an empty list in JSON, not null
 	}
 
 	meta := []kv{

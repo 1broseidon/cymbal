@@ -688,17 +688,6 @@ func runGroundTruthRefs(cymbalBin, repoName, repoDir string, sym Symbol) GroundT
 
 // ── impls ground truth ─────────────────────────────────────────────
 
-type groundTruthImplsResponse struct {
-	Results []struct {
-		Implementer string `json:"implementer"`
-		Target      string `json:"target"`
-		RelPath     string `json:"rel_path"`
-		Line        int    `json:"line"`
-		Resolved    bool   `json:"resolved"`
-		Language    string `json:"language"`
-	} `json:"results"`
-}
-
 // implsRow is the flattened row shape we consume from `cymbal --json impls`.
 type implsRow struct {
 	Implementer string `json:"implementer"`

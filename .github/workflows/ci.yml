@@ -55,8 +55,8 @@ jobs:
         with:
           node-version: 22
 
-      - name: Validate OpenCode plugin asset syntax
-        run: node --check cmd/hook_assets/opencode/cymbal-opencode.js
+      - name: Test OpenCode plugin
+        run: node --test cmd/hook_assets/opencode/cymbal-opencode.test.mjs
 
       - name: Test
         run: make test-coverage

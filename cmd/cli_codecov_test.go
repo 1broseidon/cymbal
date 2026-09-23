@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -280,8 +281,8 @@ func TestCodecovCLIImpactRunEModes(t *testing.T) {
 
 	if _, _, err = captureProcessOutput(t, func() error {
 		return impactCmd.RunE(newImpactTestCommand(dbPath), []string{"MissingSymbol"})
-	}); err == nil || !strings.Contains(err.Error(), "no callers found") {
-		t.Fatalf("expected no callers error, got %v", err)
+	}); !errors.Is(err, errSymbolNotFound) {
+		t.Fatalf("expected symbol not found, got %v", err)
 	}
 }
 
@@ -302,7 +303,7 @@ func TestCodecovCLITraceRunEModes(t *testing.T) {
 	jsonCmd := newTraceTestCommand(dbPath)
 	setTestFlag(t, jsonCmd, "json", "true")
 	stdout, _, err = captureProcessOutput(t, func() error {
-		return traceCmd.RunE(jsonCmd, []string{"Execute", "Worker.Run"})
+		return traceCmd.RunE(jsonCmd, []string{"Execute", "Run"})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -326,7 +327,8 @@ func TestCodecovCLITraceRunEModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireOutputContains(t, stdout, "No outgoing calls found for 'Shared'.")
+	requireOutputContains(t, stdout, "symbol: Shared")
+	requireOutputContains(t, stdout, "edges: 0")
 
 	if file, sym := parseSymbolArg(filepath.Join(repo, "main.go") + ":Execute"); file == "" || sym != "Execute" {
 		t.Fatalf("parseSymbolArg should keep file hint and symbol: %q %q", file, sym)
@@ -425,8 +427,8 @@ func TestCodecovCLISearchRefsShowContextRunEModes(t *testing.T) {
 	stdout, _, err = captureProcessOutput(t, func() error {
 		return refsCmd.RunE(refsCmdLocal, []string{"helper", "MissingSymbol"})
 	})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, errSymbolNotFound) {
+		t.Fatalf("expected symbol not found for MissingSymbol, got %v", err)
 	}
 	requireOutputContains(t, stdout, "symbol: helper")
 
@@ -610,20 +612,19 @@ func TestCodecovCLIOutlineLsInvestigateRunEModes(t *testing.T) {
 	stdout, _, err = captureProcessOutput(t, func() error {
 		return investigateCmd.RunE(investigateJSONCmd, []string{"Execute", "MissingSymbol"})
 	})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, errSymbolNotFound) {
+		t.Fatalf("expected symbol not found for MissingSymbol, got %v", err)
 	}
 	requireOutputContains(t, stdout, `"result"`)
-	requireOutputContains(t, stdout, `"error": "not found"`)
+	requireOutputContains(t, stdout, `"error": "symbol not found: MissingSymbol"`)
 
-	stdout, stderr, err = captureProcessOutput(t, func() error {
+	stdout, _, err = captureProcessOutput(t, func() error {
 		return investigateCmd.RunE(commandWithDB(dbPath), []string{"Service", "MissingSymbol"})
 	})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, errSymbolNotFound) {
+		t.Fatalf("expected symbol not found for MissingSymbol, got %v", err)
 	}
 	requireOutputContains(t, stdout, "investigate: type")
-	requireOutputContains(t, stderr, "MissingSymbol:")
 }
 
 // TestInvestigateStdinBatch proves investigate's RunE merges --stdin names with

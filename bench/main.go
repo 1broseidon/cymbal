@@ -498,18 +498,6 @@ func runBench(tool Tool, op Op, repoDir, symbol string, iters int, before ...pre
 
 // ── Accuracy checks ────────────────────────────────────────────────
 
-func containsAll(out string, needles []string) bool {
-	for _, needle := range needles {
-		if needle == "" {
-			continue
-		}
-		if !strings.Contains(out, needle) {
-			return false
-		}
-	}
-	return true
-}
-
 func firstMissing(out string, needles []string) string {
 	for _, needle := range needles {
 		if needle == "" {

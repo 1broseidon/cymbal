@@ -171,7 +171,9 @@ func (s *Store) SetMeta(key, value string) error {
 	return err
 }
 
-// FileHash returns the stored hash for a file, or empty string if not indexed.
+// FileHash returns the hash stored with a file, or "" if the file is not
+// indexed. Index stores none, since freshness is mtime plus size, so only a row
+// written through UpsertFile or InsertFileAll with a hash has one.
 func (s *Store) FileHash(filePath string) (string, error) {
 	var hash string
 	err := s.db.QueryRow("SELECT hash FROM files WHERE path = ?", filePath).Scan(&hash)

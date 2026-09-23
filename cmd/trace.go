@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -76,24 +77,26 @@ Examples:
 			_, sym := parseSymbolArg(n)
 			names = append(names, sym)
 		}
+		// A name with no callees still gets a full, zero-count answer; only a
+		// name the index has never seen fails.
+		names, failures := keepIndexed(names, func(name string) string {
+			entry, _ := findSymbolEntry(plan, name)
+			return entry.Path
+		})
+		if len(names) == 0 {
+			return errors.Join(failures...)
+		}
 
 		if graphRequested(cmd) {
 			entry, _ := findSymbolEntry(plan, names[0])
-			return renderAsGraph(cmd, entry.Path, names, index.GraphDirectionDown, 2)
+			err := renderAsGraph(cmd, entry.Path, names, index.GraphDirectionDown, 2)
+			return errors.Join(append(failures, err)...)
 		}
 
 		opts := index.TraceOptions{IncludeUnresolved: includeUnresolved, Scope: scope}
 		merged, sourceMap, labelMap, totalRaw, truncated, err := mergeTracePlan(plan, names, depth, limit, kinds, opts)
 		if err != nil {
 			return err
-		}
-		if len(merged) == 0 {
-			if len(names) == 1 {
-				fmt.Printf("No outgoing calls found for '%s'.\n", names[0])
-			} else {
-				fmt.Printf("No outgoing calls found for any of: %s\n", strings.Join(names, ", "))
-			}
-			return nil
 		}
 
 		ambig := ambiguousSymbolLanguages(plan, names)
@@ -122,7 +125,7 @@ Examples:
 			if len(ambig) > 0 {
 				payload["symbol_languages"] = ambig
 			}
-			return writeJSON(payload)
+			return errors.Join(append(failures, writeJSON(payload))...)
 		}
 
 		var content strings.Builder
@@ -162,7 +165,7 @@ Examples:
 			meta = append(meta, kv{"worktree", wt})
 		}
 		frontmatter(meta, content.String())
-		return nil
+		return errors.Join(failures...)
 	},
 }
 

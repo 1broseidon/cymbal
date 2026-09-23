@@ -58,6 +58,34 @@ func TestIndexBodyHashAcrossEdits(t *testing.T) {
 	}
 }
 
+func TestIndexStoresNoFileHash(t *testing.T) {
+	repo, db := freshnessFixture(t)
+	t.Cleanup(CloseAll)
+	// Reparsing a file that is already indexed is where a hash used to be stored.
+	path, later := filepath.Join(repo, "main.go"), time.Now().Add(time.Hour)
+	if err := os.WriteFile(path, []byte("package fixture\nfunc Edited() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if stats, err := Index(repo, db, Options{Workers: 1}); err != nil || stats.FilesIndexed != 1 {
+		t.Fatalf("reindex: %+v, %v", stats, err)
+	}
+	store, err := OpenStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var files, hashed int
+	if err := store.db.QueryRow(`SELECT COUNT(*), COUNT(NULLIF(hash, '')) FROM files`).Scan(&files, &hashed); err != nil {
+		t.Fatal(err)
+	}
+	if files != 1 || hashed != 0 {
+		t.Fatalf("files %d, with a hash %d; want 1 and 0", files, hashed)
+	}
+}
+
 func TestIndexFormatUpgradeReparsesUnchangedFilesOnce(t *testing.T) {
 	repo, db := freshnessFixture(t)
 	t.Cleanup(CloseAll)

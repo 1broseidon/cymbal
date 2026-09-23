@@ -257,7 +257,6 @@ func canonicalPath(path string) string {
 // parseResult holds the output of a parse worker.
 type parseResult struct {
 	entry    walker.FileEntry
-	hash     string
 	result   *symbols.ParseResult
 	rowCount int // symbols + imports + refs for batching decisions
 }
@@ -294,8 +293,9 @@ func flushBatch(store *Store, batch []parseResult, indexed, found, writeErrs *at
 			continue
 		}
 
+		// No file hash is stored: freshness is mtime plus size.
 		err := InsertFileAllStmts(stmts, pr.entry.Path, pr.entry.RelPath,
-			pr.entry.Language, pr.hash, pr.entry.ModTime, pr.entry.Size,
+			pr.entry.Language, "", pr.entry.ModTime, pr.entry.Size,
 			pr.result.Symbols, pr.result.Imports, pr.result.Refs)
 		if err != nil {
 			tx.Exec("ROLLBACK TO " + sp)
@@ -434,20 +434,13 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 		writeErrs atomic.Int64
 	)
 
-	// processed tracks total files done (for progress).
-	processed := func() int64 {
-		return indexed.Load() + unchanged.Load() + unsup.Load() + parseErrs.Load()
-	}
-	_ = processed // used in progress goroutine
-
 	totalFiles := len(files)
 
 	parseCh := make(chan walker.FileEntry, 256)
 	resultCh := make(chan parseResult, 256)
 
 	// Phase 1: parse workers — CPU-bound, fully parallel.
-	// Each worker reads the file once, parses from those bytes, and hashes
-	// from the same buffer — eliminating duplicate I/O and allocation.
+	// Each worker reads the file once and parses from those bytes.
 	var parseWg sync.WaitGroup
 	for range workers {
 		parseWg.Add(1)
@@ -466,7 +459,6 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 					}
 				}
 
-				// Read once — parse and hash from same bytes.
 				src, err := os.ReadFile(f.Path)
 				if err != nil {
 					parseErrs.Add(1)
@@ -479,14 +471,8 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 					continue
 				}
 
-				// Only compute hash when there's a stored entry to compare against.
-				var hash string
-				if _, exists := fileChecks[f.Path]; exists {
-					hash = HashBytes(src)
-				}
-
 				rows := len(result.Symbols) + len(result.Imports) + len(result.Refs)
-				resultCh <- parseResult{entry: f, hash: hash, result: result, rowCount: rows}
+				resultCh <- parseResult{entry: f, result: result, rowCount: rows}
 			}
 		}()
 	}
@@ -1030,12 +1016,6 @@ type InvestigateResult struct {
 	Implements   []ImplementorResult `json:"implements,omitempty"`   // what this type implements/extends (for class-like kinds)
 }
 
-// Investigate returns kind-adaptive context for a symbol.
-// The symbol's kind (from the index) drives which data is included:
-//   - function/method: source + refs + shallow impact
-//   - class/struct/type/interface: source + members + importers-as-refs
-//   - ambiguous: returns AmbiguousError with ranked candidates
-//
 // InvestigateOpts controls symbol resolution for Investigate.
 type InvestigateOpts struct {
 	FileHint string // filter matches to symbols in this file path (substring match)
@@ -1044,6 +1024,13 @@ type InvestigateOpts struct {
 	Scope ResolveScope
 }
 
+// Investigate returns kind-adaptive context for a symbol.
+// The symbol's kind (from the index) drives which data is included:
+//   - function/method: source + refs + shallow impact
+//   - class/struct/type/interface: source + members + importers-as-refs
+//   - ambiguous: returns AmbiguousError with ranked candidates
+//
+// The source is returned in full, even for a large type.
 func Investigate(dbPath, symbolName string, opts ...InvestigateOpts) (*InvestigateResult, error) {
 	store, err := openCached(dbPath)
 	if err != nil {
@@ -1055,12 +1042,16 @@ func Investigate(dbPath, symbolName string, opts ...InvestigateOpts) (*Investiga
 		return nil, err
 	}
 
+	var o InvestigateOpts
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+
 	// Apply file hint filter if provided.
-	if len(opts) > 0 && opts[0].FileHint != "" {
-		hint := opts[0].FileHint
+	if o.FileHint != "" {
 		var filtered []SymbolResult
 		for _, r := range results {
-			if strings.HasSuffix(r.RelPath, hint) || strings.Contains(r.RelPath, hint) {
+			if strings.HasSuffix(r.RelPath, o.FileHint) || strings.Contains(r.RelPath, o.FileHint) {
 				filtered = append(filtered, r)
 			}
 		}
@@ -1075,28 +1066,63 @@ func Investigate(dbPath, symbolName string, opts ...InvestigateOpts) (*Investiga
 	if len(results) > 1 {
 		return nil, &AmbiguousError{Name: symbolName, Matches: results}
 	}
+	return investigate(store, results[0], o.Scope, 0), nil
+}
 
-	sym := results[0]
-	source := readLines(sym.File, sym.StartLine, sym.EndLine)
-
-	var scope ResolveScope
-	if len(opts) > 0 {
-		scope = opts[0].Scope
+// InvestigateResolved builds an InvestigateResult for a pre-resolved symbol.
+// Use when the caller already resolved the symbol (e.g., via flexResolve).
+// A type's source is capped at maxTypeSourceLines, since its members are
+// listed separately.
+func InvestigateResolved(dbPath string, sym SymbolResult, opts ...InvestigateOpts) (*InvestigateResult, error) {
+	store, err := openCached(dbPath)
+	if err != nil {
+		return nil, err
 	}
-	langs := scopeLanguages(sym.Language, scope)
+	var o InvestigateOpts
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	return investigate(store, sym, o.Scope, maxTypeSourceLines), nil
+}
 
+// maxTypeSourceLines is how much of a type's source InvestigateResolved keeps.
+const maxTypeSourceLines = 60
+
+// investigateTypeKinds are the kinds investigated as types: members, references
+// and inheritance edges, with the source cap applied.
+var investigateTypeKinds = map[string]bool{
+	"class": true, "struct": true, "type": true, "interface": true,
+	"trait": true, "enum": true, "object": true, "mixin": true,
+	"extension": true, "protocol": true, "record": true, "actor": true,
+}
+
+// investigate builds the kind-adaptive result for sym. typeSourceCap limits a
+// type's source to that many lines; 0 keeps all of it.
+func investigate(store *Store, sym SymbolResult, scope ResolveScope, typeSourceCap int) *InvestigateResult {
+	isType := investigateTypeKinds[sym.Kind]
+	srcEnd := sym.EndLine
+	if isType && typeSourceCap > 0 && srcEnd-sym.StartLine+1 > typeSourceCap {
+		srcEnd = sym.StartLine + typeSourceCap - 1
+	}
+	source := readLines(sym.File, sym.StartLine, srcEnd)
+	if srcEnd < sym.EndLine {
+		source += fmt.Sprintf("\n... (%d more lines — see cymbal show %s:%d-%d)\n",
+			sym.EndLine-srcEnd, sym.RelPath, sym.StartLine, sym.EndLine)
+	}
+
+	langs := scopeLanguages(sym.Language, scope)
 	res := &InvestigateResult{
 		Symbol: sym,
 		Source: source,
 	}
 
-	switch sym.Kind {
-	case "function", "method":
+	switch {
+	case sym.Kind == "function" || sym.Kind == "method":
 		res.Kind = "function"
 		res.Refs, _ = store.FindReferencesInLangs(sym.Name, langs, 20)
 		res.Impact, _ = store.FindImpactInLangs(sym.Name, langs, 2, 20)
 
-	case "class", "struct", "type", "interface", "trait", "enum", "object", "mixin", "extension", "protocol", "record", "actor":
+	case isType:
 		res.Kind = "type"
 		res.Members, _ = store.ChildSymbols(sym.Name, 50, sym.File)
 		// For types, show who references the type name.
@@ -1110,63 +1136,7 @@ func Investigate(dbPath, symbolName string, opts ...InvestigateOpts) (*Investiga
 		res.Kind = sym.Kind
 		res.Refs, _ = store.FindReferencesInLangs(sym.Name, langs, 20)
 	}
-
-	return res, nil
-}
-
-// InvestigateResolved builds an InvestigateResult for a pre-resolved symbol.
-// Use when the caller already resolved the symbol (e.g., via flexResolve).
-func InvestigateResolved(dbPath string, sym SymbolResult, opts ...InvestigateOpts) (*InvestigateResult, error) {
-	store, err := openCached(dbPath)
-	if err != nil {
-		return nil, err
-	}
-
-	var scope ResolveScope
-	if len(opts) > 0 {
-		scope = opts[0].Scope
-	}
-	langs := scopeLanguages(sym.Language, scope)
-
-	// Cap source for large type symbols — members are listed separately.
-	const maxTypeLines = 60
-	srcEnd := sym.EndLine
-	truncated := false
-	switch sym.Kind {
-	case "class", "struct", "type", "interface", "trait", "enum", "object", "mixin", "extension":
-		if srcEnd-sym.StartLine+1 > maxTypeLines {
-			srcEnd = sym.StartLine + maxTypeLines - 1
-			truncated = true
-		}
-	}
-
-	source := readLines(sym.File, sym.StartLine, srcEnd)
-	if truncated {
-		source += fmt.Sprintf("\n... (%d more lines — see cymbal show %s:%d-%d)\n",
-			sym.EndLine-srcEnd, sym.RelPath, sym.StartLine, sym.EndLine)
-	}
-	res := &InvestigateResult{
-		Symbol: sym,
-		Source: source,
-	}
-
-	switch sym.Kind {
-	case "function", "method":
-		res.Kind = "function"
-		res.Refs, _ = store.FindReferencesInLangs(sym.Name, langs, 20)
-		res.Impact, _ = store.FindImpactInLangs(sym.Name, langs, 2, 20)
-	case "class", "struct", "type", "interface", "trait", "enum", "object", "mixin", "extension", "protocol", "record", "actor":
-		res.Kind = "type"
-		res.Members, _ = store.ChildSymbols(sym.Name, 50, sym.File)
-		res.Refs, _ = store.FindReferencesInLangs(sym.Name, langs, 20)
-		res.Implementors, _ = store.FindImplementors(sym.Name, 20)
-		res.Implements, _ = store.FindImplements(sym.Name, 20)
-	default:
-		res.Kind = sym.Kind
-		res.Refs, _ = store.FindReferencesInLangs(sym.Name, langs, 20)
-	}
-
-	return res, nil
+	return res
 }
 
 // SymbolLanguages returns the distinct languages of indexed symbols with the

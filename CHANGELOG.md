@@ -8,6 +8,14 @@ published verbatim on the GitHub release.
 
 ## [Unreleased]
 
+**Empty results are results.** `impact` on a symbol nothing calls used to fail with "no callers found", the same thing it printed for a name that doesn't exist. Now it exits 0 with its usual header and `total_callers: 0`, or an empty `results` list in `--json`. `trace`, `refs` and `refs --importers` do the same when they have nothing to show, and `trace --json` prints JSON instead of a plain-text note. A name the index has never seen exits 1 with `symbol not found: X` in all four commands, as in `show` and `context`, so a typo no longer looks like an empty answer. `investigate --json` still lists that name, with the error.
+
+**What counts as a known name.** `impact`, `trace` and `refs` know any name the index has a definition of or a reference to, including external calls like `fmt.Println`. They match bare names, so a dotted name like `Worker.Run`, which used to come back empty, now reports not found. `investigate` needs a definition, as `show` does. In a batch, the names that resolve still print and a missing one makes the exit status nonzero. A script that read a failing `impact` as "no callers" should check the count instead.
+
+**Fixed** `investigate` printing all of a long Swift protocol or actor or C# record. Like other types, they now stop at 60 lines with a pointer to `cymbal show`, since their members are listed separately.
+
+**For library users,** `Index` no longer computes a file hash that nothing read, so `Store.FileHash` is empty for the files it writes. Freshness is still mtime plus size.
+
 ## [0.16.2] - 2026-09-23
 
 **Symbols carry a `body_hash`.** Every symbol in `search`, `show`, `outline`, `context`, `investigate` and `structure` JSON now has a 16-character hash of its own source lines. It stays the same when other code in the file changes or the symbol moves, and changes when the symbol's own lines do, including a modifier like `public` on its first line. An agent can store `file:Name` with its hash and later check in one call whether that symbol changed. Text output is unchanged. The first refresh after upgrading reparses every file once, with a one-line note on stderr.

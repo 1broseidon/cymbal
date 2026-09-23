@@ -440,7 +440,7 @@ func TestPhase3CommandSearchShowInvestigateAndImporters(t *testing.T) {
 		t.Fatalf("expected fuzzy investigate for lowercase execute: %+v", investigated)
 	}
 	stdout, _, err = captureProcessOutput(t, func() error {
-		return investigateOnePrint(dbPath, "Service", false, "", index.ResolveScopeFamily)
+		return investigateOnePrint(dbPath, "Service", "", index.ResolveScopeFamily)
 	})
 	if err != nil {
 		t.Fatal(err)
