@@ -1,0 +1,22 @@
+---
+id: task-17
+title: Record the git commit the index reflects
+column: todo
+position: 6
+priority: low
+tags:
+  - indexing
+  - provenance
+  - git
+  - json
+relatedFiles:
+  - index/index.go
+  - index/store.go
+  - cmd/output.go
+createdAt: "2026-09-23T03:04:19.542Z"
+---
+
+## Description
+The meta table only holds repo_root, index_exclude, index_include_generated and index_include_large_files (index/index.go:368, 608-614). Nothing records which commit, or whether the tree was dirty, when the index was last refreshed, so a saved blast radius from `impact` or `changed` cannot be dated or re-checked later.
+
+Store HEAD and a dirty flag in meta on each index/refresh (cheap: read .git/HEAD and the ref, no git subprocess needed if avoidable), and emit them in the --json envelope (for example `"index": {"head": "...", "dirty": true}`) and in `cymbal structure`/`ls --stats`.
