@@ -74,7 +74,9 @@ var skipDirs = map[string]bool{
 const defaultMaxSourceFileBytes int64 = 3*1024*1024 + 256*1024
 
 // LangForFile returns the language identifier for a file path.
-// It delegates to the unified language registry in lang.Default.
+// It delegates to the unified language registry in lang.Default. It looks at the
+// path only, so an extensionless script that Walk classifies by its `#!` line
+// returns "" here.
 func LangForFile(path string) string {
 	return lang.Default.LangForFile(path)
 }
@@ -108,6 +110,7 @@ func WalkWithOptions(root string, workers int, langFilter func(string) bool, opt
 		language string
 		size     int64
 		modTime  time.Time
+		sniff    fs.DirEntry // set when the language comes from the `#!` line, read by the worker
 	}
 
 	ch := make(chan task, 256)
@@ -117,6 +120,19 @@ func WalkWithOptions(root string, workers int, langFilter func(string) bool, opt
 	for range workers {
 		wg.Go(func() {
 			for work := range ch {
+				if work.sniff != nil {
+					info, err := work.sniff.Info()
+					// The path checks ran in the walk. The file's language is unknown
+					// until it is read, so a too-large one is dropped uncounted.
+					if err != nil || isTooLarge(info, opts) {
+						continue
+					}
+					work.language = sniffLanguage(work.path)
+					if work.language == "" || langFilter != nil && !langFilter(work.language) {
+						continue
+					}
+					work.size, work.modTime = info.Size(), info.ModTime()
+				}
 				entry := FileEntry{
 					Path:     work.path,
 					RelPath:  work.relPath,
@@ -149,6 +165,20 @@ func WalkWithOptions(root string, workers int, langFilter func(string) bool, opt
 
 		lang := LangForFile(path)
 		if lang == "" {
+			// An extensionless regular file may still be a script. A worker stats
+			// it and reads its `#!` line, so that cost is spread over the pool, and
+			// a path-excluded file is never stat-ed or opened. The regular-file
+			// check matters: opening a FIFO would block.
+			if filepath.Ext(d.Name()) != "" || !d.Type().IsRegular() {
+				return nil
+			}
+			rel, err := filepath.Rel(relBase, path)
+			if err != nil {
+				rel = path
+			}
+			if !shouldExcludePath(rel, opts) {
+				ch <- task{path: path, relPath: rel, sniff: d}
+			}
 			return nil
 		}
 		if langFilter != nil && !langFilter(lang) {
@@ -191,11 +221,37 @@ func WalkWithOptions(root string, workers int, langFilter func(string) bool, opt
 	return files, stats, nil
 }
 
-func shouldExcludeFile(rel string, info fs.FileInfo, opts WalkOptions) bool {
-	if pathmatch.MatchAny(rel, opts.Exclude) {
-		return true
+// sniffLanguage is langForShebang, swappable so tests can see which files are read.
+var sniffLanguage = langForShebang
+
+// langForShebang classifies an extensionless file by its `#!` line. Only files
+// the name cannot classify reach here, so the extra open is paid per
+// extensionless file, not per file walked.
+func langForShebang(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
 	}
-	if !opts.IncludeLargeFiles && info.Size() > defaultMaxSourceFileBytes {
+	defer f.Close()
+	head := make([]byte, lang.ShebangMaxBytes)
+	n, _ := io.ReadFull(f, head)
+	if l := lang.Default.ForShebang(head[:n]); l != nil {
+		return l.Name
+	}
+	return ""
+}
+
+func shouldExcludeFile(rel string, info fs.FileInfo, opts WalkOptions) bool {
+	return shouldExcludePath(rel, opts) || isTooLarge(info, opts)
+}
+
+func isTooLarge(info fs.FileInfo, opts WalkOptions) bool {
+	return !opts.IncludeLargeFiles && info.Size() > defaultMaxSourceFileBytes
+}
+
+// shouldExcludePath is the part of shouldExcludeFile that needs only the path.
+func shouldExcludePath(rel string, opts WalkOptions) bool {
+	if pathmatch.MatchAny(rel, opts.Exclude) {
 		return true
 	}
 	if opts.IncludeGenerated {

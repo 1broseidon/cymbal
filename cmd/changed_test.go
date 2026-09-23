@@ -377,6 +377,12 @@ func TestParseBlobSymbolsOKSemantics(t *testing.T) {
 		t.Errorf("binary content should report ok=false")
 	}
 
+	// An extensionless script is classified by its `#!` line.
+	syms, ok = parseBlobSymbols([]byte("#!/bin/bash\ndeploy() { :; }\n"), "bin/deploy")
+	if !ok || len(syms) == 0 || syms[0].Name != "deploy" {
+		t.Errorf("shebang script should parse as bash, got ok=%v syms=%+v", ok, syms)
+	}
+
 	// Recognised-but-not-parseable / unsupported extension is not parseable.
 	if _, ok := parseBlobSymbols([]byte("hello world"), "notes.txt"); ok {
 		t.Errorf("unsupported extension should report ok=false")

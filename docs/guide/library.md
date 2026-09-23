@@ -15,7 +15,7 @@ CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go get github.com/1broseidon/cymbal@latest
 | Package | Import | Purpose |
 |---------|--------|---------|
 | `index` | `github.com/1broseidon/cymbal/index` | Indexing engine, SQLite store, and all query APIs |
-| `lang` | `github.com/1broseidon/cymbal/lang` | Unified language registry for names, extensions, special filenames, and parser availability |
+| `lang` | `github.com/1broseidon/cymbal/lang` | Unified language registry for names, extensions, special filenames, `#!` interpreters, and parser availability |
 | `parser` | `github.com/1broseidon/cymbal/parser` | Tree-sitter parsing for 22 languages |
 | `symbols` | `github.com/1broseidon/cymbal/symbols` | Core data types: `Symbol`, `Import`, `Ref`, `ParseResult` |
 | `walker` | `github.com/1broseidon/cymbal/walker` | Concurrent file discovery with language detection |
@@ -28,7 +28,7 @@ Most consumers only need `index`. The other packages are useful if you want to p
 
 The `lang` package is the canonical source of truth for language support in cymbal. It models both:
 
-- **known / recognized languages** — files cymbal can classify by extension or special filename
+- **known / recognized languages** — files cymbal can classify by extension, special filename, or (for extensionless files) `#!` interpreter
 - **supported / parseable languages** — files with a tree-sitter grammar that can be parsed and indexed
 
 ```go
@@ -41,6 +41,9 @@ fmt.Println(lang.Default.LangForFile("Dockerfile")) // "dockerfile"
 l := lang.Default.ForFile("notes.toml")
 fmt.Println(l.Name)        // "toml"
 fmt.Println(l.Parseable()) // false
+
+// Classify an extensionless script by its first bytes (up to lang.ShebangMaxBytes).
+fmt.Println(lang.Default.ForShebang([]byte("#!/usr/bin/env python3\n")).Name) // "python"
 ```
 
 Use `lang.Default.Supported` when you need the parseable subset for indexing or parsing. Use `Known` / `LangForFile` when classification alone is enough.
@@ -367,9 +370,9 @@ for _, f := range files {
 }
 ```
 
-`Walk` skips dot-directories, `node_modules`, `vendor`, `__pycache__`, build output, etc. Pass `nil` for the language filter to include all recognized file types, including non-parseable ones such as `Dockerfile` and `Makefile`.
+`Walk` skips dot-directories, `node_modules`, `vendor`, `__pycache__`, build output, etc. Pass `nil` for the language filter to include all recognized file types, including non-parseable ones such as `Dockerfile` and `Makefile`. An extensionless file that the name alone cannot classify (`bin/deploy`) is classified by its `#!` line, so scripts are indexed too; only regular files are read, and never ones matched by `WalkOptions.Exclude`.
 
-Detect a file's language:
+Detect a file's language from its path (this does not read the file, so an extensionless script returns `""` here even though `Walk` would classify it):
 
 ```go
 lang := walker.LangForFile("handler.go") // "go"

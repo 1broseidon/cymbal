@@ -4,6 +4,10 @@ All notable changes to cymbal are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Extensionless scripts are classified by their `#!` line** — a file with no extension and no special filename (`bin/deploy`, `jira`) is now indexed when its shebang names a known interpreter: `sh`/`bash`/`zsh`/`dash`/`ksh`/`ash`, `python`/`pypy`, `node`/`nodejs`, `ts-node`, `ruby`/`jruby`, `lua`/`luajit`, `php`, `elixir`, and `perl` (recognised, not parsed). `/usr/bin/env` forms are understood, including options, `NAME=value` assignments and `-S`/`--split-string`, and a trailing version is ignored (`python3.12`), except `perl6`, which is Raku. Only regular files are read (never FIFOs), at most 256 bytes each, by the walker's worker pool, and a file matched by `--exclude` or the generated-file rules is never stat-ed or opened. The cost is a stat and a small read per extensionless file on every index freshness check: about 1 to 1.5 µs of wall time each on a warm cache (50k such files add ~54 ms per query), falling to ~0.2 µs when they are excluded. `cymbal changed` applies the same detection to blobs. Library: `lang.Language.Interpreters`, `lang.Registry.ForShebang`, `lang.ShebangMaxBytes`. A root-level script must be addressed as `./deploy:…` in `show`, since a bare `deploy:…` is not recognised as a file path.
+
 ## [0.15.0] - 2026-09-05
 
 This release includes the changes merged after v0.14.0 in PRs #66–#76. Integrators using `investigate --json` should update their result traversal as described under **Changed**.
