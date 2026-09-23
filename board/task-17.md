@@ -9,11 +9,13 @@ tags:
   - provenance
   - git
   - json
+  - wontfix
 relatedFiles:
   - index/index.go
   - index/store.go
   - cmd/output.go
 createdAt: "2026-09-23T03:04:19.542Z"
+updatedAt: "2026-09-23T17:49:05.951Z"
 ---
 
 ## Description
