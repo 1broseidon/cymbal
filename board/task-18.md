@@ -42,7 +42,10 @@ subtasks:
   - id: task-18-4
     title: Remove the unreachable JSON branch, the three unused helpers and the processed closure
     completed: false
-updatedAt: "2026-09-23T18:00:32.933Z"
+  - id: task-18-5
+    title: Stop computing the per-file hash in Index and fix the FileHash and worker comments
+    completed: false
+updatedAt: "2026-09-23T18:00:33.192Z"
 ---
 
 ## Description
