@@ -592,8 +592,9 @@ func EnsureFreshWithError(dbPath string) (int, error) {
 // indexFormat versions the per-symbol data the indexer stores. Bump it when a
 // change must reach files that have not changed on disk, such as a new stored
 // field; the next refresh then reparses every file once. Format 1 adds
-// symbols.body_hash.
-const indexFormat = "1"
+// symbols.body_hash. Format 2 fixes implements edges for generic and qualified
+// supertypes in Java, Kotlin, Scala, Dart and PHP.
+const indexFormat = "2"
 
 // startFormatUpgrade reports whether the index predates indexFormat. Such an
 // index lacks per-symbol data that only a reparse produces, so the run must
