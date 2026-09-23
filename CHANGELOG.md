@@ -4,6 +4,10 @@ All notable changes to cymbal are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Files with a binary tail no longer stall indexing** — a self-extracting installer (a shell header followed by an archive), or any source file with binary data appended, sent the whole payload through tree-sitter. The cost grows faster than the payload: a Python file with a random tail took 0.2 s to index at 10 KB, 1.2 s at 100 KB, over 70 s at 300 KB and over 120 s at 1 MB, and a shell script with a 1 MB tail took 3.4 s. Each now takes about 0.1 s. The tail also corrupted symbols: in real makeself installers with an xz or uncompressed payload, two header functions went missing, and the uncompressed one gained bogus functions from source inside the archive. `parser.ParseSource` (and so `ParseFile` and `ParseBytes`) now parses only up to the first NUL byte. The text part keeps its symbols and line numbers, and anything after the NUL is not indexed.
+
 ## [0.15.0] - 2026-09-05
 
 This release includes the changes merged after v0.14.0 in PRs #66–#76. Integrators using `investigate --json` should update their result traversal as described under **Changed**.

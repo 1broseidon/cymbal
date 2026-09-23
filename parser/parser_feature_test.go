@@ -2966,3 +2966,29 @@ export function Page() {
 		t.Errorf("double-arrow factory signature = %q, want %q (update the jsUnwrapToFunction doc comment if this changed deliberately)", sym.Signature, "()")
 	}
 }
+
+func TestFeatureParseStopsAtFirstNUL(t *testing.T) {
+	// A file with a binary tail, such as a self-extracting installer, is parsed
+	// only up to its first NUL: the text part keeps its symbols and line
+	// numbers, and nothing after the NUL is indexed. Python is used because
+	// its grammar reliably parses on past a NUL, so the test fails without the
+	// fix. Bash stops at the NUL in a minimal case like this one, though not in
+	// every file.
+	src := []byte("def extract():\n    return 1\n\x00\ndef late():\n    return 2\n")
+	result, err := ParseSource(src, "installer.py", "python", lang.Default.TreeSitter("python"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sym := findSymbol(result.Symbols, "extract")
+	if sym == nil {
+		debugParseResult(t, result)
+		t.Fatal("expected extract from the text before the NUL")
+	}
+	if sym.StartLine != 1 || sym.EndLine != 2 {
+		t.Errorf("extract lines = %d-%d, want 1-2", sym.StartLine, sym.EndLine)
+	}
+	if findSymbol(result.Symbols, "late") != nil {
+		t.Error("late comes after the first NUL and should not be indexed")
+	}
+}
