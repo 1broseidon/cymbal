@@ -32,3 +32,4 @@ Done when: `cymbal show Foo --json` includes body_hash; editing a different func
 
 ## Log
 - 2026-09-23T15:27:57.873Z: [claude] PR #84 open (branch feat/symbol-body-hash). body_hash = first 16 hex of sha256 over whole lines start..end, CRLF and trailing whitespace normalized; emitted in search/show/outline/context/investigate/structure JSON. New meta index_format=1 forces a one-time full reparse of older indexes. Stdlib bench: no measurable index-time change, DB +4.6%.
+- 2026-09-23T15:43:14.872Z: [claude] Merged as #84 (squash 3dc8006) on 2026-09-23. CI green on all 6 checks.
