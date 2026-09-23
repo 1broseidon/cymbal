@@ -49,3 +49,6 @@ Completion criteria:
 - Record a non-mutating Make startup comparison and validate the repaired Node command.
 
 Source: September 9, 2026 efficiency audit of ac794409a7fa1148e3cdf155991fbb662c3d9487. Full report: /home/george/.codex/visualizations/2026/09/05/01a07147-dfce-7913-b64a-a4535bdd0cc0/cymbal-efficiency-audit-2026-09-09.md
+
+## Log
+- 2026-09-23T17:54:14.259Z: [claude] Audit 2026-09-23 against main 047b568: all four subtasks still valid. The OpenCode suite has been broken since 95b0a43 (#61, 2026-06-01), which predates the audit: node --test fails with 'does not provide an export named appleScriptString', so none of its 14 tests run. The plugin exports only CymbalPlugin. appleScriptString, buildNotificationCommand and updateNotifierDisabled still exist unexported; parseUpdateNotice is gone. CI still runs only node --check (#87 did not change that). make -n clean median is 390 ms now, versus 10 ms with MODULE and COVER_PACKAGES deferred, with identical recipe output. The root package still has no tests.
