@@ -1,8 +1,6 @@
 ---
 id: task-15
 title: "Per-symbol body hash: detect whether a symbol changed"
-column: in-progress
-position: 0
 priority: medium
 tags:
   - agent-flow
@@ -16,7 +14,8 @@ relatedFiles:
   - cmd/investigate.go
   - cmd/output.go
 createdAt: "2026-09-23T02:59:45.046Z"
-updatedAt: "2026-09-23T15:27:57.596Z"
+updatedAt: "2026-09-23T15:43:15.144Z"
+completedAt: "2026-09-23T15:43:15.144Z"
 ---
 
 ## Description
