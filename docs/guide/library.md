@@ -422,6 +422,7 @@ type SymbolResult struct {
     Depth     int    `json:"depth"`               // nesting depth (0 = top-level)
     Signature string `json:"signature,omitempty"` // parameter list
     Language  string `json:"language"`
+    BodyHash  string `json:"body_hash,omitempty"` // changes only when the symbol's own lines change
 }
 ```
 

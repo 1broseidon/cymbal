@@ -382,6 +382,12 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 		}
 	}
 
+	upgrade, err := startFormatUpgrade(store, root, opts.Scope != "")
+	if err != nil {
+		return nil, err
+	}
+	force := opts.Force || upgrade
+
 	// RelBase keeps RelPath (and exclude matching) repo-relative even when
 	// walking only a subtree.
 	files, walkStats, err := walker.WalkWithOptions(walkPath, workers, lang.Default.Supported, walker.WalkOptions{
@@ -453,7 +459,7 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 					continue
 				}
 
-				if !opts.Force {
+				if !force {
 					if fc, ok := fileChecks[f.Path]; ok && fc.MtimeNs == f.ModTime.UnixNano() && fc.Size == f.Size {
 						unchanged.Add(1)
 						continue
@@ -526,6 +532,9 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 
 	pe := int(parseErrs.Load())
 	we := int(writeErrs.Load())
+	if err := finishFormatUpgrade(store, upgrade, opts.Scope != "", we); err != nil {
+		return nil, err
+	}
 	stats := &Stats{
 		FilesIndexed:  int(indexed.Load()),
 		FilesSkipped:  int(unchanged.Load()),
@@ -594,7 +603,48 @@ func EnsureFreshWithError(dbPath string) (int, error) {
 	return count, nil
 }
 
+// indexFormat versions the per-symbol data the indexer stores. Bump it when a
+// change must reach files that have not changed on disk, such as a new stored
+// field; the next refresh then reparses every file once. Format 1 adds
+// symbols.body_hash.
+const indexFormat = "1"
+
+// startFormatUpgrade reports whether the index predates indexFormat. Such an
+// index lacks per-symbol data that only a reparse produces, so the run must
+// reparse every file once, as if forced.
+func startFormatUpgrade(store *Store, root string, scoped bool) (bool, error) {
+	format, err := store.GetMeta(metaIndexFormat)
+	if err != nil {
+		return false, fmt.Errorf("reading index format: %w", err)
+	}
+	if format == indexFormat {
+		return false, nil
+	}
+	var populated bool
+	if err := store.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM files)`).Scan(&populated); err != nil {
+		return false, fmt.Errorf("reading index format: %w", err)
+	}
+	if populated && !scoped {
+		fmt.Fprintf(os.Stderr, "Rebuilding index for %s (new index format, one time) ...\n", root)
+	}
+	return true, nil
+}
+
+// finishFormatUpgrade records indexFormat after an upgrade run. A scoped run
+// reparses only its subtree, and a failed write leaves a file's old rows in
+// place, so only a full run without write errors brings the index up to date.
+func finishFormatUpgrade(store *Store, upgrade, scoped bool, writeErrs int) error {
+	if !upgrade || scoped || writeErrs > 0 {
+		return nil
+	}
+	if err := store.SetMeta(metaIndexFormat, indexFormat); err != nil {
+		return fmt.Errorf("setting index format: %w", err)
+	}
+	return nil
+}
+
 const (
+	metaIndexFormat            = "index_format"
 	metaIndexExclude           = "index_exclude"
 	metaIndexIncludeGenerated  = "index_include_generated"
 	metaIndexIncludeLargeFiles = "index_include_large_files"

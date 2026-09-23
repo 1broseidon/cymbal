@@ -15,6 +15,8 @@ Passive update notices are suppressed automatically for `--json` output. Set `CY
 
 Query commands refresh the index before reading it and exit nonzero if that refresh fails. `outline`, `refs`, and `investigate` retain successful results when another batch item has an operational error, but the command exits nonzero. Their ordinary no-match behavior is unchanged: empty outlines/references and unresolved investigate names are nonfatal. `search` exits nonzero when it has no matches. JSON payload shapes are unchanged; batch consumers should inspect the payload as well as the exit status.
 
+Symbol objects in JSON output (`search`, `show`, `outline`, `context`, `investigate`, `structure`) include `body_hash`: the first 16 hex characters of the SHA-256 of the symbol's source lines, `start_line` to `end_line`, with line endings and trailing whitespace removed. It changes when those lines change, and not when the symbol only moves or other code in the file changes, so a script can store `file:Name` with its `body_hash` and later check whether that symbol changed. Symbols with identical source share a hash. An index built by an earlier release reparses every file once on its next refresh to fill it in.
+
 ---
 
 ## Graph Output
