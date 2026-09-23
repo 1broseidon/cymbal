@@ -71,6 +71,11 @@ func TestOutlineBatchPreservesSuccessOnPathError(t *testing.T) {
 				if err := os.Remove(cwd); err != nil {
 					t.Fatal(err)
 				}
+				// macOS still reports the removed directory's path, so relative
+				// resolution succeeds there and no target fails.
+				if _, err := filepath.Abs("relative.go"); err == nil {
+					t.Skip("relative paths still resolve after the working directory is removed")
+				}
 				command := newOutlineTestCommand(db)
 				if mode != "text" {
 					setTestFlag(t, command, mode, "true")
