@@ -366,7 +366,7 @@ Exported packages:
 | Package | What it does |
 |---|---|
 | `index` | Indexing engine, SQLite store, and public query APIs |
-| `lang` | Language registry for names, extensions, special filenames, and parser availability |
+| `lang` | Language registry for names, extensions, special filenames, `#!` interpreters, and parser availability |
 | `parser` | Tree-sitter parsing |
 | `symbols` | Core data types (`Symbol`, `Import`, `Ref`) |
 | `walker` | Concurrent file discovery with language detection |

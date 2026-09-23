@@ -608,6 +608,9 @@ func parseBlobSymbols(src []byte, path string) ([]symbols.Symbol, bool) {
 		return nil, false // binary
 	}
 	l := lang.Default.ForFile(path)
+	if l == nil && filepath.Ext(path) == "" {
+		l = lang.Default.ForShebang(src)
+	}
 	if l == nil || !l.Parseable() {
 		return nil, false
 	}

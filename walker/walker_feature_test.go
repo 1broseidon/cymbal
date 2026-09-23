@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/1broseidon/cymbal/lang"
@@ -671,4 +672,101 @@ func flattenTreeNames(root *TreeNode) map[string]bool {
 	}
 	walk(root)
 	return out
+}
+
+func TestFeatureWalkerShebangDetection(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"bin/deploy":     "#!/bin/bash\ndeploy() { :; }\n",
+		"bin/report":     "#!/usr/bin/env python3\ndef main(): pass\n",
+		"bin/legacy":     "#!/usr/bin/perl\n",     // recognized, not parseable
+		"bin/fishy":      "#!/usr/bin/env fish\n", // unknown interpreter
+		"LICENSE":        "MIT License\n",
+		"notes.txt":      "#!/bin/bash\n", // has an extension: name wins
+		"Makefile":       "#!/bin/bash\n", // special filename wins
+		"scripts/run.sh": "echo hi\n",
+	}
+	for p, content := range files {
+		full := filepath.Join(dir, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	all, err := Walk(dir, 2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, f := range all {
+		got[filepath.ToSlash(f.RelPath)] = f.Language
+	}
+	want := map[string]string{
+		"bin/deploy":     "bash",
+		"bin/report":     "python",
+		"bin/legacy":     "perl",
+		"Makefile":       "make",
+		"scripts/run.sh": "bash",
+	}
+	if len(got) != len(want) {
+		t.Errorf("walked %v, want %v", got, want)
+	}
+	for p, l := range want {
+		if got[p] != l {
+			t.Errorf("%s: language %q, want %q", p, got[p], l)
+		}
+	}
+
+	// The indexing filter keeps only parseable languages, so the perl script
+	// is classified but not indexed.
+	parseable, err := Walk(dir, 2, lang.Default.Supported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range parseable {
+		if f.RelPath == filepath.Join("bin", "legacy") {
+			t.Errorf("recognition-only shebang language should not pass the Supported filter")
+		}
+	}
+}
+
+func TestFeatureWalkerExcludeSkipsShebangRead(t *testing.T) {
+	dir := t.TempDir()
+	for _, p := range []string{"bin/kept", "vendored/skipped"} {
+		full := filepath.Join(dir, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("#!/bin/bash\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var mu sync.Mutex
+	var read []string
+	orig := sniffLanguage
+	sniffLanguage = func(path string) string {
+		mu.Lock()
+		read = append(read, filepath.Base(path))
+		mu.Unlock()
+		return orig(path)
+	}
+	defer func() { sniffLanguage = orig }()
+
+	files, stats, err := WalkWithOptions(dir, 4, nil, WalkOptions{Exclude: []string{"vendored/**"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].RelPath != filepath.Join("bin", "kept") {
+		t.Fatalf("files = %+v, want only bin/kept", files)
+	}
+	if len(read) != 1 || read[0] != "kept" {
+		t.Errorf("shebang read for %v, want only kept", read)
+	}
+	if stats.FilesExcluded != 0 {
+		t.Errorf("FilesExcluded = %d, want 0: an unsniffed file is not known to be source", stats.FilesExcluded)
+	}
 }

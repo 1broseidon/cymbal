@@ -282,3 +282,65 @@ func TestFamily(t *testing.T) {
 		}
 	}
 }
+
+func TestForShebang(t *testing.T) {
+	tests := []struct {
+		head string
+		want string // "" = nil
+	}{
+		{"#!/bin/bash\nset -e\n", "bash"},
+		{"#!/bin/sh\n", "bash"},
+		{"#! /bin/zsh -f\n", "bash"},
+		{"#!/usr/bin/env bash\n", "bash"},
+		{"#!/usr/bin/env python3\n", "python"},
+		{"#!/usr/bin/python3.12 -u\n", "python"},
+		{"#!/usr/bin/env -S python3 -u\n", "python"},
+		{"#!/usr/bin/env -Spython3 -u\n", "python"},
+		{"#!/usr/bin/env -u HOME -i node\n", "javascript"},
+		{"#!/usr/bin/env FOO=1 ruby\n", "ruby"},
+		{"#!/usr/bin/env jruby\n", "ruby"},
+		{"#!/usr/bin/perl -w\n", "perl"},
+		{"#!/bin/bash\r\n", "bash"},    // CRLF checkout
+		{"#!/bin/bash", "bash"},        // no trailing newline
+		{"#!/usr/bin/env fish\n", ""},  // unknown interpreter
+		{"#!/usr/bin/env\n", ""},       // env with no program
+		{"#!\n", ""},                   // empty line
+		{"echo hi\n#!/bin/bash\n", ""}, // not at the start
+		{" #!/bin/bash\n", ""},         // kernel requires column 0
+		{"", ""},
+		{"#!/bin/python-config\n", ""}, // not a trailing version
+		{"#!/usr/bin/perl6\n", ""},     // Raku, not a Perl version
+		{"#!/usr/bin/env -C /tmp -P /bin python3\n", "python"},
+		{"#!/usr/bin/env -a myname --argv0 x ruby\n", "ruby"},
+		{"#!/usr/bin/env -f f --file g node\n", "javascript"},
+		{"#!/usr/bin/env --split-string=python3 -u\n", "python"},
+		{"#!/usr/bin/env --split-string python3\n", "python"},
+		{"#!/usr/bin/pypy3\n", "python"},
+		{"#!/usr/bin/env ts-node\n", "typescript"},
+		{"#!/usr/bin/env nodejs\n", "javascript"},
+		{"#!/usr/bin/env luajit\n", "lua"},
+		{"#!/usr/bin/env elixir\n", "elixir"},
+		{"#!/usr/bin/php\n", "php"},
+	}
+	for _, tt := range tests {
+		got := ""
+		if l := Default.ForShebang([]byte(tt.head)); l != nil {
+			got = l.Name
+		}
+		if got != tt.want {
+			t.Errorf("ForShebang(%q) = %q, want %q", tt.head, got, tt.want)
+		}
+	}
+}
+
+func TestNewRegistryPanicsOnDuplicateInterpreter(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic on duplicate interpreter")
+		}
+	}()
+	NewRegistry(
+		Language{Name: "a", Interpreters: []string{"x"}},
+		Language{Name: "b", Interpreters: []string{"x"}},
+	)
+}
