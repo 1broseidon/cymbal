@@ -75,6 +75,7 @@ func ParseSource(src []byte, filePath, lang string, tsLang *sitter.Language) (*s
 	if lang == "kotlin" && tree.RootNode().HasError() {
 		extractor.recoverKotlinTopLevelTypes()
 	}
+	setBodyHashes(src, extractor.symbols)
 	return &symbols.ParseResult{
 		Symbols: extractor.symbols,
 		Imports: extractor.imports,

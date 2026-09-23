@@ -13,6 +13,10 @@ type Symbol struct {
 	Depth     int    `json:"depth"`
 	Signature string `json:"signature,omitempty"`
 	Language  string `json:"language"`
+	// BodyHash identifies the symbol's source text: it changes when the lines
+	// StartLine..EndLine change, and not when the symbol only moves or other
+	// code in the file changes. Empty when the parser did not compute it.
+	BodyHash string `json:"body_hash,omitempty"`
 }
 
 // Import represents an import/use statement found in source.
