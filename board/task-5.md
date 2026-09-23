@@ -7,6 +7,7 @@ priority: high
 tags:
   - design
   - architecture
+  - wontfix
 createdAt: "2026-04-06T04:44:57.884Z"
 description: |-
   ## Plugin System for External Language Packs — Design Spec
@@ -18,6 +19,7 @@ description: |-
   ### Principle
 
   Core languages must either already exist in the official tree-sitter Go bindings or add zero new dependency surface. Everything else is a plugin.
+updatedAt: "2026-09-23T14:18:01.182Z"
 ---
 
 ## Log
