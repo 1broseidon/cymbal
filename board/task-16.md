@@ -25,3 +25,4 @@ Done when: impact on an uncalled symbol exits 0 with total_callers 0 in both mod
 
 ## Log
 - 2026-09-23T17:54:14.508Z: [claude] Audit 2026-09-23 against main 047b568: still valid. impact on an uncalled symbol exits 1 with 'no callers found' in both text and --json, and a nonexistent symbol gives identical output. The error comes from cmd/impact.go:65-70. cmd/cli_codecov_test.go:281-285 pins it using MissingSymbol, so that test changes with the fix. Related: trace and refs exit 0 on empty results, but trace --json prints plain text rather than JSON, refs writes its message to stderr while trace writes to stdout, and none of the three distinguishes a missing symbol.
+- 2026-09-23T18:00:51.298Z: [claude] Merged into task-18 on 2026-09-23, with the user's decisions: drop 13-4, widen 16 to trace, refs and investigate, and remove the per-file hash. The audit notes above are carried into task-18's description.
