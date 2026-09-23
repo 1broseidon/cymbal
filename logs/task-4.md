@@ -1,14 +1,14 @@
 ---
 id: task-4
 title: "Benchmark Harness v2: Accuracy, Speed, Token Savings, JIT Freshness"
-column: done
 priority: high
 tags:
   - bench
   - accuracy
   - tokens
   - freshness
-position: 0
+completedAt: "2026-09-23T14:18:00.635Z"
+updatedAt: "2026-09-23T14:18:00.635Z"
 ---
 
 ## Log
