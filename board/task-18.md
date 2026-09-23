@@ -51,7 +51,10 @@ subtasks:
   - id: task-18-7
     title: Run the OpenCode suite with node --test in CI
     completed: false
-updatedAt: "2026-09-23T18:00:33.702Z"
+  - id: task-18-8
+    title: Defer coverage-package discovery to test-coverage with a single go list
+    completed: false
+updatedAt: "2026-09-23T18:00:33.967Z"
 ---
 
 ## Description
