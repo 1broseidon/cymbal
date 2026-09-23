@@ -1,8 +1,6 @@
 ---
 id: task-17
 title: Record the git commit the index reflects
-column: todo
-position: 6
 priority: low
 tags:
   - indexing
@@ -15,7 +13,8 @@ relatedFiles:
   - index/store.go
   - cmd/output.go
 createdAt: "2026-09-23T03:04:19.542Z"
-updatedAt: "2026-09-23T17:49:05.951Z"
+updatedAt: "2026-09-23T17:49:06.205Z"
+completedAt: "2026-09-23T17:49:06.205Z"
 ---
 
 ## Description
