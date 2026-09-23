@@ -9,11 +9,13 @@ tags:
   - cli
   - scripting
   - json
+  - superseded
 relatedFiles:
   - cmd/impact.go
   - main.go
   - cmd/output.go
 createdAt: "2026-09-23T03:04:19.327Z"
+updatedAt: "2026-09-23T18:00:51.555Z"
 ---
 
 ## Description
