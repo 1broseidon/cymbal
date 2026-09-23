@@ -2,28 +2,29 @@
 
 All notable changes to cymbal are documented here.
 
+Each version's section is its release notes: what changed for the person
+using cymbal, written as prose, not a list of commits. The section is
+published verbatim on the GitHub release.
+
 ## [Unreleased]
 
-### Changed
+## [0.16.0] - 2026-09-23
 
-- Reference, impact, investigate, and context rendering batch requested source ranges by file. Text and JSON share loaded snippets, and JSON reference output skips text formatting.
-- Impact traversal loads enclosing-symbol intervals once per referenced file instead of querying each call site, preserving innermost caller selection, deduplication, and traversal through hidden test callers.
-- Graph metadata queries fetch only root and traversed names in bounded batches. All matching definitions and languages remain available for ambiguity and unresolved diagnostics; exact duplicate definitions use set-based suppression.
+**Symbols carry a `body_hash`.** Every symbol in `search`, `show`, `outline`, `context`, `investigate` and `structure` JSON now has a 16-character hash of its own source lines. It stays the same when other code in the file changes or the symbol moves, and changes when the symbol's own lines do, including a modifier like `public` on its first line. An agent can store `file:Name` with its hash and later check in one call whether that symbol changed. Text output is unchanged. The first refresh after upgrading reparses every file once, with a one-line note on stderr.
 
-### Fixed
+**Extensionless scripts are indexed.** A file with no extension, like `bin/deploy`, is now classified by its `#!` line when it names a known interpreter: shell, Python, Node, ts-node, Ruby, Lua, PHP, Elixir or Perl, including `/usr/bin/env` forms. Only regular files are read, at most 256 bytes each, and excluded files are never opened. `cymbal changed` detects them the same way. Address a root-level script as `./deploy:Name` in `show`.
 
-- Symbol search and reference lookup apply path filters before result limits, so a definition or call site outside the former overfetch window remains discoverable.
-- Trace and graph traversal retain real one- and two-character callees such as `Do`; call-reference kinds distinguish calls from ordinary variable uses.
-- Text search uses the same line-oriented Go regular expressions, indexed file inventory, path/language filters, snippet format, and path/line ordering with or without ripgrep. Invalid patterns and file-read failures now surface as errors. Ripgrep accelerates literal queries; regex syntax uses the native scanner. Text search no longer includes files outside the index solely because ripgrep is installed.
-- Opening `--db ./custom.db` preserves the existing parent directory's permissions. Newly created cache directories and database files remain private.
-- Query commands return a nonzero exit if the index cannot be refreshed. Discovery failures no longer permit stale-file pruning from an incomplete file inventory. `outline`, `refs`, and `investigate` preserve successful batch output while reporting operational failures through the exit status; ordinary no-match behavior is unchanged.
-- **Files with a binary tail no longer stall indexing** — a self-extracting installer (a shell header followed by an archive), or any source file with binary data appended, sent the whole payload through tree-sitter. The cost grows faster than the payload: a Python file with a random tail took 0.2 s to index at 10 KB, 1.2 s at 100 KB, over 70 s at 300 KB and over 120 s at 1 MB, and a shell script with a 1 MB tail took 3.4 s. Each now takes about 0.1 s. The tail also corrupted symbols: in real makeself installers with an xz or uncompressed payload, two header functions went missing, and the uncompressed one gained bogus functions from source inside the archive. `parser.ParseSource` (and so `ParseFile` and `ParseBytes`) now parses only up to the first NUL byte. The text part keeps its symbols and line numbers, and anything after the NUL is not indexed.
+**Queries that show many snippets are faster.** `refs`, `impact`, `investigate` and `context` read each file once for all the snippets they need from it, instead of once per snippet. `impact` finds the enclosing function for every call in a file with one lookup, and graph queries load only the symbols they visit, in bounded batches.
 
-### Added
+**Files with a binary tail no longer stall indexing.** A self-extracting installer, or any source file with binary data appended, used to go through the parser whole: a Python file with a 1 MB random tail took over 120 s to index. It now takes about 0.1 s, because cymbal parses only up to the first NUL byte. The text part keeps its symbols and line numbers and no longer picks up bogus functions from inside the archive.
 
-- `index.EnsureFreshWithError` exposes refresh errors separately from the change count; the existing `EnsureFresh` API keeps its best-effort behavior. `SearchQuery.Paths`, `FindReferencesWithPaths`, and `TextSearchWithOptions` expose path-aware retrieval and optional regex text matching to library callers. `TextSearch` continues to accept a literal substring.
-- **Extensionless scripts are classified by their `#!` line** — a file with no extension and no special filename (`bin/deploy`, `jira`) is now indexed when its shebang names a known interpreter: `sh`/`bash`/`zsh`/`dash`/`ksh`/`ash`, `python`/`pypy`, `node`/`nodejs`, `ts-node`, `ruby`/`jruby`, `lua`/`luajit`, `php`, `elixir`, and `perl` (recognised, not parsed). `/usr/bin/env` forms are understood, including options, `NAME=value` assignments and `-S`/`--split-string`, and a trailing version is ignored (`python3.12`), except `perl6`, which is Raku. Only regular files are read (never FIFOs), at most 256 bytes each, by the walker's worker pool, and a file matched by `--exclude` or the generated-file rules is never stat-ed or opened. The cost is a stat and a small read per extensionless file on every index freshness check: about 1 to 1.5 µs of wall time each on a warm cache (50k such files add ~54 ms per query), falling to ~0.2 µs when they are excluded. `cymbal changed` applies the same detection to blobs. Library: `lang.Language.Interpreters`, `lang.Registry.ForShebang`, `lang.ShebangMaxBytes`. A root-level script must be addressed as `./deploy:…` in `show`, since a bare `deploy:…` is not recognised as a file path.
-- **Per-symbol `body_hash` in JSON output** — symbols in `search`, `show`, `outline`, `context`, `investigate`, and `structure` JSON carry `body_hash`: the first 16 hex characters of the SHA-256 of the symbol's source lines, `start_line` to `end_line`, with line endings and trailing whitespace removed. It stays the same when other code in the file changes or the symbol moves, and changes when the symbol's own lines do, including modifiers such as `public` on its first line. An agent or script can store `file:Name` with its `body_hash` and later check in one call whether that symbol changed. Symbols with identical source share a hash. Text output is unchanged. Indexes now record a format version: an index built by an earlier release reparses every file once on its next refresh, with a one-line stderr note, and then refreshes incrementally as before. Library: `symbols.Symbol.BodyHash`, `index.SymbolResult.BodyHash`.
+**Text search gives the same answer with or without ripgrep.** Both paths now search the same indexed files with the same Go regular expressions, filters and output format. Ripgrep only speeds up literal queries, and it no longer pulls in files the index skipped.
+
+**Failures now fail.** If the index cannot be refreshed, query commands exit nonzero instead of answering from stale data, and a failed file scan no longer prunes files it had not reached. `outline`, `refs` and `investigate` still print the results that worked in a batch and report the rest in the exit status. An invalid regex or an unreadable file is an error, not "no matches".
+
+**Fixed** path filters being applied after result limits, which could hide a match just past the cutoff; `trace` dropping real one- and two-letter callees like `Do`; and `--db ./custom.db` changing the permissions of the folder it lives in.
+
+**For library users,** `index.EnsureFreshWithError` returns refresh errors on their own, `SearchQuery.Paths`, `FindReferencesWithPaths` and `TextSearchWithOptions` add path filtering and regex text search, and `symbols.Symbol.BodyHash`, `index.SymbolResult.BodyHash` and `lang.Registry.ForShebang` expose the new features.
 
 ## [0.15.0] - 2026-09-05
 
