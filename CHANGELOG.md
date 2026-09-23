@@ -8,7 +8,7 @@ published verbatim on the GitHub release.
 
 ## [Unreleased]
 
-## [0.16.0] - 2026-09-23
+## [0.16.1] - 2026-09-23
 
 **Symbols carry a `body_hash`.** Every symbol in `search`, `show`, `outline`, `context`, `investigate` and `structure` JSON now has a 16-character hash of its own source lines. It stays the same when other code in the file changes or the symbol moves, and changes when the symbol's own lines do, including a modifier like `public` on its first line. An agent can store `file:Name` with its hash and later check in one call whether that symbol changed. Text output is unchanged. The first refresh after upgrading reparses every file once, with a one-line note on stderr.
 
@@ -25,6 +25,8 @@ published verbatim on the GitHub release.
 **Fixed** path filters being applied after result limits, which could hide a match just past the cutoff; `trace` dropping real one- and two-letter callees like `Do`; and `--db ./custom.db` changing the permissions of the folder it lives in.
 
 **For library users,** `index.EnsureFreshWithError` returns refresh errors on their own, `SearchQuery.Paths`, `FindReferencesWithPaths` and `TextSearchWithOptions` add path filtering and regex text search, and `symbols.Symbol.BodyHash`, `index.SymbolResult.BodyHash` and `lang.Registry.ForShebang` expose the new features.
+
+**v0.16.0 was tagged but never published.** A test that fails only on macOS stopped its release build. 0.16.1 is the same release with that test fixed.
 
 ## [0.15.0] - 2026-09-05
 
