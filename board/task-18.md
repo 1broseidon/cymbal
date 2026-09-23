@@ -29,6 +29,11 @@ relatedFiles:
   - Makefile
   - CHANGELOG.md
 createdAt: "2026-09-23T18:00:25.638Z"
+subtasks:
+  - id: task-18-1
+    title: Empty results exit 0 with a zero-count result in impact, trace, refs and investigate
+    completed: false
+updatedAt: "2026-09-23T18:00:32.154Z"
 ---
 
 ## Description
