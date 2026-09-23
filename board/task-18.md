@@ -103,3 +103,6 @@ Dropped: making the walker append directly (old subtask 13-4). Since #81 the wal
 - `node --test` runs in CI and passes, and `make -n clean` runs no `go list`.
 - CI passes on Linux, macOS and Windows.
 - CHANGELOG `[Unreleased]` describes the part 1 behavior change.
+
+## Log
+- 2026-09-23T18:24:24.185Z: [claude] Opened #88 to track the part 1 bug publicly (impact exits 1 on no callers since v0.8.4; trace/refs/investigate exit 0 for unknown names). Starting the implementation on branch task-18-cleanup.
