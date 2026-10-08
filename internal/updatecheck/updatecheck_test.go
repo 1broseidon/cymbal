@@ -125,7 +125,7 @@ func TestGetStatusUsesFreshCacheWithoutNetwork(t *testing.T) {
 	if status.Source != "cache" {
 		t.Fatalf("expected cache source, got %q", status.Source)
 	}
-	if status.Command != "brew upgrade 1broseidon/tap/cymbal" {
+	if status.Command != "brew upgrade cymbal" {
 		t.Fatalf("unexpected update command %q", status.Command)
 	}
 }
@@ -163,7 +163,7 @@ func TestStatusFromStateIgnoresPersistedUpdateCommand(t *testing.T) {
 	}
 
 	status := statusFromState(state, "v0.11.0", InstallUnknown, "")
-	if status.Command != "brew upgrade 1broseidon/tap/cymbal" {
+	if status.Command != "brew upgrade cymbal" {
 		t.Fatalf("expected structured homebrew command, got %q", status.Command)
 	}
 }

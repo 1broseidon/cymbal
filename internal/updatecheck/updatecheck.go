@@ -460,7 +460,7 @@ func renderCommand(installType InstallType, latestVersion string) string {
 	}
 	switch installType {
 	case InstallHomebrew:
-		return "brew upgrade 1broseidon/tap/cymbal"
+		return "brew upgrade cymbal"
 	case InstallPowerShell:
 		return "irm https://raw.githubusercontent.com/1broseidon/cymbal/main/install.ps1 | iex"
 	case InstallDocker:

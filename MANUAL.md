@@ -8,12 +8,12 @@ For people, it replaces a chain of `grep` and jump-to-definition. For agents, it
 turns a dozen file reads into one call with `--json`.
 
 ```console title="Install"
-$ brew install 1broseidon/tap/cymbal
+$ brew install cymbal
 ```
 
 ```console title="Or hand it to your agent"
 Install cymbal and index this repo for me.
-1. Run: brew install 1broseidon/tap/cymbal
+1. Run: brew install cymbal
 2. Run `cymbal index .` at the repo root.
 3. Run `cymbal structure` and summarise the entry points for me.
 4. Run `cymbal hook install claude-code` so you keep using it.
@@ -39,8 +39,10 @@ and no model in the loop — every answer is derived from the index.
 
 ## Install
 
-Homebrew is the shortest path on macOS and Linux; the tap is
-`1broseidon/tap/cymbal`. The other routes are below.
+Homebrew is the shortest path on macOS and Linux; cymbal is in homebrew-core,
+so `brew install cymbal` needs no tap. An install from the old
+`1broseidon/tap` moves to homebrew-core on the next `brew update`. The other
+routes are below.
 
 #### Arch Linux — AUR, community-maintained
 

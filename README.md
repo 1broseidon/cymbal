@@ -56,7 +56,7 @@ repo, read that file.
 **Homebrew** (macOS / Linux):
 
 ```sh
-brew install 1broseidon/tap/cymbal
+brew install cymbal
 ```
 
 **Arch Linux** (AUR, community-maintained):
@@ -126,7 +126,7 @@ container flow regularly.
 `cymbal` can show a cached update notice during normal interactive use, but it
 never self-updates by default.
 
-- Homebrew: `brew upgrade 1broseidon/tap/cymbal`
+- Homebrew: `brew upgrade cymbal`
 - Arch Linux (AUR): update with your AUR helper, for example `yay -Syu cymbal`
 - Windows PowerShell: `irm https://raw.githubusercontent.com/1broseidon/cymbal/main/install.ps1 | iex`
 - Docker: `docker pull ghcr.io/1broseidon/cymbal:latest` (or the tagged image cymbal suggests)
