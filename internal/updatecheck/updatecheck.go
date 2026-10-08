@@ -395,18 +395,20 @@ func detectInstallType() InstallType {
 	if os.Getenv("CYMBAL_DOCKER_IMAGE") == "1" {
 		return InstallDocker
 	}
+	exe, exeErr := execPathFn()
+	// A winget path is conclusive, while an install.json left by an earlier
+	// install.ps1 run outlives the switch to winget.
+	if exeErr == nil && looksLikeWinget(exe) {
+		return InstallWinget
+	}
 	if markerType := loadInstallMarker(); markerType != InstallUnknown {
 		return markerType
 	}
-	exe, err := execPathFn()
-	if err != nil {
+	if exeErr != nil {
 		return InstallUnknown
 	}
 	if looksLikeHomebrew(exe) {
 		return InstallHomebrew
-	}
-	if looksLikeWinget(exe) {
-		return InstallWinget
 	}
 	if psPath, err := powerShellInstallPath(); err == nil && samePath(exe, psPath) {
 		return InstallPowerShell
@@ -532,10 +534,11 @@ func looksLikeHomebrew(exe string) bool {
 	return false
 }
 
-// looksLikeWinget reports a portable install by winget, which unpacks into
-// WinGet\Packages\1broseidon.cymbal_<source> and puts a symlink in
-// WinGet\Links, under %LOCALAPPDATA%\Microsoft for a user install or
-// %ProgramFiles% for a machine one.
+// looksLikeWinget reports a portable install by winget, which unpacks into a
+// 1broseidon.cymbal_<source> directory and puts a symlink in WinGet\Links.
+// The package directory sits under WinGet\Packages by default, but the
+// portablePackageUserRoot and portablePackageMachineRoot settings can move it
+// anywhere, so only its own name is matched.
 func looksLikeWinget(exe string) bool {
 	paths := []string{exe}
 	if resolved, err := evalSymlinks(exe); err == nil && resolved != "" {
@@ -543,7 +546,7 @@ func looksLikeWinget(exe string) bool {
 	}
 	for _, candidate := range paths {
 		path := normalizePath(candidate)
-		if strings.Contains(path, "/winget/packages/1broseidon.cymbal_") || strings.HasSuffix(path, "/winget/links/cymbal.exe") {
+		if strings.HasPrefix(filepath.Base(filepath.Dir(path)), "1broseidon.cymbal_") || strings.HasSuffix(path, "/winget/links/cymbal.exe") {
 			return true
 		}
 	}
