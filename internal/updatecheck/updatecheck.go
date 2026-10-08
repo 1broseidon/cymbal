@@ -20,6 +20,7 @@ const (
 	InstallUnknown    InstallType = "unknown"
 	InstallHomebrew   InstallType = "homebrew"
 	InstallPowerShell InstallType = "powershell"
+	InstallWinget     InstallType = "winget"
 	InstallDocker     InstallType = "docker"
 	InstallGo         InstallType = "go"
 	InstallManual     InstallType = "manual"
@@ -404,6 +405,9 @@ func detectInstallType() InstallType {
 	if looksLikeHomebrew(exe) {
 		return InstallHomebrew
 	}
+	if looksLikeWinget(exe) {
+		return InstallWinget
+	}
 	if psPath, err := powerShellInstallPath(); err == nil && samePath(exe, psPath) {
 		return InstallPowerShell
 	}
@@ -441,6 +445,8 @@ func parseInstallType(raw string) InstallType {
 		return InstallHomebrew
 	case string(InstallPowerShell):
 		return InstallPowerShell
+	case string(InstallWinget):
+		return InstallWinget
 	case string(InstallDocker):
 		return InstallDocker
 	case string(InstallGo):
@@ -463,6 +469,8 @@ func renderCommand(installType InstallType, latestVersion string) string {
 		return "brew upgrade cymbal"
 	case InstallPowerShell:
 		return "irm https://raw.githubusercontent.com/1broseidon/cymbal/main/install.ps1 | iex"
+	case InstallWinget:
+		return "winget upgrade 1broseidon.cymbal"
 	case InstallDocker:
 		if latestVersion != "" {
 			return fmt.Sprintf("docker pull ghcr.io/1broseidon/cymbal:%s", latestVersion)
@@ -518,6 +526,24 @@ func looksLikeHomebrew(exe string) bool {
 	for _, candidate := range paths {
 		path := normalizePath(candidate)
 		if strings.Contains(path, "/cellar/cymbal/") || strings.Contains(path, "/homebrew/cellar/cymbal/") {
+			return true
+		}
+	}
+	return false
+}
+
+// looksLikeWinget reports a portable install by winget, which unpacks into
+// WinGet\Packages\1broseidon.cymbal_<source> and puts a symlink in
+// WinGet\Links, under %LOCALAPPDATA%\Microsoft for a user install or
+// %ProgramFiles% for a machine one.
+func looksLikeWinget(exe string) bool {
+	paths := []string{exe}
+	if resolved, err := evalSymlinks(exe); err == nil && resolved != "" {
+		paths = append(paths, resolved)
+	}
+	for _, candidate := range paths {
+		path := normalizePath(candidate)
+		if strings.Contains(path, "/winget/packages/1broseidon.cymbal_") || strings.HasSuffix(path, "/winget/links/cymbal.exe") {
 			return true
 		}
 	}

@@ -181,6 +181,28 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Opens a PR against microsoft/winget-pkgs for the new version. Komac copies
+  # the previous manifest and swaps in the new zip, so it cannot submit a
+  # package winget does not have yet: the first one, 1broseidon.cymbal 0.17.0,
+  # is submitted by hand. Enable with `gh variable set WINGET_ENABLED --body true`
+  # once that PR merges.
+  #
+  # WINGET_TOKEN must be a classic PAT with the public_repo scope: it pushes to
+  # the 1broseidon/winget-pkgs fork and opens a PR on a repository we do not
+  # own, which neither GITHUB_TOKEN nor a fine-grained PAT can do. A separate
+  # job, so a winget failure leaves the release and image alone.
+  winget:
+    needs: release
+    if: vars.WINGET_ENABLED == 'true' && !contains(inputs.tag || github.ref_name, '-')
+    runs-on: windows-latest
+    steps:
+      - uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: 1broseidon.cymbal
+          release-tag: ${{ inputs.tag || github.ref_name }}
+          installers-regex: '_windows_x86_64\.zip$'
+          token: ${{ secrets.WINGET_TOKEN }}
+
   docker:
     needs: build
     runs-on: ubuntu-latest
