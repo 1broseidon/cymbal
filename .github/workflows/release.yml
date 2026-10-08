@@ -166,7 +166,7 @@ jobs:
           sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' dist/release_notes.md
           cat >> dist/release_notes.md <<'EOF'
 
-          **Install:** `brew install 1broseidon/tap/cymbal`, `yay -S cymbal`, `docker pull ghcr.io/1broseidon/cymbal:latest`, or the PowerShell and Go installs in the [README](https://github.com/1broseidon/cymbal#install). Full details in the [CHANGELOG](https://github.com/1broseidon/cymbal/blob/main/CHANGELOG.md).
+          **Install:** `brew install cymbal`, `yay -S cymbal`, `docker pull ghcr.io/1broseidon/cymbal:latest`, or the PowerShell and Go installs in the [README](https://github.com/1broseidon/cymbal#install). Full details in the [CHANGELOG](https://github.com/1broseidon/cymbal/blob/main/CHANGELOG.md).
           EOF
 
       - name: Create GitHub release
@@ -180,73 +180,6 @@ jobs:
             dist/checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update Homebrew formula
-        env:
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-        run: |
-          TAG=${{ steps.tag.outputs.tag }}
-          VERSION="${TAG#v}"
-          cd dist
-
-          SHA_DARWIN_ARM64=$(sha256sum cymbal_${TAG}_darwin_arm64.tar.gz | cut -d' ' -f1)
-          SHA_DARWIN_X86=$(sha256sum cymbal_${TAG}_darwin_x86_64.tar.gz | cut -d' ' -f1)
-          SHA_LINUX_X86=$(sha256sum cymbal_${TAG}_linux_x86_64.tar.gz | cut -d' ' -f1)
-          SHA_LINUX_ARM64=$(sha256sum cymbal_${TAG}_linux_arm64.tar.gz | cut -d' ' -f1)
-
-          cat > /tmp/cymbal.rb << FORMULA
-          # typed: false
-          # frozen_string_literal: true
-
-          class Cymbal < Formula
-            desc "Fast, language-agnostic code indexer and symbol navigator powered by tree-sitter"
-            homepage "https://github.com/1broseidon/cymbal"
-            version "${VERSION}"
-            license "MIT"
-
-            on_macos do
-              if Hardware::CPU.arm?
-                url "https://github.com/1broseidon/cymbal/releases/download/${TAG}/cymbal_${TAG}_darwin_arm64.tar.gz"
-                sha256 "${SHA_DARWIN_ARM64}"
-              elsif Hardware::CPU.intel?
-                url "https://github.com/1broseidon/cymbal/releases/download/${TAG}/cymbal_${TAG}_darwin_x86_64.tar.gz"
-                sha256 "${SHA_DARWIN_X86}"
-              end
-
-              define_method(:install) do
-                bin.install "cymbal"
-              end
-            end
-
-            on_linux do
-              if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
-                url "https://github.com/1broseidon/cymbal/releases/download/${TAG}/cymbal_${TAG}_linux_x86_64.tar.gz"
-                sha256 "${SHA_LINUX_X86}"
-              elsif Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-                url "https://github.com/1broseidon/cymbal/releases/download/${TAG}/cymbal_${TAG}_linux_arm64.tar.gz"
-                sha256 "${SHA_LINUX_ARM64}"
-              end
-
-              define_method(:install) do
-                bin.install "cymbal"
-              end
-            end
-          end
-          FORMULA
-
-          # Remove leading whitespace from heredoc
-          sed -i 's/^          //' /tmp/cymbal.rb
-
-          # Push to homebrew-tap
-          cd /tmp
-          git clone "https://x-access-token:${HOMEBREW_TAP_GITHUB_TOKEN}@github.com/1broseidon/homebrew-tap.git"
-          cp cymbal.rb homebrew-tap/Formula/cymbal.rb
-          cd homebrew-tap
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/cymbal.rb
-          git commit -m "formula: update cymbal to ${TAG}" || true
-          git push
 
   docker:
     needs: build

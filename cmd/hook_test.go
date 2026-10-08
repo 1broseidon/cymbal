@@ -775,7 +775,7 @@ func TestEmitHookNotifyJSONIncludesPayload(t *testing.T) {
 		return updatecheck.Status{
 			Available:     true,
 			LatestVersion: "v0.13.0",
-			Command:       "brew upgrade 1broseidon/tap/cymbal",
+			Command:       "brew upgrade cymbal",
 			ReleaseURL:    "https://github.com/1broseidon/cymbal/releases/latest",
 		}, nil
 	}
@@ -799,10 +799,10 @@ func TestEmitHookNotifyJSONIncludesPayload(t *testing.T) {
 	if !out.Notify || out.LatestVersion != "v0.13.0" || out.Title != "cymbal v0.13.0 is available" {
 		t.Fatalf("unexpected payload: %+v", out)
 	}
-	if out.Body != "Update: brew upgrade 1broseidon/tap/cymbal" {
+	if out.Body != "Update: brew upgrade cymbal" {
 		t.Fatalf("unexpected body: %+v", out)
 	}
-	if out.Command != "brew upgrade 1broseidon/tap/cymbal" || out.ReleaseURL != "https://github.com/1broseidon/cymbal/releases/latest" {
+	if out.Command != "brew upgrade cymbal" || out.ReleaseURL != "https://github.com/1broseidon/cymbal/releases/latest" {
 		t.Fatalf("unexpected command metadata: %+v", out)
 	}
 }
