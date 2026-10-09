@@ -76,6 +76,56 @@ func TestDetectInstallTypeRecognizesWindowsExeSuffixes(t *testing.T) {
 	}
 }
 
+func TestDetectInstallTypeRecognizesWinget(t *testing.T) {
+	reset := stubUpdateCheckEnv(t)
+	defer reset()
+	evalSymlinks = func(path string) (string, error) { return path, nil }
+
+	for _, exe := range []string{
+		`C:\Users\Lucas\AppData\Local\Microsoft\WinGet\Packages\1broseidon.cymbal_Microsoft.Winget.Source_8wekyb3d8bbwe\cymbal.exe`,
+		`C:\Users\Lucas\AppData\Local\Microsoft\WinGet\Links\cymbal.exe`,
+		`C:\Program Files\WinGet\Packages\1broseidon.cymbal_Microsoft.Winget.Source_8wekyb3d8bbwe\cymbal.exe`,
+		`D:\Portable\1broseidon.cymbal_Microsoft.Winget.Source_8wekyb3d8bbwe\cymbal.exe`,
+	} {
+		execPathFn = func() (string, error) { return exe, nil }
+		if got := detectInstallType(); got != InstallWinget {
+			t.Fatalf("detectInstallType(%s) = %q, want %q", exe, got, InstallWinget)
+		}
+	}
+
+	link := `C:\Users\Lucas\AppData\Local\Microsoft\WinGet\Links\cymbal.exe`
+	execPathFn = func() (string, error) { return `C:\Tools\cymbal.exe`, nil }
+	evalSymlinks = func(path string) (string, error) { return link, nil }
+	if got := detectInstallType(); got != InstallWinget {
+		t.Fatalf("detectInstallType() via symlink = %q, want %q", got, InstallWinget)
+	}
+
+	// An install.json from an earlier install.ps1 run does not outrank winget.
+	marker, err := installMarkerPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, []byte(`{"install_type":"powershell"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	evalSymlinks = func(path string) (string, error) { return path, nil }
+	execPathFn = func() (string, error) { return link, nil }
+	if got := detectInstallType(); got != InstallWinget {
+		t.Fatalf("detectInstallType() with powershell marker = %q, want %q", got, InstallWinget)
+	}
+	execPathFn = func() (string, error) { return `C:\Tools\cymbal.exe`, nil }
+	if got := detectInstallType(); got != InstallPowerShell {
+		t.Fatalf("detectInstallType() off winget with powershell marker = %q, want %q", got, InstallPowerShell)
+	}
+
+	if got := renderCommand(InstallWinget, ""); got != "winget upgrade 1broseidon.cymbal" {
+		t.Fatalf("winget command = %q", got)
+	}
+}
+
 func TestRenderCommandGoUsesWindowsSafeShell(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		cmd := renderCommand(InstallGo, "")

@@ -10,6 +10,8 @@ published verbatim on the GitHub release.
 
 **cymbal is in homebrew-core.** Install with `brew install cymbal`, no tap needed. Releases no longer publish a formula to `1broseidon/tap`; its `cymbal` formula is gone, and a tap migration moves an existing tap install to homebrew-core on the next `brew update`. Update notices for a Homebrew install now suggest `brew upgrade cymbal`.
 
+Update notices for a winget install suggest `winget upgrade 1broseidon.cymbal`.
+
 ## [0.17.0] - 2026-09-23
 
 **Empty results are results.** `impact` on a symbol nothing calls used to fail with "no callers found", the same thing it printed for a name that doesn't exist. Now it exits 0 with its usual header and `total_callers: 0`, or an empty `results` list in `--json`. `trace`, `refs` and `refs --importers` do the same when they have nothing to show, and `trace --json` prints JSON instead of a plain-text note. A name the index has never seen exits 1 with `symbol not found: X` in all four commands, as in `show` and `context`, so a typo no longer looks like an empty answer. `investigate --json` still lists that name, with the error.
