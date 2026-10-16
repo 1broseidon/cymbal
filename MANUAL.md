@@ -374,7 +374,7 @@ agent-agnostic three can be wired into any harness with hook points.
 $ cymbal version
 cymbal v0.15.0
   commit: ac79440
-  go:     go1.26.7 linux/amd64
+  go:     go1.26.9 linux/amd64
 ```
 
 ## Languages
