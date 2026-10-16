@@ -122,9 +122,19 @@ func WalkWithOptions(root string, workers int, langFilter func(string) bool, opt
 			for work := range ch {
 				if work.sniff != nil {
 					info, err := work.sniff.Info()
-					// The path checks ran in the walk. The file's language is unknown
-					// until it is read, so a too-large one is dropped uncounted.
-					if err != nil || isTooLarge(info, opts) {
+					if err != nil {
+						// The file cannot be stat-ed, so its size is unknown; drop it
+						// without counting, exactly as the walk path does on stat failure.
+						continue
+					}
+					// The path checks ran in the walk before this file was queued, so a
+					// file reaching a worker is never path-excluded. The only reason
+					// left to drop it is its size, and the walk path counts those, so
+					// count this one too instead of dropping it uncounted.
+					if isTooLarge(info, opts) {
+						mu.Lock()
+						addExcludedFile(&stats, info)
+						mu.Unlock()
 						continue
 					}
 					work.language = sniffLanguage(work.path)
@@ -195,7 +205,9 @@ func WalkWithOptions(root string, workers int, langFilter func(string) bool, opt
 			return err
 		}
 		if shouldExcludeFile(rel, info, opts) {
+			mu.Lock()
 			addExcludedFile(&stats, info)
+			mu.Unlock()
 			return nil
 		}
 
