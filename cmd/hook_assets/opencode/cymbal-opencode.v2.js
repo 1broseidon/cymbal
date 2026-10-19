@@ -126,17 +126,24 @@ async function announceUpdate(raw) {
 
 // OpenCode V2 has no Bun `$`; ctx.shell is only a create.before hook surface,
 // not a runner. Every cymbal hook call goes through child_process instead.
-// Resolves to the child's stdout, or "" when cymbal cannot be started
+// Resolves to the child's stdout, or "" when starting or writing to it fails
 // (mirroring the V1 asset's `.quiet().nothrow().text()`).
 function runCymbalHook(args, { input } = {}) {
 	return new Promise(resolve => {
-		const child = spawn("cymbal", args, { windowsHide: true });
+		const child = spawn("cymbal", args, {
+			windowsHide: true,
+			// Discard diagnostics so a full stderr pipe cannot stall a hook.
+			stdio: [input === undefined ? "ignore" : "pipe", "pipe", "ignore"]
+		});
 		let stdout = "";
 		child.stdout?.on("data", chunk => {
 			stdout += String(chunk);
 		});
 		child.once("error", () => resolve(""));
 		child.once("close", () => resolve(stdout));
+		// A child may exit before consuming the payload. Stream errors (EPIPE)
+		// are separate from child process errors and must also fail open.
+		child.stdin?.once("error", () => resolve(""));
 		if (input !== undefined) child.stdin?.end(input);
 	});
 }

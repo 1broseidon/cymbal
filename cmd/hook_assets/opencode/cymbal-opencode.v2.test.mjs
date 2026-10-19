@@ -142,6 +142,7 @@ async function withEnvironment(
 		const child = {
 			stdout: stream,
 			stdin: {
+				once() {},
 				end(input) {
 					rec.input = input;
 				}
