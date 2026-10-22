@@ -1,6 +1,6 @@
 ---
 schema: https://brainfile.md/v2/board.json
-title: My Project
+title: Cymbal
 agent:
   instructions:
     - Task files are individual .md files in board/
