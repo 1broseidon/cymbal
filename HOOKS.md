@@ -213,11 +213,15 @@ What it does:
   `.opencode/plugins/cymbal-opencode.js`
 - The plugin refreshes startup guidance by calling
   `cymbal hook remind --format=text --update=if-stale`
-- The plugin exposes a single `CymbalPlugin` export for OpenCode's plugin
-  loader; helper functions stay internal so OpenCode does not try to load them
-  as plugins
-- The plugin soft-nudges Bash, Grep, and Glob code-search calls back toward
-  cymbal-first navigation before the tool runs on non-Windows shells
+- One plugin works with both OpenCode 1.x and 2.x. Its single default export
+  is `{ id, setup, server }`: OpenCode 1.x calls `server()` and 2.x calls
+  `setup()`, so the installer writes the same file whichever version you run,
+  and upgrading OpenCode needs no reinstall. Helper functions stay internal so
+  OpenCode does not try to load them as plugins
+- The plugin soft-nudges code-search calls back toward cymbal-first navigation
+  before the tool runs on non-Windows shells: Bash, Grep, and Glob on
+  OpenCode 1.x, and the shell tool on 2.x (whose tool hooks can only change a
+  tool's input, so Grep and Glob are not nudged there)
 - When an update is available, the plugin shows a **native OS notification**
   (macOS Notification Center, Linux `notify-send`, or Windows system tray)
   so users see it regardless of whether they're in TUI or Desktop mode

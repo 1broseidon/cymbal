@@ -8,13 +8,15 @@ published verbatim on the GitHub release.
 
 ## [Unreleased]
 
+**The OpenCode plugin works with OpenCode 2.x.** OpenCode 2.x dropped the 1.x plugin API, so the plugin `cymbal hook install opencode` wrote had no effect there: no reminder, no nudge. The installer now writes one plugin that serves both: OpenCode 1.x runs it as before, and 2.x adds cymbal's reminder to the system prompt before each model request and nudges code searches run through its shell tool. On 2.x, Grep and Glob calls are not nudged, because 2.x tool hooks can only change a tool's input. The path, the user and project scopes, and uninstall are unchanged, and the same file keeps working when you move between OpenCode majors. An existing install is not updated by itself: run `cymbal hook install opencode` again (with `--scope project` if that is where it lives) to replace it. Thanks to @albert118 for the 2.x port ([#94](https://github.com/1broseidon/cymbal/pull/94)).
+
 **cymbal is in homebrew-core.** Install with `brew install cymbal`, no tap needed. Releases no longer publish a formula to `1broseidon/tap`; its `cymbal` formula is gone, and a tap migration moves an existing tap install to homebrew-core on the next `brew update`. Update notices for a Homebrew install now suggest `brew upgrade cymbal`.
 
 Update notices for a winget install suggest `winget upgrade 1broseidon.cymbal`.
 
 **Excluded oversized scripts are counted.** An oversized file whose language is sniffed from its `#!` line was dropped while walking but never added to the walk stats, so the `cymbal index` summary under-counted the files and bytes it skipped. It now counts toward `FilesExcluded` / `BytesExcluded`, matching how an oversized file with an extension is already counted.
 
-**Built with Go 1.26.9.** It fixes a set of standard library advisories `govulncheck` reports against 1.26.7, including GO-2026-6617 in `net/http`. Building from source needs Go 1.26.9 or newer; Go 1.21 and later fetch it automatically.
+**Built with Go 1.26.10.** It fixes a set of standard library advisories `govulncheck` reports against 1.26.7, including GO-2026-6617 in `net/http`, and distrusts a set of compromised intermediate certificates in `crypto/x509` ([GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809)), which every HTTPS request cymbal makes, such as the update check, goes through. Building from source needs Go 1.26.10 or newer; Go 1.21 and later fetch it automatically.
 
 ## [0.17.0] - 2026-09-23
 

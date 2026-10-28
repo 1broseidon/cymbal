@@ -1278,9 +1278,8 @@ func uninstallClaudeCode(scope string, dryRun bool) (string, string, error) {
 // ── OpenCode adapter ──
 
 const (
-	opencodeManagedPluginFile   = "cymbal-opencode.js"
-	opencodeManagedPluginV2File = "cymbal-opencode.v2.js"
-	opencodeHookMarker          = "cymbal-hook"
+	opencodeManagedPluginFile = "cymbal-opencode.js"
+	opencodeHookMarker        = "cymbal-hook"
 )
 
 const opencodeManagedHeaderPrefix = "// " + opencodeHookMarker + " managed by cymbal\n// cymbal-version: "
@@ -1333,15 +1332,10 @@ func samePath(a, b string) bool {
 	return filepath.Clean(a) == filepath.Clean(b)
 }
 
+// opencodePluginContents is one plugin for both OpenCode majors: 1.x calls its
+// server() and 2.x its setup(), so install needs no version detection.
 func opencodePluginContents() string {
 	return renderOpenCodePlugin(opencodeHookMarker, currentVersion())
-}
-
-// TODO: opencodeV2PluginContents is the dual V1/V2 asset for OpenCode 2.x installs.
-// Version detection (plugins config key vs `opencode --version`) is wired in a
-// later stage; this helper exists so the embed+render path is testable now.
-func opencodeV2PluginContents() string {
-	return renderOpenCodeV2Plugin(opencodeHookMarker, currentVersion())
 }
 
 func writeManagedFile(path, content string) error {

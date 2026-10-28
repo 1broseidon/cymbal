@@ -1106,8 +1106,11 @@ func TestOpenCodeInstallProjectScopeWritesManagedPlugin(t *testing.T) {
 	if !strings.Contains(string(data), `"tool.execute.before"`) || !strings.Contains(string(data), `cymbal hook nudge --format=json`) {
 		t.Fatalf("expected managed plugin to install OpenCode nudge hook, got %q", string(data))
 	}
-	if !strings.Contains(string(data), `export const CymbalPlugin`) || strings.Contains(string(data), `export default`) || strings.Contains(string(data), `export function`) {
-		t.Fatalf("expected managed plugin to expose only the OpenCode plugin export, got %q", string(data))
+	if !strings.Contains(string(data), `export default { id: "cymbal", setup, server }`) || strings.Contains(string(data), `export const`) || strings.Contains(string(data), `export function`) {
+		t.Fatalf("expected managed plugin to expose only the dual V1/V2 default export, got %q", string(data))
+	}
+	if !strings.Contains(string(data), `ctx.session.hook("context"`) || !strings.Contains(string(data), `ctx.tool.hook("execute.before"`) {
+		t.Fatalf("expected managed plugin to register the OpenCode 2.x hooks, got %q", string(data))
 	}
 	if !strings.Contains(string(data), `const nudgableTools = ["bash", "Grep", "Glob"]`) || !strings.Contains(string(data), `tool_name: input.tool === "bash" ? "bash" : input.tool`) {
 		t.Fatalf("expected managed plugin to nudge Bash/Grep/Glob through structured input, got %q", string(data))
@@ -1311,8 +1314,8 @@ func TestOpenCodeInstallDryRunDoesNotWrite(t *testing.T) {
 	if !strings.Contains(summary, `"tool.execute.before"`) || !strings.Contains(summary, `cymbal hook nudge --format=json`) {
 		t.Fatalf("dry-run summary should include OpenCode nudge integration, got %q", summary)
 	}
-	if !strings.Contains(summary, `export const CymbalPlugin`) || strings.Contains(summary, `export default`) || strings.Contains(summary, `export function`) {
-		t.Fatalf("dry-run summary should expose only the OpenCode plugin export, got %q", summary)
+	if !strings.Contains(summary, `export default { id: "cymbal", setup, server }`) || strings.Contains(summary, `export const`) || strings.Contains(summary, `export function`) {
+		t.Fatalf("dry-run summary should expose only the dual V1/V2 default export, got %q", summary)
 	}
 	if !strings.Contains(summary, opencodeHookMarker) || !strings.Contains(summary, currentVersion()) {
 		t.Fatalf("dry-run summary should include managed plugin metadata, got %q", summary)
