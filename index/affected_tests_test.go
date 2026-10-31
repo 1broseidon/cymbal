@@ -101,18 +101,22 @@ func TestAffectedTestsDirectReference(t *testing.T) {
 }
 
 func TestAffectedTestsTopLevelAndRealUseKinds(t *testing.T) {
-	f := newAffectedFixture(t, map[string]string{"source.ts": "export function target() {}\n", "tests/top.test.ts": "target();\n"})
-	r := selectAffected(t, f, AffectedTestsInput{Symbols: []AffectedTestSymbol{f.seed(t, "source.ts", "target")}}, AffectedTestsOptions{})
-	assertAffectedPaths(t, r, "tests/top.test.ts")
-	for _, x := range r.Tests {
-		e := affectedEvidence(t, x, "direct_reference")
-		want := "call"
-		if strings.Contains(x.Path, "use") {
-			want = "use"
-		}
-		if e.Steps[1].ReferenceKind != want || e.Steps[1].Line != 1 {
-			t.Fatalf("lost real reference: %+v", e)
-		}
+	for _, tc := range []struct {
+		kind, sourcePath, testPath, source, reference string
+	}{
+		{"call", "source.ts", "tests/top.test.ts", "export function target() {}\n", "target();\n"},
+		{"use", "source.go", "tests/use_test.go", "package p\ntype target struct{}\n", "package p; var value = target{}\n"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			f := newAffectedFixture(t, map[string]string{tc.sourcePath: tc.source, tc.testPath: tc.reference})
+			seed := f.seed(t, tc.sourcePath, "target")
+			r := selectAffected(t, f, AffectedTestsInput{Symbols: []AffectedTestSymbol{seed}}, AffectedTestsOptions{})
+			assertAffectedPaths(t, r, tc.testPath)
+			e := affectedEvidence(t, r.Tests[0], "direct_reference")
+			if len(e.Steps) != 2 || e.Steps[0].Path != seed.Path || e.Steps[1].Path != tc.testPath || e.Steps[1].Target != "target" || e.Steps[1].ReferenceKind != tc.kind || e.Steps[1].Line != 1 {
+				t.Fatalf("lost real reference: %+v", e)
+			}
+		})
 	}
 }
 
@@ -210,6 +214,24 @@ func TestAffectedTestsDeterministicDiamondCycle(t *testing.T) {
 	if got := run([]AffectedTestSymbol{b, a}); string(got) != string(first) {
 		t.Fatalf("insertion IDs change JSON:\n%s\n%s", first, got)
 	}
+}
+
+func TestAffectedTestsDiamondPrefersUnambiguousPath(t *testing.T) {
+	f := newAffectedFixture(t, map[string]string{
+		"source.go":       "package p\nfunc target() {}\n",
+		"a.go":            "package p\nfunc left() { target() }\n",
+		"collision.go":    "package p\nfunc left() {}\n",
+		"z.go":            "package p\nfunc right() { target() }\n",
+		"join.go":         "package p\nfunc join() {\n left()\n right()\n}\n",
+		"tests/result.go": "package p\nfunc check() { join() }\n",
+	})
+	r := selectAffected(t, f, AffectedTestsInput{Symbols: []AffectedTestSymbol{f.seed(t, "source.go", "target")}}, AffectedTestsOptions{Depth: 3})
+	assertAffectedPaths(t, r, "tests/result.go")
+	e := affectedEvidence(t, r.Tests[0], "transitive_reference")
+	if len(e.Steps) != 4 || e.Steps[1].Path != "z.go" || e.Steps[1].Name != "right" || e.Steps[2].Name != "join" || e.Steps[3].Path != "tests/result.go" || *e.Distance != 3 || e.Ambiguous || e.Confidence != "medium" || r.Tests[0].Confidence != "medium" {
+		t.Fatalf("unambiguous diamond path discarded: %+v", e)
+	}
+	assertAffectedGap(t, r, "ambiguous_definitions")
 }
 
 func TestAffectedTestsChangedTestStops(t *testing.T) {
@@ -435,6 +457,11 @@ func TestAffectedTestsOverlappingLineDefinitionsAreUncertain(t *testing.T) {
 		"tests/b.js": "bridge();\n",
 	})
 	r := selectAffected(t, f, AffectedTestsInput{Symbols: []AffectedTestSymbol{f.seed(t, "source.js", "target")}}, AffectedTestsOptions{})
+	assertAffectedPaths(t, r, "tests/a.js")
+	e := affectedEvidence(t, r.Tests[0], "transitive_reference")
+	if len(e.Steps) != 3 || e.Steps[0].Path != "source.js" || e.Steps[0].Name != "target" || e.Steps[1].Path != "bridge.js" || e.Steps[1].Name != "alpha" || e.Steps[1].Target != "target" || e.Steps[1].ReferenceKind != "call" || !e.Steps[1].Ambiguous || e.Steps[2].Path != "tests/a.js" || e.Steps[2].Target != "alpha" || e.Steps[2].ReferenceKind != "call" || *e.Distance != 2 {
+		t.Fatalf("lost canonical overlapping reference: %+v", e)
+	}
 	assertAffectedGap(t, r, "ambiguous_container")
 	for _, test := range r.Tests {
 		if test.Confidence != "low" || !test.Evidence[0].Ambiguous {

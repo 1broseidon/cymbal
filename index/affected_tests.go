@@ -516,6 +516,9 @@ func (a *affectedSelector) symbolWalk(seed AffectedTestSymbol) (bool, error) {
 			if queue[i].distance != queue[j].distance {
 				return queue[i].distance < queue[j].distance
 			}
+			if queue[i].amb != queue[j].amb {
+				return !queue[i].amb
+			}
 			return affectedKey(queue[i].steps) < affectedKey(queue[j].steps)
 		})
 		n := queue[0]
