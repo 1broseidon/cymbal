@@ -55,3 +55,15 @@ type ParseResult struct {
 	Imports []Import
 	Refs    []Ref
 }
+
+// IsNavigableDefinition reports whether a definition can carry a changed line
+// or a traversable enclosing reference. Local values/types belong to their
+// containing function; functions and methods remain navigable at every depth.
+func IsNavigableDefinition(kind string, depth int) bool {
+	switch kind {
+	case "function", "method", "constructor":
+		return true
+	default:
+		return depth == 0
+	}
+}

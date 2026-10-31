@@ -189,6 +189,7 @@ For both humans and agents, three commands cover most investigations:
 | `trace X` | "What does X depend on?" | Downward: callees |
 | `impact X` | "What depends on X?" | Upward: callers (split production/test) |
 | `changed` | "What does my current diff affect?" | Diff -> changed symbols + impact |
+| `affected-tests` | "Which test files are relevant?" | Ranked advisory selection with evidence and fallback advice |
 
 This matters because a normal code-reading loop often turns into
 search -> show -> refs -> show-next-function -> repeat. Cymbal collapses that
@@ -203,6 +204,7 @@ into fewer, more relevant tool calls with structured output.
 | `trace` | Downward call graph. Add `--graph` for a visual dependency map |
 | `impact` | Upward caller graph (callers split production/test; `--no-tests` to focus). Add `--graph` for a visual blast-radius map |
 | `changed` | Diff-scoped impact: maps your git diff (working tree / `--staged` / `--base`) to changed symbols + their impact in one call |
+| `affected-tests` | Ranked test paths from a diff or files, with evidence and uncertainty. Advisory, not a safe-to-skip guarantee. [Contract](docs/reference/commands.md#cymbal-affected-tests) |
 | `importers` | Reverse import lookup. Add `--graph` for a visual fan-in map |
 | `impls` | Find implementers / conformers / extensions. Add `--graph` for a conformance map |
 | `search` | Symbol search, or `--text` for grep-style lookup |
