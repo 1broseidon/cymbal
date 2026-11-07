@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 
-import plugin from "./cymbal-opencode.v2.js";
+import plugin from "./cymbal-opencode.js";
 
 // The default export is the dual V1/V2 object: V1 calls server(), V2 calls
 // setup(). Tests exercise the V2 hooks through a fake context (which records

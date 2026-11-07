@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 
-const pluginURL = new URL("./cymbal-opencode.v2.js", import.meta.url).href;
+const pluginURL = new URL("./cymbal-opencode.js", import.meta.url).href;
 
 // Run the actual hooks in an isolated host, substituting only the executable.
 // Real OS pipes exercise backpressure and asynchronous stream errors that the

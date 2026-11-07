@@ -2,10 +2,11 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import { createRequire, syncBuiltinESMExports } from "node:module"
 
-import { CymbalPlugin } from "./cymbal-opencode.js"
+import plugin from "./cymbal-opencode.js"
 
-// OpenCode loads every export of a plugin file as a plugin, so the plugin
-// exports only CymbalPlugin and its helpers are tested through the hooks.
+// OpenCode 1.x runs the plugin's server(); these tests cover those V1 hooks.
+// The plugin has only a default export, so its helpers are tested through them.
+const CymbalPlugin = plugin.server
 
 const childProcess = createRequire(import.meta.url)("node:child_process")
 
