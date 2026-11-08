@@ -496,6 +496,157 @@ cymbal impact Index --no-tests --test-path qa/
 
 ---
 
+## `cymbal affected-tests`
+
+Select relevant test files with ranked, explainable evidence. This command is
+**advisory**: it does not prove that unselected tests are safe to skip, and it
+does not run tests or replace required full-suite validation.
+
+```sh
+cymbal affected-tests                     # unstaged working tree vs index
+cymbal affected-tests --staged            # index vs HEAD
+cymbal affected-tests --base main         # working tree vs one ref
+cymbal affected-tests src/foo.ts src/bar.ts
+git diff --name-only | cymbal affected-tests --stdin
+cymbal affected-tests --quiet              # paths on stdout; advice on stderr
+cymbal affected-tests --json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--staged` | Attribute changes from staged blobs, even when disk content differs |
+| `--base <ref>` | Compare against one ref; ranges and option-like refs are rejected |
+| `--stdin` | Read additional file paths, one per line |
+| `-D, --depth <n>` | Symbol and reverse-import depth (default 2, maximum 5) |
+| `-n, --limit <n>` | Selected test-file limit, applied after ranking (default 50) |
+| `--max-symbols <n>` | Seed definition limit (default 40, 0 = unlimited) |
+| `--max-evidence <n>` | Global examined dependency-record limit (default 500, 0 = unlimited) |
+| `--test-path <pat>` | Additional test path pattern; substring or glob with `**`, repeatable |
+| `--resolve-scope <s>` | `same`, `family` (default), or `all` |
+| `--quiet` | Only selected paths on stdout, one per line; suppress passive update notices |
+
+Depth and result limits must be positive. Seed and evidence limits must not be
+negative. `--staged` and `--base` are mutually exclusive. File arguments and
+stdin can be combined, but cannot be combined with either diff flag.
+`--quiet` and `--json` are mutually exclusive.
+
+Diff attribution reuses `changed`: new lines use the new blob, deleted lines use
+the old blob. The graph always comes from the current working-tree index.
+Deleted or absent definitions remain explicit limitations; name matches for a
+deleted symbol are low-confidence leads, not a live dependency proof.
+Default diff mode excludes untracked files. Pass them as file arguments to
+analyze them. Explicit files and stdin select every indexed definition in each
+file, so they report less precise `file` input rather than `hunk` input.
+
+Paths are relative to the current directory on input and repository-relative
+with `/` separators on output. Backslashes are accepted as separators. Duplicate
+paths are combined. Stdin accepts CRLF, preserves spaces and leading `#`, skips
+empty lines, and reports read errors (maximum line size 1 MiB). Empty stdin
+means empty input; it does not switch to diff mode. Newline-separated input and
+quiet output cannot represent filenames containing newlines without ambiguity.
+Directories, outside-repository paths, and indexes for a different repository
+are rejected. The command requires a Git repository and never searches sibling
+worktree indexes.
+
+### Ranking and evidence
+
+Candidates rank by evidence strength:
+
+1. The changed test file itself (`changed_test`, distance 0).
+2. A direct call or use of a changed name in a test (`direct_reference`).
+3. A reference chain through production or unknown-class helpers
+   (`transitive_reference`). Top-level test references are included.
+4. A direct raw import match (`direct_import`).
+5. An existing colocated counterpart (`colocated`). Naming rules cover Go
+   `_test.go`, JS/TS-family `.test.*` and `.spec.*`, and Python `test_*.py` and
+   `*_test.py` in the same directory. This evidence has no dependency distance.
+6. Reverse import traversal (`reverse_import`) when symbol evidence is absent,
+   or when changed content outside symbols needs independent file analysis.
+
+Within a strength class, shorter paths rank first, then unambiguous paths,
+then more independent evidence, then lexical file path. Repeated discovery does
+not increase support. Imports cannot outrank symbol evidence through fan-out.
+Each independent terminal reference/import site and changed seed retains its
+canonical shortest explanation. Reference steps retain `call`, `use`, or
+`implements`; import steps retain the raw import and matched target.
+
+Confidence describes evidence strength, not coverage probability. A changed test
+or unambiguous direct hunk reference is `high`. A transitive reference or direct
+whole-file reference is `medium`. Ambiguous references, imports, and naming-only
+matches are `low`. The best retained evidence determines confidence.
+
+Traversal stops at the first path classified as test by the shared classifier,
+including custom `--test-path` patterns. Thus `tests/helpers.ts`, `testdata/*`,
+and `conftest.py` can be selected without following their consumers. These are
+test-code paths, not a runnable-test inventory. Unknown-class helpers such as
+`testutil/*` remain traversable.
+
+Symbol references are name-based, not fully resolved by type or receiver. Import
+matching uses raw-path suffixes, basename substrings, and package-directory
+suffixes. It can include unrelated same-basename files. Static JS/TS re-exports
+with a source contribute import edges; dynamic imports and callback dispatch
+are not resolved. Every result retains the static-analysis warning.
+
+### Status, fallback, and JSON stability
+
+- `complete`: the supported static scan finished without a detected gap. It does
+  **not** mean full test coverage. An empty diff is complete with no tests.
+- `partial`: analysis found an input, precision, traversal, or inference gap.
+- `unavailable`: nonempty input had no analyzable seed or applicable evidence.
+  No selected tests alone does not make an otherwise analyzed seed unavailable.
+
+Limits, ambiguity, deleted/missing definitions, skipped blobs, renames, conflicts,
+unsupported files, content outside symbols, file precision, heuristic imports or
+naming, and encountered indirect dispatch appear in `limitations`. Every cutoff
+is explicit; reaching a bound with no omitted work is not truncation. Partial
+and unavailable results set `fallback.recommended: true` and say to run the full
+suite. All statuses warn that other tests are not proven safe to skip.
+
+Advisory results exit 0, including partial or unavailable results. Bad arguments,
+Git failures, failed refreshes, and database errors exit nonzero without a success
+JSON payload. Quiet stdout contains only paths; advice goes to stderr. Consumers
+must check the exit status and analysis status, not just the path count.
+
+JSON uses the shared envelope `{ "version": "0.1", "results": ... }`.
+The new result has **`schema_version: 1`**. Field meanings remain compatible
+within this schema version; fields can be added, and consumers must tolerate
+unknown fields. Breaking changes require a new schema version. Ranking can change
+between releases. Identical repository state, options, and implementation produce
+the same ordered result.
+
+The result contains:
+
+| Field | Meaning |
+|-------|---------|
+| `status`, `input_precision` | Analysis status and `hunk` or `file` precision |
+| `bounds`, `examined_evidence` | Effective options and examined dependency-record count |
+| `tests` | Ranked test objects; empty results are `[]` |
+| `limitations` | Structured `code`, `message`, optional `path` and `seed` |
+| `fallback` | `recommended`, `reason`, `advisory`, and `static_analysis` |
+
+Each test contains `path`, 1-based `rank`, `confidence`, shortest actual dependency
+`distance` (null for naming-only selection), `changed_symbols`, and `evidence`.
+Changed symbols are identity objects with path, name, kind, language, source
+range, and optional deletion marker, not just names. File-only evidence has an
+empty changed-symbol list. Each evidence object contains `kind`, `seed`, nullable
+`distance`, ordered `steps`, `confidence`, and `ambiguous`. Steps contain actual
+source locations or file facts, reference kinds, and targets as applicable.
+A reference step's `target` is the referenced name; an import step's `target` is
+the matched file path.
+
+Stable reason codes include `seed_limit`, `evidence_limit`, `result_limit`,
+`depth_limit`, `ambiguous_definitions`, `ambiguous_container`,
+`ambiguous_blob_identity`, `missing_live_seed`, `deleted_seed`,
+`missing_file`, `no_symbol_seed`, `file_precision`, `heuristic_import`,
+`heuristic_naming`, `indirect_dispatch`, `renamed`, `metadata_only`, `binary`,
+`conflicted`, `unsupported`, `oversized`, `unreadable`, `parse_failed`, and
+`outside_symbols`, and `uncontained_reference`. Messages explain the specific gap; consumers should use codes
+rather than parse message text. New reason codes can be added.
+
+Requirement source: [issue #77](https://github.com/1broseidon/cymbal/issues/77).
+
+---
+
 ## `cymbal changed`
 
 Diff-scoped impact — map a git diff to the symbols it touches and report each

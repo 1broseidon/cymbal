@@ -135,6 +135,7 @@ the call graph. Getting this right is most of the tool.
 | Just show me the code | `show` | no graph walk |
 | Source, types, callers and imports at once | `context` | one bundled read |
 | What did I just break? | `changed` | git diff → symbols → impact |
+| Which tests are relevant? | `affected-tests` | ranked advisory test paths with evidence |
 
 > `investigate` is the one to reach for when you don't know which of the others
 > you want. It looks at the symbol's kind and returns the right shape: functions
@@ -289,6 +290,29 @@ $ cymbal changed --base main  # working tree vs a ref
 Changed symbols are attributed by parsing the diffed blobs on both sides, so
 whole-symbol deletions are named rather than mis-attributed to a neighbour.
 Deleted symbols are listed but have no impact — they no longer exist.
+
+#### affected-tests — Ranked advisory test selection
+
+```console
+$ cymbal affected-tests
+$ cymbal affected-tests --staged
+$ cymbal affected-tests --base main
+$ cymbal affected-tests src/foo.ts --json
+$ git diff --name-only | cymbal affected-tests --stdin --quiet
+```
+
+Select test files with dependency explanations and high, medium, or low evidence
+confidence. `--quiet` prints only paths to stdout and advice to stderr. Explicit
+files and stdin use whole-file analysis, which is less precise than diff hunks.
+
+Selection is advisory, not proof that other tests are safe to skip. `complete`
+means the supported static scan finished, not full coverage. Partial or
+unavailable analysis recommends the full suite. Test-code paths can include
+helpers; the command does not run them. Use `--depth`, `--limit`, `--max-symbols`,
+`--max-evidence`, `--test-path`, and `--resolve-scope` to control analysis.
+
+See the [command contract](docs/reference/commands.md#cymbal-affected-tests) for
+flags, ranking, limitations, and the versioned JSON result schema.
 
 #### diff — Git diff scoped to one symbol's line range
 

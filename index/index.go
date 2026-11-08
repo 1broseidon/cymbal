@@ -518,7 +518,7 @@ func Index(root, dbPath string, opts Options) (*Stats, error) {
 
 	pe := int(parseErrs.Load())
 	we := int(writeErrs.Load())
-	if err := finishFormatUpgrade(store, upgrade, opts.Scope != "", we); err != nil {
+	if err := finishFormatUpgrade(store, upgrade, opts.Scope != "", pe+we); err != nil {
 		return nil, err
 	}
 	stats := &Stats{
@@ -593,8 +593,9 @@ func EnsureFreshWithError(dbPath string) (int, error) {
 // change must reach files that have not changed on disk, such as a new stored
 // field; the next refresh then reparses every file once. Format 1 adds
 // symbols.body_hash. Format 2 fixes implements edges for generic and qualified
-// supertypes in Java, Kotlin, Scala, Dart and PHP.
-const indexFormat = "2"
+// supertypes in Java, Kotlin, Scala, Dart and PHP. Format 3 adds static JS/TS
+// re-export imports.
+const indexFormat = "3"
 
 // startFormatUpgrade reports whether the index predates indexFormat. Such an
 // index lacks per-symbol data that only a reparse produces, so the run must
@@ -618,10 +619,10 @@ func startFormatUpgrade(store *Store, root string, scoped bool) (bool, error) {
 }
 
 // finishFormatUpgrade records indexFormat after an upgrade run. A scoped run
-// reparses only its subtree, and a failed write leaves a file's old rows in
-// place, so only a full run without write errors brings the index up to date.
-func finishFormatUpgrade(store *Store, upgrade, scoped bool, writeErrs int) error {
-	if !upgrade || scoped || writeErrs > 0 {
+// reparses only its subtree. Read, parse, or write failures can leave old rows
+// in place, so only a full successful run brings the index up to date.
+func finishFormatUpgrade(store *Store, upgrade, scoped bool, errorCount int) error {
+	if !upgrade || scoped || errorCount > 0 {
 		return nil
 	}
 	if err := store.SetMeta(metaIndexFormat, indexFormat); err != nil {

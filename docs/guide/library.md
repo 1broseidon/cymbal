@@ -196,6 +196,58 @@ for _, i := range impact {
 
 Follows the call graph upward: what calls this function, what calls those callers. Answers "what breaks if I change this?"
 
+### Select affected tests
+
+Use `FindAffectedTests` to select tests without invoking Git or running tests.
+Refresh the index first. This query uses only the supplied database.
+
+```go
+if _, err := index.EnsureFreshWithError(dbPath); err != nil {
+    return err
+}
+opts := index.DefaultAffectedTestsOptions()
+opts.TestPaths = []string{"qa/"}
+result, err := index.FindAffectedTests(dbPath, index.AffectedTestsInput{
+    Files:     []string{"src/foo.ts"}, // repository-relative paths
+    Precision: "file",
+}, opts)
+if err != nil {
+    return err
+}
+for _, test := range result.Tests {
+    fmt.Printf("%d %s %s\n", test.Rank, test.Path, test.Confidence)
+}
+// Inspect result.Status, result.Limitations, and result.Fallback as well.
+```
+
+For a hunk-precise caller, supply `Precision: "hunk"`, changed paths in `Files`,
+and definition identities in `Symbols` (`[]index.AffectedTestSymbol`). Each
+identity has `Path`, `Name`, `Kind`, `Language`, `StartLine`, `EndLine`, and
+`Deleted`. Hunk mode does not expand files into all definitions. File mode expands
+every indexed definition in the library. Empty precision chooses file mode when
+`Files` is nonempty, otherwise hunk mode. Upstream attribution diagnostics can be
+passed as `[]index.AffectedTestsLimitation` in `Limitations`.
+
+`DefaultAffectedTestsOptions` sets depth 2, result limit 50, seed limit 40, evidence
+budget 500, and family resolution. `AffectedTestsOptions{}` instead leaves seed
+and evidence budgets unlimited; zero depth and result limit use defaults.
+Negative bounds return errors and depth above 5 is clamped. The query returns
+operational errors separately from advisory partial/unavailable results.
+
+`AffectedTestsResult` contains schema version 1, status, precision, effective
+bounds, examined evidence count, ranked `Tests`, structured `Limitations`, and
+`Fallback`. Test rows carry definition identities and location-bearing evidence
+paths. The selector owns discovery, test classification, ranking, confidence,
+deduplication, and status; consumers do not need to combine impact/importer
+results or reconstruct explanations.
+
+See the [command contract](../reference/commands.md#cymbal-affected-tests) for
+evidence types, ordering, status definitions, reason codes, and versioning.
+Selection is advisory. `complete` describes a supported static scan, not full
+coverage. Name matching cannot resolve all dynamic dispatch; test paths can
+include helpers. Partial or unavailable analysis recommends the full suite.
+Do not treat unselected tests as safe to skip.
+
 ### Find importers
 
 ```go

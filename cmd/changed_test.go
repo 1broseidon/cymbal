@@ -311,8 +311,8 @@ func TestIsChangedUnit(t *testing.T) {
 		{"constant", 2, false},
 	}
 	for _, c := range cases {
-		if got := isChangedUnit(c.kind, c.depth); got != c.want {
-			t.Errorf("isChangedUnit(%q, %d) = %v, want %v", c.kind, c.depth, got, c.want)
+		if got := symbols.IsNavigableDefinition(c.kind, c.depth); got != c.want {
+			t.Errorf("symbols.IsNavigableDefinition(%q, %d) = %v, want %v", c.kind, c.depth, got, c.want)
 		}
 	}
 }
